@@ -26,6 +26,32 @@ export function App() {
   const deleteEdge = useEditor((s) => s.deleteEdge);
   const select = useEditor((s) => s.select);
   const reset = useEditor((s) => s.reset);
+  const rename = useEditor((s) => s.rename);
+  const newProject = useEditor((s) => s.newProject);
+  const importProject = useEditor((s) => s.importProject);
+  const snapshot = useEditor((s) => s.snapshot);
+
+  const exportJson = () => {
+    const proj = snapshot();
+    const blob = new Blob([JSON.stringify(proj, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${(proj.name || 'effect').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.pylinka.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const onImportFile = (file: File) => {
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        importProject(JSON.parse(String(r.result)));
+      } catch (e) {
+        alert('Could not load project: ' + (e as Error).message);
+      }
+    };
+    r.readAsText(file);
+  };
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
@@ -58,14 +84,23 @@ export function App() {
   return (
     <div className="flex h-screen flex-col">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
-        <span className="grid h-6 w-6 place-items-center rounded-md border border-border bg-card text-[11px]">✨</span>
+        <a href="/recipes" className="grid h-6 w-6 place-items-center rounded-md border border-border bg-card text-[11px]" title="Recipes">✨</a>
         <span className="font-semibold tracking-tight">pylinka</span>
         <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">editor</span>
-        <span className="ml-2 text-sm text-muted-foreground">{project.name}</span>
-        <div className="ml-auto flex items-center gap-2">
-          <button onClick={reset} className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
-            Reset to example
-          </button>
+        <input
+          className="ml-2 w-52 rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-foreground outline-none hover:border-border focus:border-border"
+          value={project.name}
+          onChange={(e) => rename(e.target.value)}
+          aria-label="Project name"
+        />
+        <div className="ml-auto flex items-center gap-2 text-xs">
+          <button onClick={newProject} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">New</button>
+          <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+            Import
+            <input type="file" accept=".json,application/json" className="hidden" onChange={(e) => e.target.files?.[0] && onImportFile(e.target.files[0])} />
+          </label>
+          <button onClick={exportJson} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">Export</button>
+          <button onClick={reset} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">Reset</button>
         </div>
       </header>
 

@@ -1,26 +1,43 @@
 import { create } from 'zustand';
-import type { Edge, Literal, Node, PylinkaProject, System } from '@pylinka/graph';
+import type { Edge, Literal, Node, System } from '@pylinka/graph';
 import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { seedProject } from './seed';
 import { autoLayout } from './layout';
 import { RECIPES } from '../recipes/data';
+import type { EditorProject, EditorTexture } from './types';
 
 const KEY = 'pylinka.editor.project';
 type XY = { x: number; y: number };
 
-/** Fork a recipe into a fresh, laid-out project (open-in-editor flow, §9). */
-function forkRecipe(slug: string): PylinkaProject | undefined {
+function forkRecipe(slug: string): EditorProject | undefined {
   const recipe = RECIPES.find((r) => r.slug === slug);
   if (!recipe) return undefined;
-  const project = structuredClone(recipe.project);
+  const project = structuredClone(recipe.project) as EditorProject;
   project.id = crypto.randomUUID();
   project.name = recipe.title;
   project.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: autoLayout(project.systems[0]!.graph) };
+  // coin recipes carry an atlas descriptor → seed a texture so the editor shows it
+  if (recipe.atlas) {
+    const t: EditorTexture = {
+      id: crypto.randomUUID(),
+      name: recipe.atlas.url.split('/').pop() ?? 'atlas',
+      src: recipe.atlas.url,
+      width: recipe.atlas.cols * (recipe.atlas.frameW + recipe.atlas.pad),
+      height: recipe.atlas.rows * (recipe.atlas.frameH + recipe.atlas.pad),
+      cols: recipe.atlas.cols,
+      rows: recipe.atlas.rows,
+      pad: recipe.atlas.pad,
+      fps: recipe.atlas.fps,
+      play: recipe.atlas.play,
+      pick: recipe.atlas.pick,
+    };
+    project.textures = [t];
+    project.activeTextureId = t.id;
+  }
   return project;
 }
 
-function load(): PylinkaProject {
-  // ?recipe=<slug> → fork that recipe (open-in-editor), persist, strip the param
+function load(): EditorProject {
   try {
     const slug = new URLSearchParams(location.search).get('recipe');
     if (slug) {
@@ -36,11 +53,11 @@ function load(): PylinkaProject {
   }
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw) as PylinkaProject;
+    if (raw) return JSON.parse(raw) as EditorProject;
   } catch {
     /* ignore */
   }
-  return seedProject();
+  return seedProject() as EditorProject;
 }
 
 function nextNodeId(sys: System): string {
@@ -53,12 +70,15 @@ function nextNodeId(sys: System): string {
 }
 
 interface EditorState {
-  project: PylinkaProject;
+  project: EditorProject;
   positions: Record<string, XY>;
   selectedNodeId: string | null;
-  /** bumped on every simulation-affecting change so the preview re-applies */
+  /** graph/sim changes (preview re-applies live) */
   rev: number;
+  /** texture-set changes (preview re-creates the engine) */
+  texRev: number;
   system(): System;
+  snapshot(): EditorProject;
   addNode(kind: string, x: number, y: number): void;
   moveNode(id: string, x: number, y: number): void;
   setValue(nodeId: string, portId: string, value: Literal): void;
@@ -67,12 +87,18 @@ interface EditorState {
   deleteNode(id: string): void;
   deleteEdge(id: string): void;
   select(id: string | null): void;
+  rename(name: string): void;
+  addTexture(tex: Omit<EditorTexture, 'id'>): void;
+  removeTexture(id: string): void;
+  setActiveTexture(id: string | null): void;
   reset(): void;
+  newProject(): void;
+  importProject(obj: unknown): void;
 }
 
 const initial = load();
 
-function persist(project: PylinkaProject, positions: Record<string, XY>) {
+function persist(project: EditorProject, positions: Record<string, XY>) {
   const out = structuredClone(project);
   out.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: positions };
   try {
@@ -83,15 +109,23 @@ function persist(project: PylinkaProject, positions: Record<string, XY>) {
 }
 
 export const useEditor = create<EditorState>((set, get) => {
-  /** Apply a graph mutation, bump rev, persist. */
-  const commit = (mutate: (p: PylinkaProject) => void) => {
+  const commit = (mutate: (p: EditorProject) => void, bumpTex = false) => {
     set((s) => {
       const project = structuredClone(s.project);
       mutate(project);
       project.updatedAt = new Date().toISOString();
       persist(project, s.positions);
-      return { project, rev: s.rev + 1 };
+      return { project, rev: s.rev + 1, ...(bumpTex ? { texRev: s.texRev + 1 } : {}) };
     });
+  };
+
+  const loadProject = (project: EditorProject) => {
+    const positions =
+      project.editor?.nodePositions && Object.keys(project.editor.nodePositions).length
+        ? { ...project.editor.nodePositions }
+        : autoLayout(project.systems[0]!.graph);
+    persist(project, positions);
+    set((s) => ({ project, positions, rev: s.rev + 1, texRev: s.texRev + 1, selectedNodeId: null }));
   };
 
   return {
@@ -99,7 +133,13 @@ export const useEditor = create<EditorState>((set, get) => {
     positions: { ...(initial.editor?.nodePositions ?? {}) },
     selectedNodeId: null,
     rev: 0,
+    texRev: 0,
     system: () => get().project.systems[0]!,
+    snapshot: () => {
+      const out = structuredClone(get().project);
+      out.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: get().positions };
+      return out;
+    },
 
     addNode(kind, x, y) {
       let newId = '';
@@ -170,11 +210,50 @@ export const useEditor = create<EditorState>((set, get) => {
       set({ selectedNodeId: id });
     },
 
+    rename(name) {
+      commit((p) => {
+        p.name = name;
+      });
+    },
+
+    addTexture(tex) {
+      const id = crypto.randomUUID();
+      commit((p) => {
+        p.textures = [...(p.textures ?? []), { ...tex, id }];
+        p.activeTextureId = id;
+      }, true);
+    },
+
+    removeTexture(id) {
+      commit((p) => {
+        p.textures = (p.textures ?? []).filter((t) => t.id !== id);
+        if (p.activeTextureId === id) p.activeTextureId = null;
+      }, true);
+    },
+
+    setActiveTexture(id) {
+      commit((p) => {
+        p.activeTextureId = id;
+      }, true);
+    },
+
     reset() {
-      const project = seedProject();
-      const positions = { ...(project.editor?.nodePositions ?? {}) };
-      persist(project, positions);
-      set((s) => ({ project, positions, rev: s.rev + 1, selectedNodeId: null }));
+      loadProject(seedProject() as EditorProject);
+    },
+
+    newProject() {
+      const p = seedProject() as EditorProject;
+      p.id = crypto.randomUUID();
+      p.name = 'Untitled effect';
+      loadProject(p);
+    },
+
+    importProject(obj) {
+      const p = obj as EditorProject;
+      if (!p || typeof p !== 'object' || !Array.isArray(p.systems) || !p.systems.length) {
+        throw new Error('Not a pylinka project.');
+      }
+      loadProject(p);
     },
   };
 });
