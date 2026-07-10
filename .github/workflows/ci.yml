@@ -16,6 +16,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm build # build packages so workspace deps resolve their dist types
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
