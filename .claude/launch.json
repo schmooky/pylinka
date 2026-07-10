@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pylinka-site",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@pylinka/site", "dev"],
+      "port": 5212
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description?: string;
+  active?: string;
+}
+const { title, description = 'A GPU-driven, node-based particle system for PixiJS.', active } =
+  Astro.props;
+
+const nav = [
+  { href: '/', label: 'Home', key: 'home' },
+  { href: '/packages', label: 'Packages', key: 'packages' },
+  { href: '/recipes', label: 'Recipes', key: 'recipes' },
+  { href: '/status', label: 'Status', key: 'status' },
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9C%A8%3C/text%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <header class="sticky top-0 z-40 border-b border-[var(--color-border)]/70 backdrop-blur-md bg-[var(--color-bg)]/70">
+      <div class="mx-auto flex h-14 max-w-6xl items-center gap-6 px-5">
+        <a href="/" class="flex items-center gap-2 font-semibold tracking-tight">
+          <span class="grid h-6 w-6 place-items-center rounded-md bg-gradient-to-br from-[var(--color-violet)] to-[var(--color-cyan)] text-[11px]">✨</span>
+          <span>pylinka</span>
+        </a>
+        <nav class="ml-auto flex items-center gap-1 text-sm">
+          {
+            nav.map((n) => (
+              <a
+                href={n.href}
+                class:list={[
+                  'rounded-md px-3 py-1.5 transition-colors hover:text-[var(--color-fg)]',
+                  active === n.key
+                    ? 'text-[var(--color-fg)] bg-[var(--color-surface-2)]'
+                    : 'text-[var(--color-fg-muted)]',
+                ]}
+              >
+                {n.label}
+              </a>
+            ))
+          }
+          <a
+            href="https://github.com/schmooky/pylinka"
+            class="ml-2 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-[var(--color-fg-muted)] transition-colors hover:text-[var(--color-fg)] hover:border-[var(--color-violet)]/60"
+          >
+            GitHub ↗
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-6xl px-5">
+      <slot />
+    </main>
+
+    <footer class="mx-auto mt-24 max-w-6xl border-t border-[var(--color-border)] px-5 py-10 text-sm text-[var(--color-fg-dim)]">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <span>MIT · pylinka.schmooky.dev</span>
+        <span>WebGPU first · WebGL2 fallback · built for slot games on real phones</span>
+      </div>
+    </footer>
+  </body>
+</html>

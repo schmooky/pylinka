@@ -1,0 +1,94 @@
+---
+import Base from '../layouts/Base.astro';
+import { V1_SCHEMAS, CATALOG_VERSION } from '@pylinka/graph';
+
+const packages = [
+  { name: '@pylinka/graph', desc: 'Shared kernel: graph types, node catalog, validation, hashing, slot assignment. Zero deps.', status: 'shipped', tone: 'green' },
+  { name: '@pylinka/compiler', desc: 'SystemBundle → IR → GPU program codegen (WGSL M1, GLSL ES 3.00 M2). Zero deps.', status: 'next', tone: 'violet' },
+  { name: '@pylinka/core', desc: 'Runtime: pools, uniform bus, scheduler, backends, instanced render. Peer pixi.js@^8.', status: 'planned', tone: 'dim' },
+  { name: '@pylinka/format', desc: 'Serialize / parse / migrate the pylinka project format.', status: 'planned', tone: 'dim' },
+  { name: '@pylinka/editor', desc: 'React Flow editor + IndexedDB persistence.', status: 'planned', tone: 'dim' },
+];
+
+const toneClass: Record<string, string> = {
+  green: 'text-[var(--color-green)] border-[var(--color-green)]/40 bg-[var(--color-green)]/10',
+  violet: 'text-[var(--color-violet-bright)] border-[var(--color-violet)]/40 bg-[var(--color-violet)]/10',
+  dim: 'text-[var(--color-fg-dim)] border-[var(--color-border)] bg-[var(--color-surface-2)]',
+};
+
+// Real catalog data, grouped by namespace.
+const order = ['input', 'param', 'gen', 'math', 'field', 'shape', 'output', 'tex'];
+const byNs = new Map<string, { kind: string; label: string; impact: string }[]>();
+for (const s of V1_SCHEMAS) {
+  const list = byNs.get(s.namespace) ?? [];
+  list.push({ kind: s.kind, label: s.label, impact: s.impact });
+  byNs.set(s.namespace, list);
+}
+const groups = order
+  .filter((ns) => byNs.has(ns))
+  .map((ns) => ({ ns, nodes: byNs.get(ns)!.sort((a, b) => a.kind.localeCompare(b.kind)) }));
+const totalNodes = V1_SCHEMAS.length;
+---
+
+<Base title="Pylinka — Packages" active="packages">
+  <section class="py-14">
+    <h1 class="text-3xl font-semibold tracking-tight">Packages</h1>
+    <p class="mt-2 max-w-2xl text-[var(--color-fg-muted)]">
+      A pnpm monorepo. The shared kernel and compiler are zero-dependency pure TypeScript; the
+      runtime peers on pixi.js v8.
+    </p>
+
+    <div class="mt-8 space-y-3">
+      {
+        packages.map((p) => (
+          <div class="flex flex-col gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/50 p-5 sm:flex-row sm:items-center sm:gap-5">
+            <code class="font-mono text-sm text-[var(--color-fg)]">{p.name}</code>
+            <span class="text-sm text-[var(--color-fg-muted)] sm:flex-1">{p.desc}</span>
+            <span class:list={['shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium', toneClass[p.tone]]}>
+              {p.status}
+            </span>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- Live node catalog -->
+  <section class="pb-16">
+    <div class="mb-5 flex items-end justify-between gap-4">
+      <div>
+        <h2 class="text-2xl font-semibold tracking-tight">Node catalog</h2>
+        <p class="mt-1 text-sm text-[var(--color-fg-muted)]">
+          Rendered live from <code class="font-mono text-xs text-[var(--color-violet-bright)]">@pylinka/graph</code>
+          — catalog v{CATALOG_VERSION}, {totalNodes} node kinds.
+        </p>
+      </div>
+    </div>
+
+    <div class="grid gap-4 sm:grid-cols-2">
+      {
+        groups.map((g) => (
+          <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/50 p-5">
+            <div class="mb-3 flex items-center gap-2">
+              <span class="font-mono text-sm font-medium text-[var(--color-cyan)]">{g.ns}.*</span>
+              <span class="text-xs text-[var(--color-fg-dim)]">{g.nodes.length}</span>
+            </div>
+            <ul class="space-y-1.5">
+              {g.nodes.map((n) => (
+                <li class="flex items-center gap-2 text-sm">
+                  <code class="font-mono text-xs text-[var(--color-fg-muted)]">{n.kind}</code>
+                  {n.impact === 'high' && (
+                    <span class="rounded bg-[var(--color-amber)]/15 px-1.5 text-[10px] text-[var(--color-amber)]">high</span>
+                  )}
+                  {n.impact === 'medium' && (
+                    <span class="rounded bg-[var(--color-cyan)]/15 px-1.5 text-[10px] text-[var(--color-cyan)]">med</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+</Base>

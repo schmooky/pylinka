@@ -1,0 +1,149 @@
+---
+import Base from '../layouts/Base.astro';
+
+const tiers = [
+  { tier: 'T1 · low mobile', device: '2021 Android, older iPhones', backend: 'WebGL2 TF', budget: '≥ 50k', status: 'primary (M2)' },
+  { tier: 'T2 · high mobile', device: 'iPhone 14+, flagship Android', backend: 'WebGPU', budget: '≥ 250k', status: 'primary' },
+  { tier: 'T3 · desktop iGPU', device: 'integrated-GPU laptops', backend: 'WebGPU', budget: '≥ 250k', status: 'editor default' },
+  { tier: 'T4 · desktop dGPU', device: '2024 dGPU', backend: 'WebGPU', budget: '≥ 1M', status: 'headline' },
+];
+
+const features = [
+  {
+    icon: '⚡',
+    title: 'The GPU owns the particles',
+    body: 'State lives in GPU buffers and never round-trips to the CPU in steady state. One emit pass, one update pass, one instanced draw — per system, per frame.',
+  },
+  {
+    icon: '🎚️',
+    title: 'Every number is live',
+    body: 'Inline literals lower to uniforms. Drag any value and it updates next frame with zero recompilation. Promote any value to a named knob in one click.',
+  },
+  {
+    icon: '🧩',
+    title: 'A typed dataflow graph',
+    body: 'Wire Position, Velocity, Noise, AddForce, KillIf… The graph compiles to backend-neutral IR, then WGSL (WebGPU) or GLSL ES transform-feedback (WebGL2).',
+  },
+  {
+    icon: '📱',
+    title: 'Backend follows the host',
+    body: "A pixi WebGL slot gets the WebGL2 sim in the same GL context; a WebGPU host shares the device. Particles interleave correctly in your scene graph.",
+  },
+];
+---
+
+<Base title="Pylinka — GPU particles for PixiJS" active="home">
+  <!-- Hero -->
+  <section class="relative overflow-hidden">
+    <div class="grid-fade pointer-events-none absolute inset-0 -z-10 h-[420px]"></div>
+    <div class="py-20 sm:py-28">
+      <div class="mb-5 inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)]/60 px-3 py-1 text-xs text-[var(--color-fg-muted)]">
+        <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-green)]"></span>
+        v0 in progress · <span class="text-[var(--color-violet-bright)]">@pylinka/graph shipped</span>
+      </div>
+      <h1 class="max-w-3xl text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
+        GPU-driven, node-based
+        <span class="bg-gradient-to-r from-[var(--color-violet-bright)] via-[var(--color-cyan)] to-[var(--color-violet-bright)] bg-clip-text text-transparent">
+          particles
+        </span>
+        for PixiJS.
+      </h1>
+      <p class="mt-6 max-w-2xl text-lg text-[var(--color-fg-muted)]">
+        A Neutrino-style dataflow editor whose graph compiles to GPU programs. Everything
+        live-tweakable, a recipe gallery, a versionable project format. WebGPU first, WebGL2
+        fallback — <span class="text-[var(--color-fg)]">built for slot games on real phones.</span>
+      </p>
+      <div class="mt-9 flex flex-wrap gap-3">
+        <a
+          href="/packages"
+          class="rounded-lg bg-gradient-to-br from-[var(--color-violet)] to-[var(--color-violet-bright)] px-5 py-2.5 font-medium text-white shadow-lg shadow-[var(--color-violet)]/20 transition-transform hover:-translate-y-0.5"
+        >
+          Explore the packages
+        </a>
+        <a
+          href="/status"
+          class="rounded-lg border border-[var(--color-border)] px-5 py-2.5 font-medium text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-violet)]/60 hover:text-[var(--color-fg)]"
+        >
+          Build status →
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pipeline -->
+  <section class="pb-16">
+    <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/50 p-6 sm:p-8">
+      <div class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+        {
+          ['Authoring', 'Compilation', 'Runtime'].map((stage, i) => (
+            <>
+              <div class="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+                <div class="text-xs uppercase tracking-wider text-[var(--color-fg-dim)]">
+                  {i === 0 ? 'editor' : i === 1 ? 'pure · deterministic' : '@pylinka/core'}
+                </div>
+                <div class="mt-1 font-medium">{stage}</div>
+                <div class="mt-1 text-sm text-[var(--color-fg-muted)]">
+                  {i === 0 && 'Typed graph, live values, knobs'}
+                  {i === 1 && 'SystemBundle → IR → WGSL / GLSL'}
+                  {i === 2 && 'Pools, uniform bus, instanced draw'}
+                </div>
+              </div>
+              {i < 2 && <div class="hidden text-[var(--color-violet-bright)] sm:block">→</div>}
+            </>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="pb-16">
+    <div class="grid gap-4 sm:grid-cols-2">
+      {
+        features.map((f) => (
+          <div class="group rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/50 p-6 transition-colors hover:border-[var(--color-violet)]/40">
+            <div class="mb-3 grid h-10 w-10 place-items-center rounded-lg bg-[var(--color-surface-2)] text-xl">
+              {f.icon}
+            </div>
+            <h3 class="font-medium">{f.title}</h3>
+            <p class="mt-1.5 text-sm leading-relaxed text-[var(--color-fg-muted)]">{f.body}</p>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- Tiers -->
+  <section class="pb-16">
+    <h2 class="mb-1 text-2xl font-semibold tracking-tight">Target tiers</h2>
+    <p class="mb-5 text-sm text-[var(--color-fg-muted)]">
+      Budgets are quoted per tier (§2.2). Where the OSS editor and slot games conflict, slots win.
+    </p>
+    <div class="overflow-x-auto rounded-2xl border border-[var(--color-border)]">
+      <table class="w-full min-w-[560px] text-left text-sm">
+        <thead class="bg-[var(--color-surface-2)] text-[var(--color-fg-dim)]">
+          <tr>
+            <th class="px-4 py-3 font-medium">Tier</th>
+            <th class="px-4 py-3 font-medium">Representative device</th>
+            <th class="px-4 py-3 font-medium">Backend</th>
+            <th class="px-4 py-3 font-medium">Alive @ 60fps</th>
+            <th class="px-4 py-3 font-medium">Role</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-[var(--color-border)]">
+          {
+            tiers.map((t) => (
+              <tr class="hover:bg-[var(--color-surface)]/60">
+                <td class="px-4 py-3 font-medium text-[var(--color-violet-bright)]">{t.tier}</td>
+                <td class="px-4 py-3 text-[var(--color-fg-muted)]">{t.device}</td>
+                <td class="px-4 py-3 font-mono text-xs">{t.backend}</td>
+                <td class="px-4 py-3 font-mono text-xs">{t.budget}</td>
+                <td class="px-4 py-3 text-[var(--color-fg-muted)]">{t.status}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+</Base>

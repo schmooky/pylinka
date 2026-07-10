@@ -1,0 +1,129 @@
+---
+import Base from '../layouts/Base.astro';
+
+type State = 'done' | 'active' | 'todo';
+interface Task {
+  id: string;
+  label: string;
+  state: State;
+}
+interface Milestone {
+  id: string;
+  title: string;
+  note: string;
+  tasks: Task[];
+}
+
+const milestones: Milestone[] = [
+  {
+    id: 'M1.0',
+    title: 'Spike (WebGPU)',
+    note: 'Hand-written WGSL from §13 templates. Needs real GPU hardware — not runnable in CI.',
+    tasks: [
+      { id: 'S1–S9', label: 'Standalone + pixi WebGPU sim, tier runs, PRNG/color decisions', state: 'todo' },
+    ],
+  },
+  {
+    id: 'M1.1',
+    title: '@pylinka/graph',
+    note: 'Zero-dependency shared kernel. 37 tests green.',
+    tasks: [
+      { id: 'G1', label: 'types.ts (§11.1–11.2)', state: 'done' },
+      { id: 'G2', label: 'catalog registry + v1 schemas', state: 'done' },
+      { id: 'G3', label: 'validate.ts — full §12.3 taxonomy', state: 'done' },
+      { id: 'G4', label: 'hash.ts — §12.1 FNV-1a', state: 'done' },
+      { id: 'G5', label: 'slots.ts — §12.2', state: 'done' },
+    ],
+  },
+  {
+    id: 'M1.2',
+    title: '@pylinka/compiler',
+    note: 'Backend-neutral IR + WGSL codegen. The coin-spark-trail golden is the north star.',
+    tasks: [
+      { id: 'C1', label: 'live-prune, eval-time, topo sort', state: 'todo' },
+      { id: 'C2', label: 'CodegenCtx (WGSL)', state: 'todo' },
+      { id: 'C3', label: 'scaffold assembly (§13.5–13.6)', state: 'todo' },
+      { id: 'C4', label: 'per-node codegen + ease catalog', state: 'todo' },
+      { id: 'C5', label: 'golden tests', state: 'todo' },
+      { id: 'C6', label: 'determinism + error paths', state: 'todo' },
+    ],
+  },
+  {
+    id: 'M1.3',
+    title: '@pylinka/core',
+    note: 'Runtime: pools, uniform bus, scheduler, backends, render. Peer pixi.js@^8.',
+    tasks: [{ id: 'R1–R8', label: 'backend, pool, scheduler, view, runtime, device-loss, alloc test', state: 'todo' }],
+  },
+  {
+    id: 'M1.4',
+    title: '@pylinka/format',
+    note: 'Parse / serialize / migrate; unknown-kind preservation.',
+    tasks: [{ id: 'F1–F2', label: 'parse/serialize + migration chains', state: 'todo' }],
+  },
+  {
+    id: 'M1.5',
+    title: '@pylinka/editor',
+    note: 'React Flow editor, IndexedDB, live preview.',
+    tasks: [{ id: 'E1–E7', label: 'stores, canvas, panels, compile worker, e2e', state: 'todo' }],
+  },
+  {
+    id: 'M1-beta',
+    title: 'apps/site + previews',
+    note: 'This site. Gallery + open-in-editor + offline preview generation.',
+    tasks: [
+      { id: 'site', label: 'Astro docs site (dark, violet)', state: 'active' },
+      { id: 'gen-previews', label: 'offline frame-stepped webm/poster', state: 'todo' },
+    ],
+  },
+];
+
+const dot: Record<State, string> = {
+  done: 'bg-[var(--color-green)]',
+  active: 'bg-[var(--color-amber)] animate-pulse',
+  todo: 'bg-[var(--color-fg-dim)]/40',
+};
+const label: Record<State, string> = { done: 'done', active: 'in progress', todo: 'planned' };
+
+const all = milestones.flatMap((m) => m.tasks);
+const doneCount = all.filter((t) => t.state === 'done').length;
+---
+
+<Base title="Pylinka — Status" active="status">
+  <section class="py-14">
+    <h1 class="text-3xl font-semibold tracking-tight">Build status</h1>
+    <p class="mt-2 max-w-2xl text-[var(--color-fg-muted)]">
+      Live against the execution plan (REQUIREMENTS.md §18). The M1.0 GPU spike is gated on real
+      hardware; the pure-TS packages ship and test in CI first.
+    </p>
+
+    <div class="mt-8 space-y-4">
+      {
+        milestones.map((m) => (
+          <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/50 p-5">
+            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span class="font-mono text-sm text-[var(--color-violet-bright)]">{m.id}</span>
+              <h2 class="font-medium">{m.title}</h2>
+              <span class="text-xs text-[var(--color-fg-dim)]">{m.note}</span>
+            </div>
+            <ul class="mt-4 grid gap-2 sm:grid-cols-2">
+              {m.tasks.map((t) => (
+                <li class="flex items-center gap-2.5 text-sm">
+                  <span class:list={['h-2 w-2 shrink-0 rounded-full', dot[t.state]]} />
+                  <code class="font-mono text-xs text-[var(--color-fg-dim)]">{t.id}</code>
+                  <span class:list={[t.state === 'done' ? 'text-[var(--color-fg-muted)]' : 'text-[var(--color-fg)]']}>
+                    {t.label}
+                  </span>
+                  <span class="ml-auto text-[10px] text-[var(--color-fg-dim)]">{label[t.state]}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </div>
+
+    <p class="mt-6 text-sm text-[var(--color-fg-dim)]">
+      {doneCount} of {all.length} tracked task-groups complete.
+    </p>
+  </section>
+</Base>
