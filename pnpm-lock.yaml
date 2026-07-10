@@ -35,6 +35,9 @@ importers:
 
   apps/site:
     dependencies:
+      '@pylinka/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@pylinka/graph':
         specifier: workspace:*
         version: link:../../packages/graph

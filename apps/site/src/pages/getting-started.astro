@@ -9,10 +9,43 @@ import DocsLayout from '../layouts/DocsLayout.astro';
   </p>
 
   <h2>Install</h2>
-  <p>Pylinka ships as ES modules. The runtime peers on <code>pixi.js@^8</code>.</p>
-  <pre><code>pnpm add @pylinka/core pixi.js</code></pre>
+  <pre><code>pnpm add @pylinka/core</code></pre>
 
-  <h2>Mount a system</h2>
+  <h2>Run it on a canvas (WebGL2)</h2>
+  <p>
+    The quickest path — works in any WebGL2 browser, no pixi and no WebGPU
+    required. Give it a canvas and a project; the simulation runs on the GPU via
+    transform feedback. See it live in the <a href="/playground">Playground</a>.
+  </p>
+  <pre><code>import &#123; createParticles &#125; from '@pylinka/core/webgl';
+import project from './sparks.pylinka.json';
+
+const fx = createParticles(canvas, project);
+
+function frame(dt) &#123;
+  fx.setEmitter(mouseX, mouseY);   // where new particles are born
+  fx.update(dt);                    // step the sim + render
+  requestAnimationFrame(() =&gt; frame(1 / 60));
+&#125;
+requestAnimationFrame(() =&gt; frame(1 / 60));
+
+fx.setKnob('windPower', 40);        // live, zero recompile
+fx.spawnBurst(300);</code></pre>
+  <p>
+    <code>createParticles</code> interprets the common node patterns — spawn
+    shape, random velocity &amp; life, gravity, wind, drag, colour- and
+    scale-over-life — into a GPU model. Effects using nodes outside that set
+    still run; the extra nodes are ignored.
+  </p>
+
+  <h2>The pixi v8 path</h2>
+  <p>
+    For interleaving particles inside a PixiJS scene graph, the runtime also peers
+    on <code>pixi.js@^8</code> and integrates as a render pipe. This mounts a
+    system as a scene-graph node:
+  </p>
+
+  <h3>Mount a system</h3>
   <p>
     A Pylinka <em>project</em> is a JSON document describing one or more particle systems. Author it
     in the editor or start from a recipe, then load it into your renderer:

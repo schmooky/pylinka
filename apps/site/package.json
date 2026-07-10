@@ -10,7 +10,8 @@
     "typecheck": "astro check"
   },
   "dependencies": {
-    "@pylinka/graph": "workspace:*"
+    "@pylinka/graph": "workspace:*",
+    "@pylinka/core": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

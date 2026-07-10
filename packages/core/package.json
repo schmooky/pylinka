@@ -13,6 +13,10 @@
     "./pixi": {
       "types": "./dist/render/index.d.ts",
       "import": "./dist/render/index.js"
+    },
+    "./webgl": {
+      "types": "./dist/webgl/index.d.ts",
+      "import": "./dist/webgl/index.js"
     }
   },
   "main": "./dist/index.js",
