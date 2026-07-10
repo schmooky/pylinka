@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Record each recipe to a looping webm + poster via headless Chromium.",
   "scripts": {
-    "gen": "node gen.mjs"
+    "gen": "node gen.mjs",
+    "gen:slugs": "node gen-slugs.mjs"
   },
   "dependencies": {
     "playwright": "^1.61.0"

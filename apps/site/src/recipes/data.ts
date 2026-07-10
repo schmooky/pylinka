@@ -4,7 +4,7 @@
  */
 import type { Literal, Node, PylinkaProject, System } from '@pylinka/graph';
 
-export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract';
+export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'combo';
 
 export interface RecipeAtlas {
   url: string;
@@ -25,8 +25,12 @@ export interface Recipe {
   oneLiner: string;
   tags: string[];
   project: PylinkaProject;
-  /** optional textured atlas sequence (e.g. a spinning coin). */
+  /** optional textured atlas sequence (e.g. a spinning coin) bound to systems[0]. */
   atlas?: RecipeAtlas;
+  /** multi-emitter: per-system atlas (systemId → sequence). */
+  systemAtlases?: Record<string, RecipeAtlas>;
+  /** sub-emitters: childSystemId → parentSystemId (child spawns on parent deaths). */
+  subEmitters?: Record<string, string>;
 }
 
 /** The extracted piggy-cash coins: 7 colour rows × 10 flip frames. */
@@ -70,72 +74,100 @@ const f = (v: number): Literal => ({ t: 'f32', v });
 const v2 = (v: Vec2): Literal => ({ t: 'vec2', v });
 const col = (v: string): Literal => ({ t: 'color', v });
 
-function fx(o: FxOpts): Recipe {
+/** The physics/emitter subset of a recipe — everything that shapes one System. */
+type SysOpts = Omit<FxOpts, 'slug' | 'title' | 'group' | 'oneLiner' | 'tags' | 'atlas'>;
+
+/** Build one System (emitter + graph). Node/edge ids use prefix `idp` so they
+ * stay globally unique when several systems share a project. */
+function buildSystem(o: SysOpts, id: string, idp: string, name: string, enabled = true): System {
   const nodes: Node[] = [];
   const edges: System['graph']['edges'] = [];
   let e = 0;
-  const link = (fromN: string, fromP: string, toN: string, toP: string) =>
-    edges.push({ id: `e${e++}`, from: { nodeId: fromN, portId: fromP }, to: { nodeId: toN, portId: toP } });
+  const nid = (n: number) => `${idp}${n}`;
+  const link = (fromN: number, fromP: string, toN: number, toP: string) =>
+    edges.push({ id: `${idp}e${e++}`, from: { nodeId: nid(fromN), portId: fromP }, to: { nodeId: nid(toN), portId: toP } });
 
-  if (o.shape === 'circle') nodes.push({ id: 'n1', kind: 'shape.circle', values: { radius: f(o.radius ?? 30) } });
-  else if (o.shape === 'rect') nodes.push({ id: 'n1', kind: 'shape.rectangle', values: { size: v2(o.size ?? [100, 100]) } });
-  else nodes.push({ id: 'n1', kind: 'shape.point', values: { offset: v2([0, 0]) } });
-  nodes.push({ id: 'n2', kind: 'output.spawnPosition' });
-  link('n1', 'pos', 'n2', 'pos');
+  if (o.shape === 'circle') nodes.push({ id: nid(1), kind: 'shape.circle', values: { radius: f(o.radius ?? 30) } });
+  else if (o.shape === 'rect') nodes.push({ id: nid(1), kind: 'shape.rectangle', values: { size: v2(o.size ?? [100, 100]) } });
+  else nodes.push({ id: nid(1), kind: 'shape.point', values: { offset: v2([0, 0]) } });
+  nodes.push({ id: nid(2), kind: 'output.spawnPosition' });
+  link(1, 'pos', 2, 'pos');
 
-  nodes.push({ id: 'n3', kind: 'gen.randomRange', values: { min: f(o.lifeMin), max: f(o.lifeMax) } });
-  nodes.push({ id: 'n4', kind: 'output.initLife' });
-  link('n3', 'out', 'n4', 'life');
+  nodes.push({ id: nid(3), kind: 'gen.randomRange', values: { min: f(o.lifeMin), max: f(o.lifeMax) } });
+  nodes.push({ id: nid(4), kind: 'output.initLife' });
+  link(3, 'out', 4, 'life');
 
-  nodes.push({ id: 'n5', kind: 'gen.randomVec2', values: { min: v2(o.velMin), max: v2(o.velMax) } });
-  nodes.push({ id: 'n6', kind: 'output.initVelocity' });
-  link('n5', 'out', 'n6', 'vel');
+  nodes.push({ id: nid(5), kind: 'gen.randomVec2', values: { min: v2(o.velMin), max: v2(o.velMax) } });
+  nodes.push({ id: nid(6), kind: 'output.initVelocity' });
+  link(5, 'out', 6, 'vel');
 
   if (o.gravity && (o.gravity[0] !== 0 || o.gravity[1] !== 0)) {
-    nodes.push({ id: 'n7', kind: 'field.gravity', values: { g: v2(o.gravity) } });
-    nodes.push({ id: 'n8', kind: 'output.addForce' });
-    link('n7', 'force', 'n8', 'force');
+    nodes.push({ id: nid(7), kind: 'field.gravity', values: { g: v2(o.gravity) } });
+    nodes.push({ id: nid(8), kind: 'output.addForce' });
+    link(7, 'force', 8, 'force');
   }
   if (o.drag) {
-    nodes.push({ id: 'n9', kind: 'field.drag', values: { coefficient: f(o.drag) } });
-    nodes.push({ id: 'n10', kind: 'output.drag' });
-    link('n9', 'drag', 'n10', 'drag');
+    nodes.push({ id: nid(9), kind: 'field.drag', values: { coefficient: f(o.drag) } });
+    nodes.push({ id: nid(10), kind: 'output.drag' });
+    link(9, 'drag', 10, 'drag');
   }
   if (o.wind) {
-    nodes.push({ id: 'n11', kind: 'field.directional', values: { strength: f(o.wind[0]), angle: f(o.wind[1]) } });
-    nodes.push({ id: 'n12', kind: 'output.addForce' });
-    link('n11', 'force', 'n12', 'force');
+    nodes.push({ id: nid(11), kind: 'field.directional', values: { strength: f(o.wind[0]), angle: f(o.wind[1]) } });
+    nodes.push({ id: nid(12), kind: 'output.addForce' });
+    link(11, 'force', 12, 'force');
   }
 
-  nodes.push({ id: 'n13', kind: 'gen.colorOverLife', structural: { ease: o.colorEase ?? 'linear' }, values: { from: col(o.colorFrom), to: col(o.colorTo) } });
-  nodes.push({ id: 'n14', kind: 'output.writeColor' });
-  link('n13', 'out', 'n14', 'color');
+  nodes.push({ id: nid(13), kind: 'gen.colorOverLife', structural: { ease: o.colorEase ?? 'linear' }, values: { from: col(o.colorFrom), to: col(o.colorTo) } });
+  nodes.push({ id: nid(14), kind: 'output.writeColor' });
+  link(13, 'out', 14, 'color');
 
-  nodes.push({ id: 'n15', kind: 'gen.scaleOverLife', structural: { ease: o.scaleEase ?? 'linear' }, values: { from: f(o.scaleFrom ?? 1), to: f(o.scaleTo ?? 0) } });
-  nodes.push({ id: 'n16', kind: 'output.writeScale' });
-  link('n15', 'out', 'n16', 'scale');
+  nodes.push({ id: nid(15), kind: 'gen.scaleOverLife', structural: { ease: o.scaleEase ?? 'linear' }, values: { from: f(o.scaleFrom ?? 1), to: f(o.scaleTo ?? 0) } });
+  nodes.push({ id: nid(16), kind: 'output.writeScale' });
+  link(15, 'out', 16, 'scale');
 
   const emitter: System['emitter'] =
     o.mode === 'burst'
       ? { mode: 'burst', rate: 0, burst: { count: o.burstCount ?? 150, interval: o.burstInterval ?? 1.5 } }
       : { mode: 'flow', rate: o.rate ?? 200, rateOverDistance: o.rod ?? 0 };
 
-  const project: PylinkaProject = {
-    format: 'pylinka/v1',
-    version: 1,
-    catalogVersion: 1,
-    id: o.slug,
-    name: o.title,
-    createdAt: '2026-07-10T00:00:00Z',
-    updatedAt: '2026-07-10T00:00:00Z',
-    params: [],
-    assets: [],
-    systems: [
-      { id: 's1', name: 'fx', capacity: o.capacity ?? 2500, blendMode: o.blend ?? 'add', enabled: true, space: 'world', emitter, graph: { nodes, edges } },
-    ],
-  };
+  return { id, name, capacity: o.capacity ?? 2500, blendMode: o.blend ?? 'add', enabled, space: 'world', emitter, graph: { nodes, edges } };
+}
 
+const META = { format: 'pylinka/v1' as const, version: 1, catalogVersion: 1, createdAt: '2026-07-10T00:00:00Z', updatedAt: '2026-07-10T00:00:00Z' };
+
+function fx(o: FxOpts): Recipe {
+  const project: PylinkaProject = { ...META, id: o.slug, name: o.title, params: [], assets: [], systems: [buildSystem(o, 's1', 'n', 'fx')] };
   return { slug: o.slug, title: o.title, group: o.group, oneLiner: o.oneLiner, tags: o.tags, project, ...(o.atlas ? { atlas: o.atlas } : {}) };
+}
+
+/** One emitter in a multi-emitter recipe. */
+type Layer = SysOpts & { name: string; atlas?: RecipeAtlas };
+interface ComboOpts {
+  slug: string;
+  title: string;
+  group: RecipeGroup;
+  oneLiner: string;
+  tags: string[];
+  layers: Layer[];
+  /** sub-emitter links as [childLayerIndex, parentLayerIndex] pairs. */
+  links?: [number, number][];
+}
+
+const PREFIX = 'abcdefgh';
+/** Compose several emitters (optionally wired as sub-emitters) into one recipe. */
+function combo(o: ComboOpts): Recipe {
+  const sysId = (i: number) => `s${i + 1}`;
+  const systems = o.layers.map((L, i) => buildSystem(L, sysId(i), PREFIX[i]!, L.name));
+  const systemAtlases: Record<string, RecipeAtlas> = {};
+  o.layers.forEach((L, i) => { if (L.atlas) systemAtlases[sysId(i)] = L.atlas; });
+  const subEmitters: Record<string, string> = {};
+  for (const [c, p] of o.links ?? []) subEmitters[sysId(c)] = sysId(p);
+  const project: PylinkaProject = { ...META, id: o.slug, name: o.title, params: [], assets: [], systems };
+  return {
+    slug: o.slug, title: o.title, group: o.group, oneLiner: o.oneLiner, tags: o.tags, project,
+    ...(Object.keys(systemAtlases).length ? { systemAtlases } : {}),
+    ...(Object.keys(subEmitters).length ? { subEmitters } : {}),
+  };
 }
 
 export const RECIPES: Recipe[] = [
@@ -208,4 +240,54 @@ export const RECIPES: Recipe[] = [
   fx({ slug: 'coin-fountain', title: 'Coin Fountain', group: 'ui', oneLiner: 'Coins erupting upward and arcing back down.', tags: ['ui', 'coins', 'fountain'], capacity: 500, blend: 'normal', rate: 60, velMin: [-120, -300], velMax: [120, -150], lifeMin: 1.6, lifeMax: 2.6, gravity: [0, 460], colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 3.4, scaleTo: 3.4, atlas: COINS }),
   fx({ slug: 'jackpot-burst', title: 'Jackpot Burst', group: 'ui', oneLiner: 'A big coin explosion for a jackpot win.', tags: ['ui', 'coins', 'jackpot'], capacity: 800, blend: 'normal', mode: 'burst', burstCount: 130, burstInterval: 1.8, velMin: [-240, -240], velMax: [240, 240], lifeMin: 1.4, lifeMax: 2.4, gravity: [0, 380], drag: 0.5, colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 3.2, scaleTo: 3.2, atlas: COINS }),
   fx({ slug: 'gem-spin', title: 'Gem Spin', group: 'magic', oneLiner: 'A slow field of random gems tumbling in place.', tags: ['magic', 'gems', 'spin'], capacity: 220, blend: 'normal', shape: 'rect', size: [220, 130], rate: 14, velMin: [-8, -8], velMax: [8, 8], lifeMin: 2.5, lifeMax: 4.5, colorFrom: '#ffffffff', colorTo: '#ffffff33', colorEase: 'sine.inOut', scaleFrom: 3.6, scaleTo: 3.6, atlas: COINS }),
+
+  // ── combo: multi-emitter & sub-emitter (spawn on death) ─────────────────
+  combo({
+    slug: 'firework', title: 'Firework', group: 'combo',
+    oneLiner: 'Rockets climb, then burst into coloured sparks where they die.',
+    tags: ['combo', 'sub-emitter', 'burst'],
+    layers: [
+      { name: 'rocket', capacity: 520, blend: 'add', rate: 16, velMin: [-60, -640], velMax: [60, -520], lifeMin: 0.7, lifeMax: 1, gravity: [0, 320], colorFrom: '#fff6c8ff', colorTo: '#ffdd8800', colorEase: 'sine.out', scaleFrom: 1, scaleTo: 0.6 },
+      { name: 'burst', capacity: 520, blend: 'add', shape: 'circle', radius: 4, velMin: [-300, -300], velMax: [300, 300], lifeMin: 0.7, lifeMax: 1.2, gravity: [0, 260], drag: 1.1, colorFrom: '#fff0a0ff', colorTo: '#ff3ca000', colorEase: 'power2.out', scaleFrom: 1.4, scaleTo: 0 },
+    ],
+    links: [[1, 0]],
+  }),
+  combo({
+    slug: 'coin-pop', title: 'Coin Pop', group: 'combo',
+    oneLiner: 'Coins fly up and pop into a gold spark where each one lands.',
+    tags: ['combo', 'coins', 'sub-emitter'],
+    layers: [
+      { name: 'coins', capacity: 400, blend: 'normal', rate: 26, velMin: [-150, -380], velMax: [150, -220], lifeMin: 1, lifeMax: 1.5, gravity: [0, 480], colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 3, scaleTo: 3, atlas: COINS },
+      { name: 'sparkle', capacity: 400, blend: 'add', velMin: [-90, -150], velMax: [90, -20], lifeMin: 0.35, lifeMax: 0.7, gravity: [0, 300], colorFrom: '#fff2b0ff', colorTo: '#ffcf3c00', colorEase: 'power2.out', scaleFrom: 1.2, scaleTo: 0 },
+    ],
+    links: [[1, 0]],
+  }),
+  combo({
+    slug: 'ember-smoke', title: 'Ember Smoke', group: 'combo',
+    oneLiner: 'Embers rise and each leaves a puff of smoke when it burns out.',
+    tags: ['combo', 'smoke', 'sub-emitter'],
+    layers: [
+      { name: 'embers', capacity: 1200, blend: 'add', shape: 'rect', size: [120, 16], rate: 55, velMin: [-10, -70], velMax: [10, -130], lifeMin: 0.9, lifeMax: 1.6, gravity: [0, -30], drag: 0.4, colorFrom: '#ff9a3aff', colorTo: '#7a1a0000', colorEase: 'sine.out', scaleFrom: 0.7, scaleTo: 0.2 },
+      { name: 'smoke', capacity: 1200, blend: 'normal', velMin: [-14, -24], velMax: [14, -54], lifeMin: 1.2, lifeMax: 2.2, gravity: [0, -16], drag: 0.8, colorFrom: '#8a8a8a88', colorTo: '#33333300', colorEase: 'sine.out', scaleFrom: 0.5, scaleTo: 2.2, scaleEase: 'sine.out' },
+    ],
+    links: [[1, 0]],
+  }),
+  combo({
+    slug: 'twin-flame', title: 'Twin Flame', group: 'combo',
+    oneLiner: 'Two emitters layered — an orange blaze around a blue-white core.',
+    tags: ['combo', 'fire', 'multi-emitter'],
+    layers: [
+      { name: 'outer', capacity: 2600, blend: 'add', shape: 'circle', radius: 18, rate: 480, velMin: [-16, -80], velMax: [16, -150], lifeMin: 0.5, lifeMax: 1, gravity: [0, -45], colorFrom: '#ffd27aff', colorTo: '#ff2a0000', colorEase: 'power2.out', scaleFrom: 1.5, scaleTo: 0 },
+      { name: 'core', capacity: 2600, blend: 'add', shape: 'circle', radius: 8, rate: 420, velMin: [-8, -110], velMax: [8, -200], lifeMin: 0.4, lifeMax: 0.8, gravity: [0, -70], colorFrom: '#d8f0ffff', colorTo: '#3a7cff00', colorEase: 'power2.out', scaleFrom: 1, scaleTo: 0 },
+    ],
+  }),
+  combo({
+    slug: 'comet-and-smoke', title: 'Comet & Smoke', group: 'combo',
+    oneLiner: 'A cyan comet core with a faint smoke trail — two emitters, one path.',
+    tags: ['combo', 'trail', 'multi-emitter'],
+    layers: [
+      { name: 'core', capacity: 3500, blend: 'add', rate: 520, rod: 2, velMin: [-15, -15], velMax: [15, 15], lifeMin: 0.8, lifeMax: 1.5, drag: 1.6, colorFrom: '#aee9ffff', colorTo: '#3a86ff00', colorEase: 'power2.out', scaleFrom: 1.3, scaleTo: 0 },
+      { name: 'smoke', capacity: 2500, blend: 'normal', rate: 120, rod: 0.8, velMin: [-8, -10], velMax: [8, -30], lifeMin: 1, lifeMax: 1.8, drag: 0.6, colorFrom: '#88aaccaa', colorTo: '#33445500', colorEase: 'sine.out', scaleFrom: 0.8, scaleTo: 2.2, scaleEase: 'sine.out' },
+    ],
+  }),
 ];

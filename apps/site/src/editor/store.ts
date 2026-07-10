@@ -3,7 +3,7 @@ import type { Edge, Literal, Node, System } from '@pylinka/graph';
 import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { seedProject } from './seed';
 import { autoLayout } from './layout';
-import { RECIPES } from '../recipes/data';
+import { RECIPES, type RecipeAtlas } from '../recipes/data';
 import type { EditorProject, EditorTexture } from './types';
 
 const KEY = 'pylinka.editor.project';
@@ -27,25 +27,41 @@ function forkRecipe(slug: string): EditorProject | undefined {
   const project = normalize(structuredClone(recipe.project) as EditorProject);
   project.id = crypto.randomUUID();
   project.name = recipe.title;
-  project.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: autoLayout(project.systems[0]!.graph) };
-  // coin recipes carry an atlas descriptor → seed a texture bound to the system
-  if (recipe.atlas) {
+  // lay out every system (each has globally-unique node ids, so positions merge)
+  const nodePositions = project.systems.reduce<Record<string, { x: number; y: number }>>(
+    (acc, s) => Object.assign(acc, autoLayout(s.graph)),
+    {},
+  );
+  project.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions };
+
+  // seed editor textures from the recipe's atlas descriptors (per-system, or the
+  // legacy single atlas bound to systems[0]) and carry over sub-emitter links.
+  const atlasBySystem: Record<string, RecipeAtlas> =
+    recipe.systemAtlases ?? (recipe.atlas ? { [project.systems[0]!.id]: recipe.atlas } : {});
+  const textures: EditorTexture[] = [];
+  const systemTextures: Record<string, string> = {};
+  for (const [systemId, a] of Object.entries(atlasBySystem)) {
     const t: EditorTexture = {
       id: crypto.randomUUID(),
-      name: recipe.atlas.url.split('/').pop() ?? 'atlas',
-      src: recipe.atlas.url,
-      width: recipe.atlas.cols * (recipe.atlas.frameW + recipe.atlas.pad),
-      height: recipe.atlas.rows * (recipe.atlas.frameH + recipe.atlas.pad),
-      cols: recipe.atlas.cols,
-      rows: recipe.atlas.rows,
-      pad: recipe.atlas.pad,
-      fps: recipe.atlas.fps,
-      play: recipe.atlas.play,
-      pick: recipe.atlas.pick,
+      name: a.url.split('/').pop() ?? 'atlas',
+      src: a.url,
+      width: a.cols * (a.frameW + a.pad),
+      height: a.rows * (a.frameH + a.pad),
+      cols: a.cols,
+      rows: a.rows,
+      pad: a.pad,
+      fps: a.fps,
+      play: a.play,
+      pick: a.pick,
     };
-    project.textures = [t];
-    project.systemTextures = { [project.systems[0]!.id]: t.id };
+    textures.push(t);
+    systemTextures[systemId] = t.id;
   }
+  if (textures.length) {
+    project.textures = textures;
+    project.systemTextures = systemTextures;
+  }
+  if (recipe.subEmitters) project.subEmitters = { ...recipe.subEmitters };
   return project;
 }
 

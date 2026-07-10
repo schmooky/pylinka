@@ -14,7 +14,8 @@
   <body style="margin:0;background:#000;overflow:hidden">
     <canvas id="c" style="display:block;width:100vw;height:100vh"></canvas>
     <script>
-      import { createParticles, type AtlasOptions } from '@pylinka/core/webgl';
+      import { createParticles, type AtlasOptions, type ParticlesHandle } from '@pylinka/core/webgl';
+      import type { System } from '@pylinka/graph';
       import { RECIPES } from '../recipes/data';
 
       (window as unknown as { __slugs: string[] }).__slugs = RECIPES.map((r) => r.slug);
@@ -35,34 +36,68 @@
         if (!recipe) return;
         canvas.width = canvas.clientWidth;
         canvas.height = canvas.clientHeight;
-        let atlas: unknown;
-        if (recipe.atlas) {
+
+        const systems = recipe.project.systems.filter((s) => s.enabled);
+        const ids = new Set(systems.map((s) => s.id));
+        const links = recipe.subEmitters ?? {};
+        const parentOf = (id: string) => {
+          const p = links[id];
+          return p && ids.has(p) ? p : undefined;
+        };
+        // atlas for a system: per-system map, or the legacy single atlas on systems[0]
+        const atlasFor = async (sys: System): Promise<AtlasOptions | undefined> => {
+          const a = recipe.systemAtlases?.[sys.id] ?? (recipe.atlas && sys.id === recipe.project.systems[0]!.id ? recipe.atlas : undefined);
+          if (!a) return undefined;
           try {
-            const image = await loadImage(recipe.atlas.url);
-            atlas = { ...recipe.atlas, image };
+            return { ...a, image: await loadImage(a.url) };
           } catch {
-            /* ignore */
+            return undefined;
           }
+        };
+        // topological order: a system after its parent
+        const ordered: System[] = [];
+        const placed = new Set<string>();
+        let guard = systems.length + 1;
+        while (ordered.length < systems.length && guard-- > 0)
+          for (const s of systems) {
+            if (placed.has(s.id)) continue;
+            const par = parentOf(s.id);
+            if (!par || placed.has(par)) { ordered.push(s); placed.add(s.id); }
+          }
+        for (const s of systems) if (!placed.has(s.id)) ordered.push(s);
+
+        const byId = new Map<string, ParticlesHandle>();
+        const handles: ParticlesHandle[] = [];
+        for (const sys of ordered) {
+          const atlas = await atlasFor(sys);
+          const par = parentOf(sys.id);
+          const subParent = par ? byId.get(par) : undefined;
+          const fx = createParticles(canvas, recipe.project, {
+            systemName: sys.name,
+            zoom: 1.6,
+            sizeScale: 2.2,
+            ...(atlas ? { atlas } : {}),
+            ...(subParent ? { subParent } : {}),
+          });
+          fx.autoClear = handles.length === 0;
+          byId.set(sys.id, fx);
+          handles.push(fx);
         }
-        const fx = createParticles(canvas, recipe.project, {
-          zoom: 1.6,
-          sizeScale: 2.2,
-          ...(atlas ? { atlas: atlas as AtlasOptions } : {}),
-        });
+
         const cx = canvas.width / 2;
         const cy = canvas.height / 2;
         let t = 0;
         function frame() {
           t += 1 / 60;
-          if (recipe!.group === 'trails') {
-            const r = Math.min(canvas.width, canvas.height) * 0.26;
-            fx.setEmitter(cx + Math.cos(t * 1.6) * r, cy + Math.sin(t * 1.6) * r);
+          let ex = cx, ey = cy;
+          if (recipe!.group === 'trails' || recipe!.group === 'combo') {
+            const r = Math.min(canvas.width, canvas.height) * (recipe!.group === 'combo' ? 0.14 : 0.26);
+            ex = cx + Math.cos(t * 1.5) * r;
+            ey = cy + Math.sin(t * 1.5) * r;
           } else if (recipe!.group === 'ambient') {
-            fx.setEmitter(cx, canvas.height * 0.12);
-          } else {
-            fx.setEmitter(cx, cy);
+            ex = cx; ey = canvas.height * 0.12;
           }
-          fx.update(1 / 60);
+          for (const fx of handles) { fx.setEmitter(ex, ey); fx.update(1 / 60); }
           requestAnimationFrame(frame);
         }
         requestAnimationFrame(frame);
