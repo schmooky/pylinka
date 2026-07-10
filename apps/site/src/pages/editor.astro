@@ -1,15 +1,17 @@
 ---
 import '../editor/editor.css';
+import Head from '../components/Head.astro';
 import { App } from '../editor/App';
 ---
 
 <!doctype html>
 <html lang="en" class="dark">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Pylinka Editor</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9C%A8%3C/text%3E%3C/svg%3E" />
+    <Head
+      title="Pylinka Editor — node-based GPU particle editor for PixiJS"
+      description="Wire a typed dataflow graph of particle nodes and watch a live WebGL preview update on every edit with zero recompile."
+      path="/editor"
+    />
   </head>
   <body>
     <App client:only="react" />

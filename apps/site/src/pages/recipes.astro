@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import Head from '../components/Head.astro';
 import { RECIPES } from '../recipes/data';
 
 const groups = ['all', 'trails', 'fire', 'magic', 'ambient', 'ui', 'abstract'];
@@ -8,10 +9,11 @@ const groups = ['all', 'trails', 'fire', 'magic', 'ambient', 'ui', 'abstract'];
 <!doctype html>
 <html lang="en" class="dark">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Pylinka — Recipes</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9C%A8%3C/text%3E%3C/svg%3E" />
+    <Head
+      title="Pylinka Recipes — 44 ready-made GPU particle effects for PixiJS"
+      description="A gallery of 44 open-source particle effects for PixiJS — trails, fire, magic, ambient, UI, and abstract. Each is a real pylinka project you can open in the editor and tweak live."
+      path="/recipes"
+    />
   </head>
   <body>
     <header class="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur">

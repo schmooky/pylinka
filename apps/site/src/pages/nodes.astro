@@ -31,7 +31,11 @@ const sig = (ports: readonly { id: string; type: string }[]) =>
   ports.map((p) => `${p.id}:${p.type}`).join(', ') || '—';
 ---
 
-<DocsLayout title="Pylinka — Nodes" active="nodes">
+<DocsLayout
+  title="Node reference — Pylinka particle graph"
+  description="The full v1 node catalog for Pylinka particle graphs: inputs, generators, math, force fields, spawn shapes, and outputs, grouped by namespace."
+  active="nodes"
+>
   <h1>Nodes</h1>
   <p class="!text-base !text-muted-foreground">
     The v{CATALOG_VERSION} node catalog — {V1_SCHEMAS.length} kinds, grouped by namespace. Rendered
