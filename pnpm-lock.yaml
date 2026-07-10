@@ -55,6 +55,12 @@ importers:
         specifier: workspace:*
         version: link:../graph
 
+  packages/format:
+    dependencies:
+      '@pylinka/graph':
+        specifier: workspace:*
+        version: link:../graph
+
   packages/graph: {}
 
 packages:

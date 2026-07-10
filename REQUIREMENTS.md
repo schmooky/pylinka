@@ -1249,8 +1249,8 @@ New system seeds the **default well-formed graph**: `shape.point → output.spaw
 - [ ] **R8** Integration smoke: compile coin-spark-trail with the real compiler, run 120 frames headless, assert aliveCount in expected band, no errors.
 
 **M1.4 — `@pylinka/format`**
-- [ ] **F1** parse/serialize per §11.6 (inline↔blob transform), validation to Diagnostics.
-- [ ] **F2** Migration chains (document + catalog aliasing); unknown-kind preservation (E201) tested.
+- [x] **F1** parse/serialize per §11.6 (inline↔blob transform), validation to Diagnostics.
+- [x] **F2** Migration chains (document + catalog aliasing); unknown-kind preservation (E201) tested.
 
 **M1.5 — `@pylinka/editor`**
 - [ ] **E1** Stores + command/undo core (immer patches, cap 100, gesture coalescing).
