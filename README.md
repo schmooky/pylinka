@@ -33,9 +33,9 @@ Try it — one dev server hosts everything:
 
 ```bash
 pnpm --filter @pylinka/site dev
-# → localhost:5212        docs
-#   localhost:5212/editor  node editor + live preview
-#   localhost:5212/playground / /recipes
+# → localhost:5212         docs
+#   localhost:5212/editor   node editor + live preview
+#   localhost:5212/recipes  effect gallery
 ```
 
 Requires Node ≥ 22 and pnpm ≥ 9. See `REQUIREMENTS.md §4.4` for the full toolchain and `§18` for the
