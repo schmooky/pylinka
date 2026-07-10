@@ -139,6 +139,8 @@ interface EditorState {
   removeSystem(id: string): void;
   renameSystem(id: string, name: string): void;
   toggleSystem(id: string): void;
+  /** make `childId` spawn on `parentId`'s particle deaths (null = born at cursor) */
+  setSubParent(childId: string, parentId: string | null): void;
   // textures (bound to the active system)
   addTexture(tex: Omit<EditorTexture, 'id'>): void;
   removeTexture(id: string): void;
@@ -309,6 +311,11 @@ export const useEditor = create<EditorState>((set, get) => {
         const project = structuredClone(s.project);
         project.systems = project.systems.filter((x) => x.id !== id);
         if (project.systemTextures) delete project.systemTextures[id];
+        if (project.subEmitters) {
+          delete project.subEmitters[id]; // as a child
+          for (const [c, par] of Object.entries(project.subEmitters))
+            if (par === id) delete project.subEmitters[c]; // as a parent
+        }
         project.updatedAt = new Date().toISOString();
         const activeSystemId = s.activeSystemId === id ? project.systems[0]!.id : s.activeSystemId;
         persist(project, s.positions, activeSystemId);
@@ -327,6 +334,26 @@ export const useEditor = create<EditorState>((set, get) => {
       commit((p) => {
         const sys = p.systems.find((x) => x.id === id);
         if (sys) sys.enabled = !sys.enabled;
+      }, true);
+    },
+
+    setSubParent(childId, parentId) {
+      commit((p) => {
+        const links = { ...(p.subEmitters ?? {}) };
+        if (!parentId || parentId === childId) {
+          delete links[childId];
+        } else {
+          // reject cycles: walk parentId's ancestry, bail if we reach childId
+          let cur: string | undefined = parentId;
+          const seen = new Set<string>();
+          while (cur && !seen.has(cur)) {
+            if (cur === childId) return; // would create a loop → no-op
+            seen.add(cur);
+            cur = links[cur];
+          }
+          links[childId] = parentId;
+        }
+        p.subEmitters = links;
       }, true);
     },
 

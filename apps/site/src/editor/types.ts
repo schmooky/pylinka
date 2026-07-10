@@ -25,6 +25,8 @@ export interface EditorProject extends PylinkaProject {
   textures?: EditorTexture[];
   /** which texture each system renders as (systemId → textureId | null) */
   systemTextures?: Record<string, string | null>;
+  /** sub-emitters: childSystemId → parentSystemId (child spawns on parent deaths) */
+  subEmitters?: Record<string, string>;
 }
 
 /** Per-frame atlas dims from a uniform grid (matches the runtime's tools). */

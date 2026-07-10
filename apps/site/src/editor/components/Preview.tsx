@@ -43,8 +43,9 @@ export function Preview() {
   knobsRef.current = knobs;
   const [tab, setTab] = useState<'knobs' | 'assets'>('knobs');
 
-  // (re)create one particle handle per ENABLED system; only the first clears so the
-  // rest composite on top (multi-emitter). Each carries its own atlas texture.
+  // (re)create one particle handle per ENABLED system, PARENTS FIRST so a
+  // sub-emitter can wire to its parent's live handle. Only the first handle
+  // clears; the rest composite on top. Each carries its own atlas texture.
   const recreate = async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -52,19 +53,47 @@ export function Preview() {
     fxRef.current = [];
     const proj = projRef.current;
     const enabled = proj.systems.filter((s) => s.enabled);
+    const enabledIds = new Set(enabled.map((s) => s.id));
+    const links = proj.subEmitters ?? {};
+    // effective parent = the declared parent, only if it's also enabled
+    const parentOf = (id: string): string | undefined => {
+      const p = links[id];
+      return p && enabledIds.has(p) ? p : undefined;
+    };
+    // topological order: a system comes after its parent
+    const ordered: typeof enabled = [];
+    const placed = new Set<string>();
+    let guard = enabled.length + 1;
+    while (ordered.length < enabled.length && guard-- > 0) {
+      for (const s of enabled) {
+        if (placed.has(s.id)) continue;
+        const par = parentOf(s.id);
+        if (!par || placed.has(par)) { ordered.push(s); placed.add(s.id); }
+      }
+    }
+    for (const s of enabled) if (!placed.has(s.id)) ordered.push(s); // cycle fallback
+
+    const byId = new Map<string, ParticlesHandle>();
     const handles: ParticlesHandle[] = [];
-    for (let i = 0; i < enabled.length; i++) {
-      const sys = enabled[i]!;
+    for (let i = 0; i < ordered.length; i++) {
+      const sys = ordered[i]!;
       let atlas: AtlasOptions | undefined;
       try {
         atlas = await buildAtlas(proj, sys);
       } catch {
         /* texture failed to load → soft sprite */
       }
+      const parId = parentOf(sys.id);
+      const subParent = parId ? byId.get(parId) : undefined;
       try {
-        const h = createParticles(canvas, proj, { systemName: sys.name, ...(atlas ? { atlas } : {}) });
+        const h = createParticles(canvas, proj, {
+          systemName: sys.name,
+          ...(atlas ? { atlas } : {}),
+          ...(subParent ? { subParent } : {}),
+        });
         h.autoClear = i === 0;
         for (const [n, v] of Object.entries(knobsRef.current)) h.setKnob(n, v);
+        byId.set(sys.id, h);
         handles.push(h);
       } catch (e) {
         setHud(String(e));

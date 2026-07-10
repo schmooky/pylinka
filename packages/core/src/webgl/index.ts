@@ -86,6 +86,13 @@ export interface ParticlesOptions {
    * random row is picked per particle (or fixed), the column advances with age.
    */
   atlas?: AtlasOptions;
+  /**
+   * Make this a SUB-EMITTER of another running effect: its particles spawn on
+   * the death of the parent's particles (at the death position). The parent
+   * handle must share the same canvas/context and be updated before this one.
+   * The child mirrors the parent 1:1 and inherits the parent's pool capacity.
+   */
+  subParent?: ParticlesHandle;
 }
 
 export interface AtlasOptions {
@@ -112,6 +119,9 @@ export interface AtlasOptions {
 export { extractParams, parseColor, type EngineParams } from './params.js';
 export { WebGL2Engine } from './engine.js';
 
+/** Handle → engine, so a sub-emitter can reach its parent's GPU buffers. */
+const engineOf = new WeakMap<ParticlesHandle, WebGL2Engine>();
+
 export function createParticles(
   target: HTMLCanvasElement | WebGL2RenderingContext,
   project: PylinkaProject,
@@ -134,7 +144,12 @@ export function createParticles(
   for (const p of project.params) if (p.default.t === 'f32') knobValues[p.name] = p.default.v;
 
   const params: EngineParams = extractParams(system, project.params, knobValues);
-  const engine = new WebGL2Engine(gl, params, opts.sizeScale ?? 1, resolveAtlas(opts.atlas));
+  const parentEngine = opts.subParent ? engineOf.get(opts.subParent) : undefined;
+  if (opts.subParent && !parentEngine) throw new Error('subParent handle is not a live pylinka effect.');
+  const engine = new WebGL2Engine(
+    gl, params, opts.sizeScale ?? 1, resolveAtlas(opts.atlas),
+    parentEngine ? { parent: parentEngine } : undefined,
+  );
   let scheduler = new SpawnScheduler(system.emitter, params.capacity);
   const systemName = system.name;
   const maxDt = opts.maxDt ?? 0.05;
@@ -201,8 +216,10 @@ export function createParticles(
       return engine.aliveCount();
     },
     destroy() {
+      engineOf.delete(handle);
       engine.destroy();
     },
   };
+  engineOf.set(handle, engine);
   return handle;
 }

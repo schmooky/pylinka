@@ -10,7 +10,13 @@ export function Systems() {
   const removeSystem = useEditor((s) => s.removeSystem);
   const renameSystem = useEditor((s) => s.renameSystem);
   const toggleSystem = useEditor((s) => s.toggleSystem);
+  const setSubParent = useEditor((s) => s.setSubParent);
+  const parentId = useEditor((s) => (s.project.subEmitters ?? {})[s.activeSystemId] ?? '');
   const [editing, setEditing] = useState<string | null>(null);
+
+  const activeName = systems.find((s) => s.id === activeId)?.name ?? '';
+  // valid parents = every other system (the store rejects cycles on commit)
+  const parentChoices = systems.filter((s) => s.id !== activeId);
 
   return (
     <div className="flex items-center gap-1 overflow-x-auto border-b border-border bg-card/40 px-2 py-1.5 text-xs">
@@ -47,6 +53,20 @@ export function Systems() {
         className="ml-1 shrink-0 rounded-md border border-dashed border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
         + Emitter
       </button>
+
+      {parentChoices.length > 0 && (
+        <label className="ml-auto flex shrink-0 items-center gap-1.5 pl-2 text-muted-foreground"
+          title={`Where “${activeName}” particles are born`}>
+          <span className="text-[10px] uppercase tracking-wider">“{activeName}” spawns from</span>
+          <select className="sel" value={parentId}
+            onChange={(e) => setSubParent(activeId, e.target.value || null)}>
+            <option value="">cursor / emitter</option>
+            {parentChoices.map((s) => (
+              <option key={s.id} value={s.id}>↳ deaths of “{s.name}”</option>
+            ))}
+          </select>
+        </label>
+      )}
     </div>
   );
 }

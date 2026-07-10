@@ -106,6 +106,90 @@ void main() {
   o_seed = i_seed;
 }`;
 
+/**
+ * Sub-emitter simulation VS — a child system that spawns ON THE DEATH of a
+ * parent system's particles (1:1 slot mapping, child capacity == parent
+ * capacity). It reads the parent's CURRENT and PREVIOUS state buffers; slot i
+ * (re)spawns exactly on the frame parent slot i transitions alive→dead, at the
+ * parent's death position. There is no cursor-window emitter spawn. All other
+ * integration matches UPDATE_VS.
+ */
+export const UPDATE_VS_SUB = `#version 300 es
+precision highp float;
+
+in vec2 i_pos;
+in vec2 i_vel;
+in float i_age;
+in float i_life;
+in float i_seed;
+
+// parent slot i — current frame
+in vec2 i_pPos;
+in float i_pAge;
+in float i_pLife;
+// parent slot i — previous frame
+in float i_pAgePrev;
+in float i_pLifePrev;
+
+out vec2 o_pos;
+out vec2 o_vel;
+out float o_age;
+out float o_life;
+out float o_seed;
+
+uniform float u_dt;
+uniform vec2  u_gravity;
+uniform vec2  u_wind;
+uniform float u_drag;
+uniform vec2  u_velMin;
+uniform vec2  u_velMax;
+uniform float u_lifeMin;
+uniform float u_lifeMax;
+uniform float u_frame;
+uniform int   u_shape;
+uniform float u_shapeR;
+uniform vec2  u_shapeSize;
+
+float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
+float rnd(float s, float k) { return hash11(s * 57.31 + k * 131.7 + 0.123); }
+
+void main() {
+  gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
+  float id = float(gl_VertexID);
+  bool alive = (i_life > 0.0) && (i_age < i_life);
+
+  bool pPrevAlive = (i_pLifePrev > 0.0) && (i_pAgePrev < i_pLifePrev);
+  bool pCurrAlive = (i_pLife > 0.0) && (i_pAge < i_pLife);
+  bool justDied = pPrevAlive && !pCurrAlive;
+
+  if (justDied) {
+    float s = hash11(id * 7.77 + u_frame * 3.13 + 1.0);
+    vec2 off = vec2(0.0);
+    if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); off = vec2(cos(a), sin(a)) * u_shapeR * sqrt(rnd(s, 9.0)); }
+    else if (u_shape == 2) { off = (vec2(rnd(s, 1.0), rnd(s, 2.0)) - 0.5) * u_shapeSize; }
+    o_pos  = i_pPos + off;
+    o_vel  = mix(u_velMin, u_velMax, vec2(rnd(s, 3.0), rnd(s, 4.0)));
+    o_life = mix(u_lifeMin, u_lifeMax, rnd(s, 5.0));
+    o_age  = 0.0;
+    o_seed = s;
+    return;
+  }
+
+  if (!alive) {
+    o_pos = i_pos; o_vel = i_vel; o_age = i_age; o_life = 0.0; o_seed = i_seed;
+    return;
+  }
+
+  vec2 force = u_gravity + u_wind;
+  vec2 vel = i_vel + force * u_dt;
+  vel *= exp(-u_drag * u_dt);
+  o_pos  = i_pos + vel * u_dt;
+  o_vel  = vel;
+  o_age  = i_age + u_dt;
+  o_life = i_life;
+  o_seed = i_seed;
+}`;
+
 /** Trivial fragment shader for the TF (rasterizer-discard) pass. */
 export const UPDATE_FS = `#version 300 es
 precision highp float;

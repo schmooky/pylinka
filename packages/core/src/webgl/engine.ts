@@ -11,8 +11,14 @@ import {
   TF_VARYINGS,
   UPDATE_FS,
   UPDATE_VS,
+  UPDATE_VS_SUB,
 } from './shaders.js';
 import type { EngineParams } from './params.js';
+
+/** A sub-emitter's parent: the child spawns on this engine's particle deaths. */
+export interface SubSource {
+  parent: WebGL2Engine;
+}
 
 /** Resolved atlas-sequence config the engine renders. */
 export interface AtlasConfig {
@@ -68,6 +74,8 @@ export class WebGL2Engine {
   private readonly renderProg: WebGLProgram;
   private readonly bufs: [WebGLBuffer, WebGLBuffer];
   private readonly updateVAOs: [WebGLVertexArrayObject, WebGLVertexArrayObject];
+  /** sub-emitter only: [childCur][parentCur] VAOs binding the parent's buffers. */
+  private readonly subVAOs: WebGLVertexArrayObject[][] = [];
   private readonly renderVAOs: [WebGLVertexArrayObject, WebGLVertexArrayObject];
   private readonly tf: WebGLTransformFeedback;
   private readonly uUpdate = new Map<string, WebGLUniformLocation | null>();
@@ -80,13 +88,21 @@ export class WebGL2Engine {
   private readonly sizeScale: number;
   private readonly atlas: AtlasConfig | undefined;
   private readonly tex: WebGLTexture | null = null;
+  private readonly sub: SubSource | undefined;
 
-  constructor(gl: WebGL2RenderingContext, params: EngineParams, sizeScale = 1, atlas?: AtlasConfig) {
+  /** current ping-pong index (which buffer holds this-frame state). */
+  get curIndex(): number { return this.cur; }
+  bufferAt(i: number): WebGLBuffer { return this.bufs[i]!; }
+  get capacityValue(): number { return this.capacity; }
+
+  constructor(gl: WebGL2RenderingContext, params: EngineParams, sizeScale = 1, atlas?: AtlasConfig, sub?: SubSource) {
     this.gl = gl;
-    this.capacity = params.capacity;
+    // a sub-emitter mirrors its parent 1:1, so it must share the parent's capacity
+    this.capacity = sub ? sub.parent.capacityValue : params.capacity;
     this.sizeScale = sizeScale;
     this.atlas = atlas;
-    this.updateProg = link(gl, UPDATE_VS, UPDATE_FS, TF_VARYINGS);
+    this.sub = sub;
+    this.updateProg = link(gl, sub ? UPDATE_VS_SUB : UPDATE_VS, UPDATE_FS, TF_VARYINGS);
     this.renderProg = link(gl, RENDER_VS, RENDER_FS);
 
     if (atlas) {
@@ -112,6 +128,15 @@ export class WebGL2Engine {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0, 1, 2, 0, 2, 3]), gl.STATIC_DRAW);
 
     this.updateVAOs = [this.makeUpdateVAO(this.bufs[0]), this.makeUpdateVAO(this.bufs[1])];
+    if (sub) {
+      const p = sub.parent;
+      // one VAO per (childCur, parentCur): parent curr = bufs[parentCur], prev = bufs[1-parentCur]
+      this.subVAOs = [0, 1].map((childCur) =>
+        [0, 1].map((parentCur) =>
+          this.makeSubUpdateVAO(this.bufs[childCur]!, p.bufferAt(parentCur), p.bufferAt(1 - parentCur)),
+        ),
+      );
+    }
     this.renderVAOs = [
       this.makeRenderVAO(cornerBuf, this.bufs[0], idxBuf),
       this.makeRenderVAO(cornerBuf, this.bufs[1], idxBuf),
@@ -146,6 +171,36 @@ export class WebGL2Engine {
     attr('i_age', 1, 16);
     attr('i_life', 1, 20);
     attr('i_seed', 1, 24);
+    gl.bindVertexArray(null);
+    return vao;
+  }
+
+  /** Sub-emitter update VAO: child state + parent current & previous slots. */
+  private makeSubUpdateVAO(
+    childBuf: WebGLBuffer,
+    parentCur: WebGLBuffer,
+    parentPrev: WebGLBuffer,
+  ): WebGLVertexArrayObject {
+    const gl = this.gl;
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    const bind = (buf: WebGLBuffer, name: string, size: number, off: number) => {
+      const l = gl.getAttribLocation(this.updateProg, name);
+      if (l < 0) return;
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.enableVertexAttribArray(l);
+      gl.vertexAttribPointer(l, size, gl.FLOAT, false, STRIDE, off);
+    };
+    bind(childBuf, 'i_pos', 2, 0);
+    bind(childBuf, 'i_vel', 2, 8);
+    bind(childBuf, 'i_age', 1, 16);
+    bind(childBuf, 'i_life', 1, 20);
+    bind(childBuf, 'i_seed', 1, 24);
+    bind(parentCur, 'i_pPos', 2, 0);
+    bind(parentCur, 'i_pAge', 1, 16);
+    bind(parentCur, 'i_pLife', 1, 20);
+    bind(parentPrev, 'i_pAgePrev', 1, 16);
+    bind(parentPrev, 'i_pLifePrev', 1, 20);
     gl.bindVertexArray(null);
     return vao;
   }
@@ -206,7 +261,10 @@ export class WebGL2Engine {
     gl.uniform2f(u.get('u_shapeSize')!, p.shapeSize[0], p.shapeSize[1]);
 
     const dst = 1 - this.cur;
-    gl.bindVertexArray(this.updateVAOs[this.cur]!);
+    const vao = this.sub
+      ? this.subVAOs[this.cur]![this.sub.parent.curIndex]!
+      : this.updateVAOs[this.cur]!;
+    gl.bindVertexArray(vao);
     // The generic ARRAY_BUFFER binding must not reference the TF output buffer
     // (WebGL2 forbids a buffer bound to both a TF and a non-TF target). The VAO
     // holds the attribute bindings, so clearing the generic point is safe.
@@ -292,6 +350,7 @@ export class WebGL2Engine {
     gl.deleteProgram(this.renderProg);
     for (const b of this.bufs) gl.deleteBuffer(b);
     for (const v of this.updateVAOs) gl.deleteVertexArray(v);
+    for (const row of this.subVAOs) for (const v of row) gl.deleteVertexArray(v);
     for (const v of this.renderVAOs) gl.deleteVertexArray(v);
     gl.deleteTransformFeedback(this.tf);
     if (this.tex) gl.deleteTexture(this.tex);
