@@ -2,11 +2,38 @@ import { create } from 'zustand';
 import type { Edge, Literal, Node, PylinkaProject, System } from '@pylinka/graph';
 import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { seedProject } from './seed';
+import { autoLayout } from './layout';
+import { RECIPES } from '../recipes/data';
 
 const KEY = 'pylinka.editor.project';
 type XY = { x: number; y: number };
 
+/** Fork a recipe into a fresh, laid-out project (open-in-editor flow, §9). */
+function forkRecipe(slug: string): PylinkaProject | undefined {
+  const recipe = RECIPES.find((r) => r.slug === slug);
+  if (!recipe) return undefined;
+  const project = structuredClone(recipe.project);
+  project.id = crypto.randomUUID();
+  project.name = recipe.title;
+  project.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: autoLayout(project.systems[0]!.graph) };
+  return project;
+}
+
 function load(): PylinkaProject {
+  // ?recipe=<slug> → fork that recipe (open-in-editor), persist, strip the param
+  try {
+    const slug = new URLSearchParams(location.search).get('recipe');
+    if (slug) {
+      const forked = forkRecipe(slug);
+      if (forked) {
+        localStorage.setItem(KEY, JSON.stringify(forked));
+        history.replaceState(null, '', location.pathname);
+        return forked;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) return JSON.parse(raw) as PylinkaProject;

@@ -96,7 +96,7 @@ export function Preview() {
         <span className="font-medium">Preview</span>
         <span className="font-mono text-muted-foreground">{hud}</span>
       </div>
-      <div className="relative bg-black" style={{ height: 300 }}>
+      <div className="relative min-h-[380px] flex-1 bg-black">
         <canvas ref={canvasRef} className="block h-full w-full" onPointerMove={onMove} onPointerLeave={() => (mouseRef.current = null)} />
       </div>
       <div className="flex items-center gap-3 border-b border-border px-3 py-2 text-xs">
@@ -104,7 +104,7 @@ export function Preview() {
         <button className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={() => fxRef.current?.spawnBurst(400)}>Burst</button>
         <span className="text-muted-foreground">move mouse over canvas</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="max-h-56 shrink-0 overflow-y-auto p-3">
         <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Knobs</div>
         {params.length === 0 && <div className="text-xs text-muted-foreground">No knobs. Promote a value or add param.ref nodes.</div>}
         {params.map((p) => {

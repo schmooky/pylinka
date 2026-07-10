@@ -92,7 +92,7 @@ export function App() {
             <Controls showInteractive={false} />
           </ReactFlow>
         </div>
-        <div className="w-[360px] shrink-0 border-l border-border">
+        <div className="w-[460px] shrink-0 border-l border-border">
           <Preview />
         </div>
       </div>

@@ -60,6 +60,12 @@ const groups = ['all', 'trails', 'fire', 'magic', 'ambient', 'ui', 'abstract'];
                     <code class="rounded border border-border px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">{t}</code>
                   ))}
                 </div>
+                <a
+                  href={`/editor?recipe=${r.slug}`}
+                  class="mt-3 flex items-center justify-center rounded-md border border-border py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  Open in editor →
+                </a>
               </div>
             </div>
           ))
