@@ -1,0 +1,197 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description?: string;
+  active: string;
+}
+const { title, description = 'A GPU-driven, node-based particle system for PixiJS.', active } =
+  Astro.props;
+
+const groups: { label: string; items: { href: string; label: string; key: string }[] }[] = [
+  {
+    label: 'Guide',
+    items: [
+      { href: '/', label: 'Introduction', key: 'intro' },
+      { href: '/getting-started', label: 'Getting started', key: 'getting-started' },
+      { href: '/concepts', label: 'Core concepts', key: 'concepts' },
+    ],
+  },
+  {
+    label: 'Reference',
+    items: [
+      { href: '/nodes', label: 'Nodes', key: 'nodes' },
+      { href: '/api', label: 'API', key: 'api' },
+    ],
+  },
+  {
+    label: 'Examples',
+    items: [{ href: '/recipes', label: 'Recipes', key: 'recipes' }],
+  },
+];
+
+const flat = groups.flatMap((g) => g.items);
+const idx = flat.findIndex((i) => i.key === active);
+const prev = idx > 0 ? flat[idx - 1] : undefined;
+const next = idx >= 0 && idx < flat.length - 1 ? flat[idx + 1] : undefined;
+---
+
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9C%A8%3C/text%3E%3C/svg%3E"
+    />
+    <script is:inline>
+      const t = localStorage.getItem('theme');
+      if (t === 'light') document.documentElement.classList.remove('dark');
+      else document.documentElement.classList.add('dark');
+    </script>
+  </head>
+  <body>
+    <!-- Header -->
+    <header
+      class="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+    >
+      <div class="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
+        <a href="/" class="flex items-center gap-2 font-semibold tracking-tight">
+          <span
+            class="grid h-6 w-6 place-items-center rounded-md border border-border bg-card text-[11px]"
+            >✨</span
+          >
+          <span>pylinka</span>
+          <span class="ml-1 hidden rounded border border-border px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground sm:inline">docs</span>
+        </a>
+
+        <div class="ml-auto flex items-center gap-1">
+          <button
+            id="theme-toggle"
+            aria-label="Toggle theme"
+            class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <svg class="hidden h-4 w-4 dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+            <svg class="h-4 w-4 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
+          </button>
+          <a
+            href="https://github.com/schmooky/pylinka"
+            class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            aria-label="GitHub"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.6 2 12.3c0 4.5 2.9 8.3 6.8 9.7.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.4-3.4-1.4-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.3 9.3 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.3 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5 4-1.4 6.8-5.2 6.8-9.7C22 6.6 17.5 2 12 2z"></path></svg>
+          </a>
+        </div>
+      </div>
+
+      <!-- Mobile section menu -->
+      <details class="border-t border-border lg:hidden">
+        <summary class="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-sm text-muted-foreground sm:px-6">
+          <span>Menu</span>
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+        </summary>
+        <nav class="px-4 pb-3 sm:px-6">
+          {
+            groups.map((g) => (
+              <div class="mb-2">
+                <div class="mb-1 mt-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  {g.label}
+                </div>
+                {g.items.map((it) => (
+                  <a
+                    href={it.href}
+                    class:list={[
+                      'block rounded-md px-2 py-1.5 text-sm',
+                      active === it.key ? 'bg-accent text-foreground' : 'text-muted-foreground',
+                    ]}
+                  >
+                    {it.label}
+                  </a>
+                ))}
+              </div>
+            ))
+          }
+        </nav>
+      </details>
+    </header>
+
+    <div class="mx-auto flex max-w-6xl gap-8 px-4 sm:px-6">
+      <!-- Sidebar (desktop) -->
+      <aside class="hidden w-52 shrink-0 lg:block">
+        <nav class="sticky top-20 py-10">
+          {
+            groups.map((g) => (
+              <div class="mb-6">
+                <div class="mb-2 px-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  {g.label}
+                </div>
+                {g.items.map((it) => (
+                  <a
+                    href={it.href}
+                    class:list={[
+                      'block rounded-md px-2 py-1.5 text-sm transition-colors',
+                      active === it.key
+                        ? 'bg-accent font-medium text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    ]}
+                  >
+                    {it.label}
+                  </a>
+                ))}
+              </div>
+            ))
+          }
+        </nav>
+      </aside>
+
+      <!-- Content -->
+      <div class="min-w-0 flex-1 py-10">
+        <article class="prose max-w-2xl">
+          <slot />
+        </article>
+
+        {
+          (prev || next) && (
+            <nav class="mt-14 flex max-w-2xl items-stretch justify-between gap-3 border-t border-border pt-6">
+              {prev ? (
+                <a
+                  href={prev.href}
+                  class="group flex flex-1 flex-col rounded-lg border border-border px-4 py-3 transition-colors hover:bg-accent"
+                >
+                  <span class="text-xs text-muted-foreground">Previous</span>
+                  <span class="text-sm font-medium">{prev.label}</span>
+                </a>
+              ) : (
+                <span class="flex-1" />
+              )}
+              {next ? (
+                <a
+                  href={next.href}
+                  class="group flex flex-1 flex-col items-end rounded-lg border border-border px-4 py-3 text-right transition-colors hover:bg-accent"
+                >
+                  <span class="text-xs text-muted-foreground">Next</span>
+                  <span class="text-sm font-medium">{next.label}</span>
+                </a>
+              ) : (
+                <span class="flex-1" />
+              )}
+            </nav>
+          )
+        }
+      </div>
+    </div>
+
+    <script is:inline>
+      const btn = document.getElementById('theme-toggle');
+      btn?.addEventListener('click', () => {
+        const root = document.documentElement;
+        const dark = root.classList.toggle('dark');
+        localStorage.setItem('theme', dark ? 'dark' : 'light');
+      });
+    </script>
+  </body>
+</html>

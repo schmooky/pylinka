@@ -1,0 +1,79 @@
+---
+import DocsLayout from '../layouts/DocsLayout.astro';
+---
+
+<DocsLayout title="Pylinka — API" active="api">
+  <h1>API</h1>
+  <p class="!text-base !text-muted-foreground">
+    The runtime surface from <code>@pylinka/core</code>. Hot-path methods
+    (<code>update</code>, <code>set</code>, <code>setEmitterPosition</code>, <code>spawnBurst</code>)
+    allocate nothing.
+  </p>
+
+  <h2>createPylinka()</h2>
+  <p>Create a project-level runtime from a project document.</p>
+  <pre><code>function createPylinka(
+  project: PylinkaProject,
+  opts: CreateOptions,
+): Promise&lt;PylinkaRuntime&gt;</code></pre>
+
+  <h3>CreateOptions</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>renderer</code></td><td>pixi Renderer</td><td>backend + device/context derived from it</td></tr>
+      <tr><td><code>device</code></td><td>GPUDevice</td><td>explicit device (headless); excludes <code>renderer</code></td></tr>
+      <tr><td><code>resolveTexture</code></td><td>(asset) ⇒ Texture?</td><td>override texture resolution</td></tr>
+      <tr><td><code>fixedStep</code></td><td>number</td><td>seconds; enables deterministic fixed-step mode</td></tr>
+      <tr><td><code>maxDt</code></td><td>number</td><td>dt clamp, default 0.05</td></tr>
+      <tr><td><code>onDeviceLost</code> / <code>onDeviceRestored</code></td><td>() ⇒ void</td><td>device-loss hooks</td></tr>
+    </tbody>
+  </table>
+
+  <h2>PylinkaRuntime</h2>
+  <pre><code>interface PylinkaRuntime &#123;
+  readonly systems: Record&lt;string, ParticleSystemView&gt;;  // keyed by System.name
+  readonly params: KnobBus;                               // project-wide fan-out
+  update(dtSeconds: number): void;                        // once per rAF tick
+  destroy(): void;
+&#125;</code></pre>
+
+  <h2>ParticleSystemView</h2>
+  <p>A PixiJS container. Add <code>view</code> to a static layer (see Core concepts).</p>
+  <pre><code>interface ParticleSystemView &#123;
+  readonly view: Container;
+  readonly params: KnobBus;
+  update(dtSeconds: number): void;          // no-op if driven via the runtime
+  setEmitterPosition(x: number, y: number): void;
+  follow(target: Container): void;
+  unfollow(): void;
+  spawnBurst(count: number): void;
+  restart(): void;                          // pool + scheduler reset (+ prewarm)
+  readonly stats: &#123; aliveCount: number; overflowCount: number; gpuMs: number | null &#125;;
+  destroy(): void;
+&#125;</code></pre>
+  <p>
+    <code>stats</code> fields are plain numbers refreshed asynchronously — reading them never
+    triggers a GPU readback.
+  </p>
+
+  <h2>KnobBus</h2>
+  <pre><code>interface KnobBus &#123;
+  set(name: string, x: number, y?: number, z?: number, w?: number): void;  // O(1), alloc-free
+  get(name: string): number;   // .x component
+&#125;</code></pre>
+
+  <h2>Single-system helper</h2>
+  <p>When you only need one system, skip the project wrapper:</p>
+  <pre><code>function createParticleSystem(
+  bundle: SystemBundle,
+  opts: CreateOptions,
+): Promise&lt;ParticleSystemView&gt;</code></pre>
+
+  <h2>Device loss</h2>
+  <p>
+    WebGPU device loss is routine on mobile. Pylinka re-acquires the device, rebuilds pipelines from
+    retained compiled sources (no graph recompile), resets pools, and fires
+    <code>onDeviceRestored</code> so you can re-trigger ambient effects.
+  </p>
+</DocsLayout>

@@ -1,0 +1,75 @@
+---
+import DocsLayout from '../layouts/DocsLayout.astro';
+---
+
+<DocsLayout title="Pylinka — Getting started" active="getting-started">
+  <h1>Getting started</h1>
+  <p class="!text-base !text-muted-foreground">
+    Add Pylinka to a PixiJS v8 app and mount your first effect.
+  </p>
+
+  <h2>Install</h2>
+  <p>Pylinka ships as ES modules. The runtime peers on <code>pixi.js@^8</code>.</p>
+  <pre><code>pnpm add @pylinka/core pixi.js</code></pre>
+
+  <h2>Mount a system</h2>
+  <p>
+    A Pylinka <em>project</em> is a JSON document describing one or more particle systems. Author it
+    in the editor or start from a recipe, then load it into your renderer:
+  </p>
+  <pre><code>import &#123; Application &#125; from 'pixi.js';
+import &#123; createPylinka &#125; from '@pylinka/core';
+import project from './sparks.pylinka.json';
+
+const app = new Application();
+await app.init(&#123; preference: 'webgpu', resizeTo: window &#125;);
+
+const pylinka = await createPylinka(project, &#123; renderer: app.renderer &#125;);
+
+// Add the view to a STATIC layer — never a moving sprite (see below).
+const vfx = new Container();
+app.stage.addChild(vfx);
+vfx.addChild(pylinka.systems.sparks.view);
+
+app.ticker.add((ticker) =&gt; pylinka.update(ticker.deltaMS / 1000));</code></pre>
+
+  <p>
+    The backend is derived from the renderer you pass: a WebGPU renderer shares its device, a WebGL
+    renderer uses the WebGL2 simulation in the same context. For headless use, pass an explicit
+    <code>device</code> instead of <code>renderer</code>.
+  </p>
+
+  <h2>Move the emitter, not the view</h2>
+  <p>
+    Simulation is world-space: the emitter position is read only at spawn. To make an effect trail a
+    moving object, drive the emitter — don't reparent the view.
+  </p>
+  <pre><code>// ✅ the view stays in a static layer; the emitter follows the target
+pylinka.systems.sparks.follow(coinSprite);
+
+// ✅ or set the position yourself each frame
+pylinka.systems.sparks.setEmitterPosition(x, y);
+
+// ❌ never do this — it transforms every live particle with the coin
+coinSprite.addChild(pylinka.systems.sparks.view);</code></pre>
+
+  <h2>Tweak values live</h2>
+  <p>
+    Any value promoted to a knob is adjustable at runtime with zero recompilation — the write lands
+    on the next frame:
+  </p>
+  <pre><code>pylinka.params.set('windPower', 40);
+pylinka.params.set('windDir', Math.PI * 0.5);</code></pre>
+
+  <h2>Bursts and lifecycle</h2>
+  <pre><code>const sparks = pylinka.systems.sparks;
+
+sparks.spawnBurst(200);   // add 200 particles next frame
+sparks.restart();         // reset the pool (+ prewarm if configured)
+sparks.destroy();         // release GPU resources</code></pre>
+
+  <p>
+    That's the whole surface for playing an effect. Next, read <a href="/concepts">Core concepts</a>
+    to understand systems, the graph, and knobs, or jump to the full <a href="/api">API</a>.
+  </p>
+</DocsLayout>

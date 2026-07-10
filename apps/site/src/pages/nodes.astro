@@ -1,0 +1,87 @@
+---
+import DocsLayout from '../layouts/DocsLayout.astro';
+import { V1_SCHEMAS, CATALOG_VERSION } from '@pylinka/graph';
+
+const blurbs: Record<string, string> = {
+  input: 'Read particle and emitter state — position, velocity, age, life, time, spawn index.',
+  param: 'Read a project knob by reference.',
+  gen: 'Generators: stable/per-frame randomness and value, colour, and scale curves over life.',
+  math: 'Arithmetic and vector helpers.',
+  field: "Analytic force fields that accumulate into a particle's motion.",
+  shape: 'Spawn shapes, emitter-relative, feeding output.spawnPosition.',
+  output: 'Sinks — where results are written. Every system needs spawnPosition and initLife.',
+  tex: 'Texture selection for rendering.',
+};
+const order = ['input', 'param', 'gen', 'math', 'field', 'shape', 'output', 'tex'] as const;
+
+const byNs = new Map<string, typeof V1_SCHEMAS[number][]>();
+for (const s of V1_SCHEMAS) {
+  const list = byNs.get(s.namespace) ?? [];
+  list.push(s);
+  byNs.set(s.namespace, list);
+}
+const groups = order
+  .filter((ns) => byNs.has(ns))
+  .map((ns) => ({
+    ns,
+    nodes: byNs.get(ns)!.slice().sort((a, b) => a.kind.localeCompare(b.kind)),
+  }));
+
+const sig = (ports: readonly { id: string; type: string }[]) =>
+  ports.map((p) => `${p.id}:${p.type}`).join(', ') || '—';
+---
+
+<DocsLayout title="Pylinka — Nodes" active="nodes">
+  <h1>Nodes</h1>
+  <p class="!text-base !text-muted-foreground">
+    The v{CATALOG_VERSION} node catalog — {V1_SCHEMAS.length} kinds, grouped by namespace. Rendered
+    directly from <code>@pylinka/graph</code>.
+  </p>
+
+  {
+    groups.map((g) => (
+      <section>
+        <h2 id={g.ns}>
+          <code class="!bg-transparent !border-0 !px-0 !text-[0.7em] text-muted-foreground">{g.ns}.*</code>
+        </h2>
+        <p>{blurbs[g.ns]}</p>
+        <div class="not-prose my-4 overflow-hidden rounded-lg border border-border">
+          <table class="w-full text-sm">
+            <tbody>
+              {g.nodes.map((n, i) => (
+                <tr class:list={[i > 0 && 'border-t border-border']}>
+                  <td class="px-3 py-2.5 align-top">
+                    <div class="flex items-center gap-2">
+                      <code class="font-mono text-xs">{n.kind}</code>
+                      {n.impact === 'high' && (
+                        <span class="rounded border border-border px-1.5 text-[10px] text-muted-foreground">high</span>
+                      )}
+                      {n.impact === 'medium' && (
+                        <span class="rounded border border-border px-1.5 text-[10px] text-muted-foreground">med</span>
+                      )}
+                    </div>
+                    <div class="mt-0.5 text-xs text-muted-foreground">{n.label}</div>
+                  </td>
+                  <td class="hidden px-3 py-2.5 align-top font-mono text-[11px] text-muted-foreground sm:table-cell">
+                    <span class="text-foreground/70">in</span> {sig(n.inputs)}
+                    <br />
+                    <span class="text-foreground/70">out</span> {sig(n.outputs)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    ))
+  }
+
+  <h2>Reading a node</h2>
+  <p>
+    Each input port has a default value you can scrub inline or wire from another node's output.
+    Ports are typed; an <code>f32</code> splats into a <code>vec2</code>/<code>vec4</code>, and
+    <code>color</code> interchanges with <code>vec4</code>, but other narrowing needs an explicit
+    <code>math.component</code> or <code>math.swizzle</code>. Nodes tagged <em>med</em>/<em>high</em>
+    cost more on low-tier devices.
+  </p>
+</DocsLayout>

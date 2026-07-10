@@ -1,0 +1,86 @@
+---
+import DocsLayout from '../layouts/DocsLayout.astro';
+---
+
+<DocsLayout title="Pylinka — Core concepts" active="concepts">
+  <h1>Core concepts</h1>
+  <p class="!text-base !text-muted-foreground">
+    The handful of ideas behind every Pylinka effect.
+  </p>
+
+  <h2>Project → System → Graph</h2>
+  <p>
+    A <strong>project</strong> is the top-level document. It holds one or more <strong>systems</strong>,
+    a set of project-wide <strong>knobs</strong>, and any texture assets. Each system is one particle
+    system: a graph, an emitter, a pool capacity, and a blend mode.
+  </p>
+  <p>
+    A <strong>graph</strong> is a typed, acyclic dataflow of <strong>nodes</strong> joined by
+    <strong>edges</strong>. Ports carry one of five types — <code>f32</code>, <code>vec2</code>,
+    <code>vec4</code>, <code>color</code>, <code>bool</code>. A system is well-formed when it has
+    exactly one <code>output.spawnPosition</code> and one <code>output.initLife</code>.
+  </p>
+
+  <h2>Values vs. structure</h2>
+  <p>Every edit falls into one of two buckets, and this is what makes Pylinka feel instant:</p>
+  <table>
+    <thead>
+      <tr><th>Kind of edit</th><th>Example</th><th>Cost</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Value</td><td>drag a number, change a color, move a knob</td><td>one uniform write, next frame</td></tr>
+      <tr><td>Structure</td><td>add/remove a node or edge, change an ease</td><td>recompile (~30&nbsp;ms, debounced)</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Unconnected input values are lowered to GPU uniforms, so scrubbing them never recompiles. Only
+    changes to the <em>shape</em> of the generated code do.
+  </p>
+
+  <h2>Knobs</h2>
+  <p>
+    Any value can be <strong>promoted to a knob</strong> — a named control like <code>windPower</code>
+    with a range and a linear or log scale. Knobs are shared across a project and driven at runtime:
+  </p>
+  <pre><code>pylinka.params.set('windPower', 40);   // fans out to every system using it</code></pre>
+  <p>Promotion is free: the uniform slot already exists, so it never triggers a recompile.</p>
+
+  <h2>World space &amp; moving emitters</h2>
+  <p>
+    Particles live in the view's local space. The emitter position is consumed only at spawn, so
+    moving the emitter changes where new particles are born while existing ones stay put — a coin
+    flying across the board leaves sparks that hang and fade in place.
+  </p>
+  <p>
+    This is why you attach the view to a <em>static</em> layer and let the target drive the emitter
+    via <code>follow()</code>. Reparenting the view onto a moving sprite transforms every live
+    particle and defeats world-space simulation.
+  </p>
+
+  <h2>Emission</h2>
+  <p>Emitters run in one of three modes:</p>
+  <ul>
+    <li><strong>flow</strong> — a steady <code>rate</code> (particles/second), optionally plus <code>rateOverDistance</code> (particles per pixel the emitter travels) for gap-free trails.</li>
+    <li><strong>burst</strong> — a <code>count</code> every <code>interval</code> seconds.</li>
+    <li><strong>once</strong> — a single burst on start.</li>
+  </ul>
+  <p>
+    Sub-frame spawn interpolation places particles along the emitter's path within a frame, so fast
+    trails come out continuous rather than clumped.
+  </p>
+
+  <h2>Pools &amp; lifetime</h2>
+  <p>
+    Each system pre-allocates a fixed <code>capacity</code> of particle slots. When a particle's age
+    reaches its life it dies automatically — there is no kill node for end-of-life. If emission
+    outruns capacity, new particles are dropped (an <code>overflowCount</code> ticks up); the editor
+    warns when <code>rate × maxLife</code> exceeds capacity.
+  </p>
+
+  <h2>Determinism</h2>
+  <p>
+    Pylinka uses an integer-hash PRNG. Runs are bit-reproducible on the same device, driver, and
+    fixed-step mode. Across different GPUs, float math diverges — expect statistical similarity, not
+    identical trajectories. There are no cross-client sync guarantees.
+  </p>
+</DocsLayout>
