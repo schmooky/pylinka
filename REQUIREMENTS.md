@@ -1231,12 +1231,12 @@ New system seeds the **default well-formed graph**: `shape.point → output.spaw
 - [x] **G5** `slots.ts` — §12.2; test against the golden slot table (§14.2).
 
 **M1.2 — `@pylinka/compiler`**
-- [ ] **C1** Live-pruning, eval-time inference (incl. V007/V008), deterministic topo sort.
-- [ ] **C2** `CodegenCtx` (WGSL): temps, valueSlot/knobSlot, stable/frame random indices, safe helpers, `line`.
-- [ ] **C3** Scaffold assembly from §13.5–13.6 (string templates in `scaffold/`, one source of truth).
-- [ ] **C4** Codegen for every G2 node; ease catalog §13.9.
-- [ ] **C5** Golden test: coin-spark-trail → byte-compare emit/update/UniformLayout vs `test/golden/` (seeded from §14). Plus per-node snippet goldens.
-- [ ] **C6** Determinism test (run twice, byte-equal) + error paths (each V-code surfaces).
+- [x] **C1** Live-pruning, eval-time inference (incl. V007/V008), deterministic topo sort.
+- [x] **C2** `CodegenCtx` (WGSL): temps, valueSlot/knobSlot, stable/frame random indices, safe helpers, `line`.
+- [x] **C3** Scaffold assembly from §13.5–13.6 (string templates in `scaffold/`, one source of truth).
+- [x] **C4** Codegen for every G2 node; ease catalog §13.9.
+- [x] **C5** Golden test: coin-spark-trail → byte-compare emit/update/UniformLayout vs `test/golden/` (seeded from §14). Plus per-node snippet goldens.
+- [x] **C6** Determinism test (run twice, byte-equal) + error paths (each V-code surfaces).
 
 **M1.3 — `@pylinka/core`**
 - [ ] **R1** `BackendProvider` (webgpu only): device from pixi renderer or explicit; `timestamp-query` detection.

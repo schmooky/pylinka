@@ -1,0 +1,29 @@
+{
+  "name": "@pylinka/compiler",
+  "version": "0.0.0",
+  "description": "Pylinka compiler: SystemBundle → backend-neutral IR → GPU program codegen (WGSL). Zero runtime deps.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pylinka/graph": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

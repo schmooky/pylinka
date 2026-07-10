@@ -49,6 +49,12 @@ importers:
         specifier: ^4.0.0
         version: 4.3.2
 
+  packages/compiler:
+    dependencies:
+      '@pylinka/graph':
+        specifier: workspace:*
+        version: link:../graph
+
   packages/graph: {}
 
 packages:
