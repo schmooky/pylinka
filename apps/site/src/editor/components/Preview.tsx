@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createParticles, type AtlasOptions, type ParticlesHandle } from '@pylinka/core/webgl';
+import type { System } from '@pylinka/graph';
 import { useEditor } from '../store';
 import { frameSize, type EditorProject } from '../types';
 import { Assets } from './Assets';
@@ -13,8 +14,9 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-async function buildAtlas(proj: EditorProject): Promise<AtlasOptions | undefined> {
-  const t = (proj.textures ?? []).find((x) => x.id === proj.activeTextureId);
+async function buildAtlas(proj: EditorProject, sys: System): Promise<AtlasOptions | undefined> {
+  const texId = (proj.systemTextures ?? {})[sys.id];
+  const t = texId ? (proj.textures ?? []).find((x) => x.id === texId) : undefined;
   if (!t) return undefined;
   const image = await loadImage(t.src);
   const { frameW, frameH } = frameSize(t);
@@ -27,7 +29,7 @@ export function Preview() {
   const texRev = useEditor((s) => s.texRev);
   const params = useEditor((s) => s.project.params);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const fxRef = useRef<ParticlesHandle | null>(null);
+  const fxRef = useRef<ParticlesHandle[]>([]);
   const projRef = useRef(project);
   projRef.current = project;
 
@@ -41,28 +43,37 @@ export function Preview() {
   knobsRef.current = knobs;
   const [tab, setTab] = useState<'knobs' | 'assets'>('knobs');
 
-  // (re)create the particle handle, loading the active texture atlas if any
+  // (re)create one particle handle per ENABLED system; only the first clears so the
+  // rest composite on top (multi-emitter). Each carries its own atlas texture.
   const recreate = async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    fxRef.current?.destroy();
-    fxRef.current = null;
+    for (const h of fxRef.current) h.destroy();
+    fxRef.current = [];
     const proj = projRef.current;
-    let atlas: AtlasOptions | undefined;
-    try {
-      atlas = await buildAtlas(proj);
-    } catch {
-      /* texture failed to load → soft sprite */
+    const enabled = proj.systems.filter((s) => s.enabled);
+    const handles: ParticlesHandle[] = [];
+    for (let i = 0; i < enabled.length; i++) {
+      const sys = enabled[i]!;
+      let atlas: AtlasOptions | undefined;
+      try {
+        atlas = await buildAtlas(proj, sys);
+      } catch {
+        /* texture failed to load → soft sprite */
+      }
+      try {
+        const h = createParticles(canvas, proj, { systemName: sys.name, ...(atlas ? { atlas } : {}) });
+        h.autoClear = i === 0;
+        for (const [n, v] of Object.entries(knobsRef.current)) h.setKnob(n, v);
+        handles.push(h);
+      } catch (e) {
+        setHud(String(e));
+      }
     }
-    try {
-      fxRef.current = createParticles(canvas, proj, atlas ? { atlas } : {});
-      for (const [n, v] of Object.entries(knobsRef.current)) fxRef.current.setKnob(n, v);
-    } catch (e) {
-      setHud(String(e));
-    }
+    fxRef.current = handles;
   };
 
-  // init once: size canvas, seed knobs, start the loop, create the handle
+  // init once: size canvas, seed knobs, start the loop, create the handles
   useEffect(() => {
     const canvas = canvasRef.current!;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -89,39 +100,47 @@ export function Preview() {
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
       t += dt;
-      const fx = fxRef.current;
-      if (fx) {
-        if (mouseRef.current) fx.setEmitter(mouseRef.current[0], mouseRef.current[1]);
+      const handles = fxRef.current;
+      if (handles.length) {
+        let ex: number, ey: number;
+        if (mouseRef.current) [ex, ey] = mouseRef.current;
         else if (orbitRef.current) {
-          const cx = canvas.width / 2, cy = canvas.height / 2;
           const r = Math.min(canvas.width, canvas.height) * 0.28;
-          fx.setEmitter(cx + Math.cos(t * 1.8) * r, cy + Math.sin(t * 1.8) * r);
-        } else fx.setEmitter(canvas.width / 2, canvas.height / 2);
-        fx.update(dt);
+          ex = canvas.width / 2 + Math.cos(t * 1.8) * r;
+          ey = canvas.height / 2 + Math.sin(t * 1.8) * r;
+        } else { ex = canvas.width / 2; ey = canvas.height / 2; }
+        let alive = 0;
+        for (const fx of handles) { fx.setEmitter(ex, ey); fx.update(dt); }
         acc += dt; frames++;
-        if (acc >= 0.5) { setHud(`${Math.round(frames / acc)} fps · ${fx.aliveCount().toLocaleString()} alive`); acc = 0; frames = 0; }
+        if (acc >= 0.5) {
+          for (const fx of handles) alive += fx.aliveCount();
+          setHud(`${Math.round(frames / acc)} fps · ${alive.toLocaleString()} alive`);
+          acc = 0; frames = 0;
+        }
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-    return () => { cancelAnimationFrame(raf); ro.disconnect(); fxRef.current?.destroy(); fxRef.current = null; };
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      for (const h of fxRef.current) h.destroy();
+      fxRef.current = [];
+    };
   }, []);
 
-  // texture set changed → full re-create (atlas is a construction-time input)
+  // texture/system set changed → full re-create (atlas + system count are construction-time inputs)
   const firstTex = useRef(true);
   useEffect(() => {
-    if (firstTex.current) {
-      firstTex.current = false;
-      return; // the init effect already created the handle
-    }
+    if (firstTex.current) { firstTex.current = false; return; }
     void recreate();
   }, [texRev]);
 
-  // graph/value change → live re-apply (or re-create on capacity change)
+  // graph/value change → live re-apply to each handle (or re-create on capacity change)
   useEffect(() => {
-    const fx = fxRef.current;
-    if (!fx) return;
-    if (!fx.apply(project)) void recreate();
+    const handles = fxRef.current;
+    if (!handles.length) return;
+    if (!handles.every((fx) => fx.apply(project))) void recreate();
   }, [rev]);
 
   const onMove = (e: React.PointerEvent) => {
@@ -142,7 +161,7 @@ export function Preview() {
       </div>
       <div className="flex items-center gap-3 border-b border-border px-3 py-2 text-xs">
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={orbit} onChange={(e) => setOrbit(e.target.checked)} /> orbit</label>
-        <button className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={() => fxRef.current?.spawnBurst(400)}>Burst</button>
+        <button className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={() => fxRef.current.forEach((h) => h.spawnBurst(400))}>Burst</button>
         <span className="text-muted-foreground">move mouse over canvas</span>
       </div>
       <div className="flex border-b border-border text-xs">
@@ -174,7 +193,7 @@ export function Preview() {
                     onChange={(e) => {
                       const v = Number(e.target.value);
                       setKnobs((k) => ({ ...k, [p.name]: v }));
-                      fxRef.current?.setKnob(p.name, v);
+                      fxRef.current.forEach((h) => h.setKnob(p.name, v));
                     }} />
                 </div>
               );

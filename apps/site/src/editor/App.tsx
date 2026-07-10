@@ -14,11 +14,13 @@ import { toFlow } from './graphAdapter';
 import { PylinkaNode } from './components/PylinkaNode';
 import { Palette } from './components/Palette';
 import { Preview } from './components/Preview';
+import { Systems } from './components/Systems';
 
 const nodeTypes = { pylinka: PylinkaNode };
 
 export function App() {
   const project = useEditor((s) => s.project);
+  const activeSystemId = useEditor((s) => s.activeSystemId);
   const selectedNodeId = useEditor((s) => s.selectedNodeId);
   const moveNode = useEditor((s) => s.moveNode);
   const connect = useEditor((s) => s.connect);
@@ -56,18 +58,19 @@ export function App() {
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
 
-  // rebuild flow only when graph STRUCTURE changes (not on value scrubs / drags)
+  // rebuild flow only when the active graph's STRUCTURE changes (not on value scrubs / drags)
   const structureSig = useMemo(() => {
-    const g = project.systems[0]!.graph;
+    const g = (project.systems.find((s) => s.id === activeSystemId) ?? project.systems[0]!).graph;
     return JSON.stringify({
+      sys: activeSystemId,
       n: g.nodes.map((n) => [n.id, n.kind]),
       e: g.edges.map((e) => [e.id, e.from.nodeId, e.from.portId, e.to.nodeId, e.to.portId]),
       p: project.params.map((p) => p.id),
     });
-  }, [project]);
+  }, [project, activeSystemId]);
 
   useEffect(() => {
-    const f = toFlow(project, useEditor.getState().positions, useEditor.getState().selectedNodeId);
+    const f = toFlow(project, useEditor.getState().positions, useEditor.getState().selectedNodeId, activeSystemId);
     setRfNodes(f.nodes);
     setRfEdges(f.edges);
   }, [structureSig]);
@@ -106,7 +109,9 @@ export function App() {
 
       <div className="flex min-h-0 flex-1">
         <Palette />
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Systems />
+          <div className="min-h-0 flex-1">
           <ReactFlow
             nodes={rfNodes}
             edges={rfEdges}
@@ -126,6 +131,7 @@ export function App() {
             <Background gap={22} color="color-mix(in oklab, var(--color-border) 70%, transparent)" />
             <Controls showInteractive={false} />
           </ReactFlow>
+          </div>
         </div>
         <div className="w-[460px] shrink-0 border-l border-border">
           <Preview />

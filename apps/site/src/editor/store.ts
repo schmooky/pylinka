@@ -9,14 +9,26 @@ import type { EditorProject, EditorTexture } from './types';
 const KEY = 'pylinka.editor.project';
 type XY = { x: number; y: number };
 
+/** Back-compat + invariants: a project always has systemTextures + an active system. */
+function normalize(p: EditorProject): EditorProject {
+  p.systemTextures = p.systemTextures ?? {};
+  // migrate the old single active-texture field onto the first system
+  const legacy = (p as { activeTextureId?: string | null }).activeTextureId;
+  if (legacy && p.systems[0] && !(p.systems[0].id in p.systemTextures)) {
+    p.systemTextures[p.systems[0].id] = legacy;
+  }
+  delete (p as { activeTextureId?: string | null }).activeTextureId;
+  return p;
+}
+
 function forkRecipe(slug: string): EditorProject | undefined {
   const recipe = RECIPES.find((r) => r.slug === slug);
   if (!recipe) return undefined;
-  const project = structuredClone(recipe.project) as EditorProject;
+  const project = normalize(structuredClone(recipe.project) as EditorProject);
   project.id = crypto.randomUUID();
   project.name = recipe.title;
   project.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: autoLayout(project.systems[0]!.graph) };
-  // coin recipes carry an atlas descriptor → seed a texture so the editor shows it
+  // coin recipes carry an atlas descriptor → seed a texture bound to the system
   if (recipe.atlas) {
     const t: EditorTexture = {
       id: crypto.randomUUID(),
@@ -32,7 +44,7 @@ function forkRecipe(slug: string): EditorProject | undefined {
       pick: recipe.atlas.pick,
     };
     project.textures = [t];
-    project.activeTextureId = t.id;
+    project.systemTextures = { [project.systems[0]!.id]: t.id };
   }
   return project;
 }
@@ -53,29 +65,62 @@ function load(): EditorProject {
   }
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw) as EditorProject;
+    if (raw) return normalize(JSON.parse(raw) as EditorProject);
   } catch {
     /* ignore */
   }
-  return seedProject() as EditorProject;
+  return normalize(seedProject() as EditorProject);
 }
 
-function nextNodeId(sys: System): string {
+/** Global-unique node id across ALL systems (positions are keyed by bare node id). */
+function nextNodeId(p: EditorProject): string {
   let max = 0;
-  for (const n of sys.graph.nodes) {
-    const m = /^n(\d+)$/.exec(n.id);
-    if (m) max = Math.max(max, Number(m[1]));
-  }
+  for (const sys of p.systems)
+    for (const n of sys.graph.nodes) {
+      const m = /^n(\d+)$/.exec(n.id);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
   return `n${max + 1}`;
+}
+
+/** A simple upward fountain, node ids starting at `base` (kept globally unique). */
+function makeSystem(name: string, base: number): System {
+  const id = (k: number) => `n${base + k}`;
+  return {
+    id: crypto.randomUUID(), name, capacity: 4000, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 300, rateOverDistance: 1.2 },
+    graph: {
+      nodes: [
+        { id: id(0), kind: 'shape.point', values: { offset: { t: 'vec2', v: [0, 0] } } },
+        { id: id(1), kind: 'output.spawnPosition' },
+        { id: id(2), kind: 'gen.randomRange', values: { min: { t: 'f32', v: 0.8 }, max: { t: 'f32', v: 1.6 } } },
+        { id: id(3), kind: 'output.initLife' },
+        { id: id(4), kind: 'gen.randomVec2', values: { min: { t: 'vec2', v: [-60, -300] }, max: { t: 'vec2', v: [60, -380] } } },
+        { id: id(5), kind: 'output.initVelocity' },
+        { id: id(6), kind: 'field.gravity', values: { g: { t: 'vec2', v: [0, 420] } } },
+        { id: id(7), kind: 'output.addForce' },
+        { id: id(8), kind: 'gen.scaleOverLife', structural: { ease: 'power2.out' }, values: { from: { t: 'f32', v: 1.2 }, to: { t: 'f32', v: 0 } } },
+        { id: id(9), kind: 'output.writeScale' },
+      ],
+      edges: [
+        { id: `e${base}a`, from: { nodeId: id(0), portId: 'pos' }, to: { nodeId: id(1), portId: 'pos' } },
+        { id: `e${base}b`, from: { nodeId: id(2), portId: 'out' }, to: { nodeId: id(3), portId: 'life' } },
+        { id: `e${base}c`, from: { nodeId: id(4), portId: 'out' }, to: { nodeId: id(5), portId: 'vel' } },
+        { id: `e${base}d`, from: { nodeId: id(6), portId: 'force' }, to: { nodeId: id(7), portId: 'force' } },
+        { id: `e${base}e`, from: { nodeId: id(8), portId: 'out' }, to: { nodeId: id(9), portId: 'scale' } },
+      ],
+    },
+  };
 }
 
 interface EditorState {
   project: EditorProject;
   positions: Record<string, XY>;
+  activeSystemId: string;
   selectedNodeId: string | null;
   /** graph/sim changes (preview re-applies live) */
   rev: number;
-  /** texture-set changes (preview re-creates the engine) */
+  /** texture/system-set changes (preview re-creates the engines) */
   texRev: number;
   system(): System;
   snapshot(): EditorProject;
@@ -88,6 +133,13 @@ interface EditorState {
   deleteEdge(id: string): void;
   select(id: string | null): void;
   rename(name: string): void;
+  // systems (emitters)
+  setActiveSystem(id: string): void;
+  addSystem(): void;
+  removeSystem(id: string): void;
+  renameSystem(id: string, name: string): void;
+  toggleSystem(id: string): void;
+  // textures (bound to the active system)
   addTexture(tex: Omit<EditorTexture, 'id'>): void;
   removeTexture(id: string): void;
   setActiveTexture(id: string | null): void;
@@ -98,9 +150,9 @@ interface EditorState {
 
 const initial = load();
 
-function persist(project: EditorProject, positions: Record<string, XY>) {
+function persist(project: EditorProject, positions: Record<string, XY>, activeSystemId: string) {
   const out = structuredClone(project);
-  out.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: positions };
+  out.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: positions, activeSystemId };
   try {
     localStorage.setItem(KEY, JSON.stringify(out));
   } catch {
@@ -109,43 +161,56 @@ function persist(project: EditorProject, positions: Record<string, XY>) {
 }
 
 export const useEditor = create<EditorState>((set, get) => {
-  const commit = (mutate: (p: EditorProject) => void, bumpTex = false) => {
+  const activeSysOf = (p: EditorProject): System =>
+    p.systems.find((s) => s.id === get().activeSystemId) ?? p.systems[0]!;
+
+  const commit = (mutate: (p: EditorProject, sys: System) => void, bumpTex = false) => {
     set((s) => {
       const project = structuredClone(s.project);
-      mutate(project);
+      mutate(project, activeSysOf(project));
       project.updatedAt = new Date().toISOString();
-      persist(project, s.positions);
+      persist(project, s.positions, s.activeSystemId);
       return { project, rev: s.rev + 1, ...(bumpTex ? { texRev: s.texRev + 1 } : {}) };
     });
   };
 
-  const loadProject = (project: EditorProject) => {
+  const loadProject = (raw: EditorProject) => {
+    const project = normalize(raw);
+    const activeSystemId =
+      project.editor?.activeSystemId && project.systems.some((s) => s.id === project.editor!.activeSystemId)
+        ? project.editor.activeSystemId
+        : project.systems[0]!.id;
     const positions =
       project.editor?.nodePositions && Object.keys(project.editor.nodePositions).length
         ? { ...project.editor.nodePositions }
-        : autoLayout(project.systems[0]!.graph);
-    persist(project, positions);
-    set((s) => ({ project, positions, rev: s.rev + 1, texRev: s.texRev + 1, selectedNodeId: null }));
+        : project.systems.reduce<Record<string, XY>>((acc, s) => Object.assign(acc, autoLayout(s.graph)), {});
+    persist(project, positions, activeSystemId);
+    set((s) => ({ project, positions, activeSystemId, rev: s.rev + 1, texRev: s.texRev + 1, selectedNodeId: null }));
   };
+
+  const initActive =
+    initial.editor?.activeSystemId && initial.systems.some((s) => s.id === initial.editor!.activeSystemId)
+      ? initial.editor.activeSystemId
+      : initial.systems[0]!.id;
 
   return {
     project: initial,
     positions: { ...(initial.editor?.nodePositions ?? {}) },
+    activeSystemId: initActive,
     selectedNodeId: null,
     rev: 0,
     texRev: 0,
-    system: () => get().project.systems[0]!,
+    system: () => activeSysOf(get().project),
     snapshot: () => {
       const out = structuredClone(get().project);
-      out.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: get().positions };
+      out.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: get().positions, activeSystemId: get().activeSystemId };
       return out;
     },
 
     addNode(kind, x, y) {
       let newId = '';
-      commit((p) => {
-        const sys = p.systems[0]!;
-        newId = nextNodeId(sys);
+      commit((p, sys) => {
+        newId = nextNodeId(p);
         const schema = getSchema(V1_CATALOG, kind);
         const values: Record<string, Literal> = {};
         for (const port of schema?.inputs ?? [])
@@ -157,7 +222,7 @@ export const useEditor = create<EditorState>((set, get) => {
         sys.graph.nodes.push(node);
       });
       set((s) => ({ positions: { ...s.positions, [newId]: { x, y } }, selectedNodeId: newId }));
-      persist(get().project, get().positions);
+      persist(get().project, get().positions, get().activeSystemId);
     },
 
     moveNode(id, x, y) {
@@ -165,8 +230,8 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     setValue(nodeId, portId, value) {
-      commit((p) => {
-        const node = p.systems[0]!.graph.nodes.find((n) => n.id === nodeId);
+      commit((_p, sys) => {
+        const node = sys.graph.nodes.find((n) => n.id === nodeId);
         if (!node) return;
         node.values = node.values ?? {};
         node.values[portId] = value;
@@ -174,8 +239,8 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     setStructural(nodeId, key, value) {
-      commit((p) => {
-        const node = p.systems[0]!.graph.nodes.find((n) => n.id === nodeId);
+      commit((_p, sys) => {
+        const node = sys.graph.nodes.find((n) => n.id === nodeId);
         if (!node) return;
         node.structural = node.structural ?? {};
         node.structural[key] = value;
@@ -183,16 +248,16 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     connect(from, to) {
-      commit((p) => {
-        const g = p.systems[0]!.graph;
+      commit((_p, sys) => {
+        const g = sys.graph;
         g.edges = g.edges.filter((e) => !(e.to.nodeId === to.nodeId && e.to.portId === to.portId));
         g.edges.push({ id: `e${Date.now()}_${Math.floor(Math.random() * 1e4)}`, from, to });
       });
     },
 
     deleteNode(id) {
-      commit((p) => {
-        const g = p.systems[0]!.graph;
+      commit((_p, sys) => {
+        const g = sys.graph;
         g.nodes = g.nodes.filter((n) => n.id !== id);
         g.edges = g.edges.filter((e) => e.from.nodeId !== id && e.to.nodeId !== id);
       });
@@ -200,9 +265,8 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     deleteEdge(id) {
-      commit((p) => {
-        const g = p.systems[0]!.graph;
-        g.edges = g.edges.filter((e) => e.id !== id);
+      commit((_p, sys) => {
+        sys.graph.edges = sys.graph.edges.filter((e) => e.id !== id);
       });
     },
 
@@ -216,24 +280,76 @@ export const useEditor = create<EditorState>((set, get) => {
       });
     },
 
+    setActiveSystem(id) {
+      if (!get().project.systems.some((s) => s.id === id)) return;
+      set({ activeSystemId: id, selectedNodeId: null });
+      persist(get().project, get().positions, id);
+    },
+
+    addSystem() {
+      const p0 = get().project;
+      const base = Number(/\d+/.exec(nextNodeId(p0))?.[0] ?? '1');
+      const n = p0.systems.length + 1;
+      const sys = makeSystem(`emitter ${n}`, base);
+      const positions = autoLayout(sys.graph);
+      set((s) => {
+        const project = structuredClone(s.project);
+        project.systems.push(sys);
+        project.updatedAt = new Date().toISOString();
+        const merged = { ...s.positions, ...positions };
+        persist(project, merged, sys.id);
+        return { project, positions: merged, activeSystemId: sys.id, selectedNodeId: null, rev: s.rev + 1, texRev: s.texRev + 1 };
+      });
+    },
+
+    removeSystem(id) {
+      const p = get().project;
+      if (p.systems.length <= 1) return; // keep at least one emitter
+      set((s) => {
+        const project = structuredClone(s.project);
+        project.systems = project.systems.filter((x) => x.id !== id);
+        if (project.systemTextures) delete project.systemTextures[id];
+        project.updatedAt = new Date().toISOString();
+        const activeSystemId = s.activeSystemId === id ? project.systems[0]!.id : s.activeSystemId;
+        persist(project, s.positions, activeSystemId);
+        return { project, activeSystemId, selectedNodeId: null, rev: s.rev + 1, texRev: s.texRev + 1 };
+      });
+    },
+
+    renameSystem(id, name) {
+      commit((p) => {
+        const sys = p.systems.find((x) => x.id === id);
+        if (sys) sys.name = name;
+      });
+    },
+
+    toggleSystem(id) {
+      commit((p) => {
+        const sys = p.systems.find((x) => x.id === id);
+        if (sys) sys.enabled = !sys.enabled;
+      }, true);
+    },
+
     addTexture(tex) {
       const id = crypto.randomUUID();
-      commit((p) => {
+      commit((p, sys) => {
         p.textures = [...(p.textures ?? []), { ...tex, id }];
-        p.activeTextureId = id;
+        p.systemTextures = { ...(p.systemTextures ?? {}), [sys.id]: id };
       }, true);
     },
 
     removeTexture(id) {
       commit((p) => {
         p.textures = (p.textures ?? []).filter((t) => t.id !== id);
-        if (p.activeTextureId === id) p.activeTextureId = null;
+        p.systemTextures = Object.fromEntries(
+          Object.entries(p.systemTextures ?? {}).map(([k, v]) => [k, v === id ? null : v]),
+        );
       }, true);
     },
 
     setActiveTexture(id) {
-      commit((p) => {
-        p.activeTextureId = id;
+      commit((p, sys) => {
+        p.systemTextures = { ...(p.systemTextures ?? {}), [sys.id]: id };
       }, true);
     },
 

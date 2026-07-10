@@ -7,8 +7,9 @@ export function toFlow(
   project: PylinkaProject,
   positions: Record<string, { x: number; y: number }>,
   selectedNodeId: string | null,
+  activeSystemId?: string,
 ): { nodes: PylinkaFlowNode[]; edges: RFEdge[] } {
-  const sys = project.systems[0]!;
+  const sys = project.systems.find((s) => s.id === activeSystemId) ?? project.systems[0]!;
   const nodes: PylinkaFlowNode[] = sys.graph.nodes.map((n) => ({
     id: n.id,
     type: 'pylinka',

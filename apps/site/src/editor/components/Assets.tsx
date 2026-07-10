@@ -19,11 +19,13 @@ export function Assets() {
   // NB: select the raw ref — `?? []` would mint a new array each getSnapshot and
   // send useSyncExternalStore into an infinite re-render (React #185).
   const textures = useEditor((s) => s.project.textures) ?? EMPTY;
-  const activeId = useEditor((s) => s.project.activeTextureId ?? null);
+  const activeId = useEditor((s) => (s.project.systemTextures ?? {})[s.activeSystemId] ?? null);
+  const activeSystemName = useEditor((s) => s.system().name);
   const addTexture = useEditor((s) => s.addTexture);
   const removeTexture = useEditor((s) => s.removeTexture);
   const setActive = useEditor((s) => s.setActiveTexture);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [sheet, setSheet] = useState(false);
 
   const onFile = async (file: File) => {
     const src = await new Promise<string>((res) => {
@@ -32,6 +34,7 @@ export function Assets() {
       r.readAsDataURL(file);
     });
     const img = await loadImage(src);
+    setSheet(false);
     setDraft({
       name: file.name.replace(/\.[^.]+$/, ''),
       src,
@@ -44,6 +47,13 @@ export function Assets() {
       play: 'loop',
       pick: 'per-particle',
     });
+  };
+
+  // committing a draft: a single sprite is just a 1×1 grid
+  const commitDraft = () => {
+    if (!draft) return;
+    addTexture(sheet ? draft : { ...draft, cols: 1, rows: 1, pad: 0 });
+    setDraft(null);
   };
 
   const addCoins = async () => {
@@ -59,7 +69,9 @@ export function Assets() {
 
   return (
     <div className="text-xs">
-      <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Textures</div>
+      <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        Texture for “{activeSystemName}”
+      </div>
 
       {/* active list */}
       <label className="mb-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent">
@@ -94,32 +106,55 @@ export function Assets() {
               <img src={draft.src} alt="" className="h-10 w-10 rounded border border-border object-cover" style={{ imageRendering: 'pixelated' }} />
               <input className="num flex-1" style={{ width: 'auto' }} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
             </div>
-            <div className="text-[10px] text-muted-foreground">
-              image {draft.width}×{draft.height} · each frame ≈ {fw}×{fh}px · rows = sequences, columns = frames
+
+            {/* single sprite vs sprite sheet */}
+            <div className="flex overflow-hidden rounded-md border border-border">
+              {([['single', 'Single sprite'], ['sheet', 'Sprite sheet']] as const).map(([k, label]) => {
+                const on = (k === 'sheet') === sheet;
+                return (
+                  <button key={k} onClick={() => setSheet(k === 'sheet')}
+                    className={`flex-1 py-1.5 ${on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
+                    {label}
+                  </button>
+                );
+              })}
             </div>
-            <div className="grid grid-cols-3 gap-1.5">
-              <Field label="cols" v={draft.cols} on={(n) => setDraft({ ...draft, cols: n })} />
-              <Field label="rows" v={draft.rows} on={(n) => setDraft({ ...draft, rows: n })} />
-              <Field label="pad" v={draft.pad} on={(n) => setDraft({ ...draft, pad: n })} />
-              <Field label="fps" v={draft.fps} on={(n) => setDraft({ ...draft, fps: n })} />
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[9px] text-muted-foreground">play</span>
-                <select className="sel" value={draft.play} onChange={(e) => setDraft({ ...draft, play: e.target.value as 'loop' | 'once' })}>
-                  <option value="loop">loop</option>
-                  <option value="once">once</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[9px] text-muted-foreground">pick</span>
-                <select className="sel" value={draft.pick} onChange={(e) => setDraft({ ...draft, pick: e.target.value as 'per-particle' | 'per-spawn' })}>
-                  <option value="per-particle">per particle</option>
-                  <option value="per-spawn">per spawn</option>
-                </select>
-              </label>
-            </div>
+
+            {!sheet ? (
+              <div className="text-[10px] text-muted-foreground">
+                image {draft.width}×{draft.height} — used whole, one sprite per particle.
+              </div>
+            ) : (
+              <>
+                <div className="text-[10px] text-muted-foreground">
+                  each frame ≈ {fw}×{fh}px · rows = sequences, columns = frames
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <Field label="cols" v={draft.cols} on={(n) => setDraft({ ...draft, cols: n })} />
+                  <Field label="rows" v={draft.rows} on={(n) => setDraft({ ...draft, rows: n })} />
+                  <Field label="pad" v={draft.pad} on={(n) => setDraft({ ...draft, pad: n })} />
+                  <Field label="fps" v={draft.fps} on={(n) => setDraft({ ...draft, fps: n })} />
+                  <label className="flex flex-col gap-0.5">
+                    <span className="text-[9px] text-muted-foreground">play</span>
+                    <select className="sel" value={draft.play} onChange={(e) => setDraft({ ...draft, play: e.target.value as 'loop' | 'once' })}>
+                      <option value="loop">loop</option>
+                      <option value="once">once</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-0.5">
+                    <span className="text-[9px] text-muted-foreground">pick</span>
+                    <select className="sel" value={draft.pick} onChange={(e) => setDraft({ ...draft, pick: e.target.value as 'per-particle' | 'per-spawn' })}>
+                      <option value="per-particle">per particle</option>
+                      <option value="per-spawn">per spawn</option>
+                    </select>
+                  </label>
+                </div>
+              </>
+            )}
+
             <div className="flex gap-2">
-              <button className="flex-1 rounded-md bg-primary py-1.5 text-primary-foreground" onClick={() => { addTexture(draft); setDraft(null); }}>
-                Add texture
+              <button className="flex-1 rounded-md bg-primary py-1.5 text-primary-foreground" onClick={commitDraft}>
+                Add {sheet ? 'sheet' : 'sprite'}
               </button>
               <button className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent" onClick={() => setDraft(null)}>
                 Cancel

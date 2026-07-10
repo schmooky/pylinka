@@ -21,8 +21,10 @@ export interface EditorTexture {
  * `textures`/`activeTextureId` are extra JSON a pure consumer ignores.
  */
 export interface EditorProject extends PylinkaProject {
+  /** shared texture library available to any system */
   textures?: EditorTexture[];
-  activeTextureId?: string | null;
+  /** which texture each system renders as (systemId → textureId | null) */
+  systemTextures?: Record<string, string | null>;
 }
 
 /** Per-frame atlas dims from a uniform grid (matches the runtime's tools). */
