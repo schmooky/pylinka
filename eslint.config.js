@@ -10,6 +10,7 @@ export default tseslint.config(
       '**/coverage/**',
       '**/.astro/**',
       'spike/**',
+      'tools/**',
       '**/*.wgsl',
     ],
   },

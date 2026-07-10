@@ -20,8 +20,30 @@
 import type { PylinkaProject } from '@pylinka/graph';
 import { SpawnScheduler } from '../scheduler.js';
 import { clampDt } from '../time.js';
-import { WebGL2Engine } from './engine.js';
+import { WebGL2Engine, type AtlasConfig } from './engine.js';
 import { extractParams, type EngineParams } from './params.js';
+
+function resolveAtlas(o: AtlasOptions | undefined): AtlasConfig | undefined {
+  if (!o) return undefined;
+  const im = o.image as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number };
+  const width = o.width ?? im.naturalWidth ?? im.width ?? 0;
+  const height = o.height ?? im.naturalHeight ?? im.height ?? 0;
+  const pick = o.pick === 'per-spawn' ? 1 : 0;
+  return {
+    image: o.image,
+    width,
+    height,
+    cols: o.cols,
+    rows: o.rows,
+    frameW: o.frameW,
+    frameH: o.frameH,
+    pad: o.pad ?? 0,
+    fps: o.fps ?? 12,
+    play: o.play === 'once' ? 0 : 1,
+    pick,
+    row: o.row ?? (pick === 1 ? Math.floor(Math.random() * o.rows) : 0),
+  };
+}
 
 export interface ParticlesHandle {
   /** Step the simulation and render one frame. Call once per rAF tick. */
@@ -58,6 +80,33 @@ export interface ParticlesOptions {
   zoom?: number;
   /** Particle sprite size multiplier (default 1) — keeps thumbnails legible. */
   sizeScale?: number;
+  /**
+   * Render particles as an animated atlas sequence (e.g. a spinning coin). The
+   * atlas is a uniform grid: each ROW is a sequence, each COLUMN a frame. A
+   * random row is picked per particle (or fixed), the column advances with age.
+   */
+  atlas?: AtlasOptions;
+}
+
+export interface AtlasOptions {
+  /** A loaded image / bitmap / canvas. */
+  image: TexImageSource;
+  cols: number;
+  rows: number;
+  frameW: number;
+  frameH: number;
+  pad?: number;
+  /** atlas pixel size (derived from the image if omitted). */
+  width?: number;
+  height?: number;
+  /** frames/second when looping (default 12). */
+  fps?: number;
+  /** 'loop' (default) spins forever; 'once' plays across the particle's life. */
+  play?: 'loop' | 'once';
+  /** 'per-particle' (default) random sequence per particle; 'per-spawn' fixed. */
+  pick?: 'per-particle' | 'per-spawn';
+  /** which row when pick === 'per-spawn' (default random). */
+  row?: number;
 }
 
 export { extractParams, parseColor, type EngineParams } from './params.js';
@@ -85,7 +134,7 @@ export function createParticles(
   for (const p of project.params) if (p.default.t === 'f32') knobValues[p.name] = p.default.v;
 
   const params: EngineParams = extractParams(system, project.params, knobValues);
-  const engine = new WebGL2Engine(gl, params, opts.sizeScale ?? 1);
+  const engine = new WebGL2Engine(gl, params, opts.sizeScale ?? 1, resolveAtlas(opts.atlas));
   let scheduler = new SpawnScheduler(system.emitter, params.capacity);
   const systemName = system.name;
   const maxDt = opts.maxDt ?? 0.05;

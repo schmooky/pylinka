@@ -14,6 +14,22 @@ import {
 } from './shaders.js';
 import type { EngineParams } from './params.js';
 
+/** Resolved atlas-sequence config the engine renders. */
+export interface AtlasConfig {
+  image: TexImageSource;
+  width: number;
+  height: number;
+  cols: number;
+  rows: number;
+  frameW: number;
+  frameH: number;
+  pad: number;
+  fps: number;
+  play: 0 | 1; // 0 once-over-life, 1 loop
+  pick: 0 | 1; // 0 per-particle random row, 1 fixed row
+  row: number; // fixed row when pick == 1
+}
+
 const STRIDE = STATE_FLOATS * 4; // bytes
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
@@ -62,13 +78,29 @@ export class WebGL2Engine {
   private frame = 0;
 
   private readonly sizeScale: number;
+  private readonly atlas: AtlasConfig | undefined;
+  private readonly tex: WebGLTexture | null = null;
 
-  constructor(gl: WebGL2RenderingContext, params: EngineParams, sizeScale = 1) {
+  constructor(gl: WebGL2RenderingContext, params: EngineParams, sizeScale = 1, atlas?: AtlasConfig) {
     this.gl = gl;
     this.capacity = params.capacity;
     this.sizeScale = sizeScale;
+    this.atlas = atlas;
     this.updateProg = link(gl, UPDATE_VS, UPDATE_FS, TF_VARYINGS);
     this.renderProg = link(gl, RENDER_VS, RENDER_FS);
+
+    if (atlas) {
+      this.tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this.tex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); // image-space uv (0 = top)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, atlas.image);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
 
     const zero = new Float32Array(this.capacity * STATE_FLOATS);
     this.bufs = [this.makeBuffer(zero), this.makeBuffer(zero)];
@@ -139,6 +171,7 @@ export class WebGL2Engine {
     inst(1, 2, 0); // a_pos
     inst(2, 1, 16); // a_age
     inst(3, 1, 20); // a_life
+    inst(4, 1, 24); // a_seed
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idx);
     gl.bindVertexArray(null);
     return vao;
@@ -207,6 +240,22 @@ export class WebGL2Engine {
     gl.uniform1i(u.get('u_colorEase')!, p.colorEase);
     gl.uniform1i(u.get('u_sizeEase')!, p.sizeEase);
 
+    const a = this.atlas;
+    gl.uniform1i(u.get('u_textured')!, a ? 1 : 0);
+    if (a) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.tex);
+      gl.uniform1i(u.get('u_atlas')!, 0);
+      gl.uniform2f(u.get('u_atlasSize')!, a.width, a.height);
+      gl.uniform2f(u.get('u_frameSize')!, a.frameW, a.frameH);
+      gl.uniform2f(u.get('u_grid')!, a.cols, a.rows);
+      gl.uniform1f(u.get('u_pad')!, a.pad);
+      gl.uniform1f(u.get('u_fps')!, a.fps);
+      gl.uniform1i(u.get('u_play')!, a.play);
+      gl.uniform1i(u.get('u_pick')!, a.pick);
+      gl.uniform1f(u.get('u_seqRow')!, a.row);
+    }
+
     gl.enable(gl.BLEND);
     if (p.blend === 'add') gl.blendFunc(gl.ONE, gl.ONE);
     else if (p.blend === 'screen') gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_COLOR);
@@ -245,6 +294,7 @@ export class WebGL2Engine {
     for (const v of this.updateVAOs) gl.deleteVertexArray(v);
     for (const v of this.renderVAOs) gl.deleteVertexArray(v);
     gl.deleteTransformFeedback(this.tf);
+    if (this.tex) gl.deleteTexture(this.tex);
   }
 }
 
@@ -255,4 +305,6 @@ const UPDATE_UNIFORMS = [
 ];
 const RENDER_UNIFORMS = [
   'u_resolution', 'u_colorFrom', 'u_colorTo', 'u_sizeFrom', 'u_sizeTo', 'u_colorEase', 'u_sizeEase',
+  'u_textured', 'u_atlas', 'u_atlasSize', 'u_frameSize', 'u_grid', 'u_pad', 'u_fps', 'u_play',
+  'u_pick', 'u_seqRow',
 ];

@@ -6,6 +6,18 @@ import type { Literal, Node, PylinkaProject, System } from '@pylinka/graph';
 
 export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract';
 
+export interface RecipeAtlas {
+  url: string;
+  cols: number;
+  rows: number;
+  frameW: number;
+  frameH: number;
+  pad: number;
+  fps: number;
+  play: 'loop' | 'once';
+  pick: 'per-particle' | 'per-spawn';
+}
+
 export interface Recipe {
   slug: string;
   title: string;
@@ -13,7 +25,12 @@ export interface Recipe {
   oneLiner: string;
   tags: string[];
   project: PylinkaProject;
+  /** optional textured atlas sequence (e.g. a spinning coin). */
+  atlas?: RecipeAtlas;
 }
+
+/** The extracted piggy-cash coins: 7 colour rows × 10 flip frames. */
+const COINS: RecipeAtlas = { url: '/atlas/coins.png', cols: 10, rows: 7, frameW: 138, frameH: 138, pad: 2, fps: 14, play: 'loop', pick: 'per-particle' };
 
 type Vec2 = [number, number];
 
@@ -46,6 +63,7 @@ interface FxOpts {
   scaleFrom?: number;
   scaleTo?: number;
   scaleEase?: string;
+  atlas?: RecipeAtlas;
 }
 
 const f = (v: number): Literal => ({ t: 'f32', v });
@@ -117,7 +135,7 @@ function fx(o: FxOpts): Recipe {
     ],
   };
 
-  return { slug: o.slug, title: o.title, group: o.group, oneLiner: o.oneLiner, tags: o.tags, project };
+  return { slug: o.slug, title: o.title, group: o.group, oneLiner: o.oneLiner, tags: o.tags, project, ...(o.atlas ? { atlas: o.atlas } : {}) };
 }
 
 export const RECIPES: Recipe[] = [
@@ -184,4 +202,10 @@ export const RECIPES: Recipe[] = [
   fx({ slug: 'nebula', title: 'Nebula', group: 'abstract', oneLiner: 'Slow indigo nebula clouds blooming.', tags: ['abstract', 'nebula', 'screen'], capacity: 800, blend: 'screen', shape: 'rect', size: [220, 140], rate: 40, velMin: [-20, -20], velMax: [20, 20], lifeMin: 2, lifeMax: 4, drag: 1.2, colorFrom: '#6a5aff88', colorTo: '#2a0a5500', colorEase: 'sine.inOut', scaleFrom: 2.4, scaleTo: 3.6, scaleEase: 'sine.inOut' }),
   fx({ slug: 'data-stream', title: 'Data Stream', group: 'abstract', oneLiner: 'Green data raining down the screen.', tags: ['abstract', 'matrix', 'additive'], capacity: 2400, shape: 'rect', size: [400, 10], rate: 260, velMin: [-2, 200], velMax: [2, 340], lifeMin: 0.8, lifeMax: 1.4, gravity: [0, 200], colorFrom: '#6affa0ff', colorTo: '#0a3a1e00', colorEase: 'linear', scaleFrom: 0.5, scaleTo: 0.5 }),
   fx({ slug: 'energy-burst', title: 'Energy Burst', group: 'abstract', oneLiner: 'A cyan energy detonation.', tags: ['abstract', 'burst', 'energy'], capacity: 2600, mode: 'burst', burstCount: 260, burstInterval: 1.3, velMin: [-200, -200], velMax: [200, 200], lifeMin: 0.5, lifeMax: 1, drag: 2.8, colorFrom: '#6afaffff', colorTo: '#0a4a8c00', colorEase: 'power2.out', scaleFrom: 1.6, scaleEase: 'power2.out' }),
+
+  // ── textured coin sequences (random tinted coin, spinning) ──────────────
+  fx({ slug: 'coin-shower', title: 'Coin Shower', group: 'ui', oneLiner: 'Spinning coins in random colours raining down.', tags: ['ui', 'coins', 'reward'], capacity: 400, blend: 'normal', shape: 'rect', size: [60, 10], rate: 42, velMin: [-30, 60], velMax: [30, 180], lifeMin: 2, lifeMax: 3.5, gravity: [0, 240], colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 3.5, scaleTo: 3.5, atlas: COINS }),
+  fx({ slug: 'coin-fountain', title: 'Coin Fountain', group: 'ui', oneLiner: 'Coins erupting upward and arcing back down.', tags: ['ui', 'coins', 'fountain'], capacity: 500, blend: 'normal', rate: 60, velMin: [-120, -300], velMax: [120, -150], lifeMin: 1.6, lifeMax: 2.6, gravity: [0, 460], colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 3.4, scaleTo: 3.4, atlas: COINS }),
+  fx({ slug: 'jackpot-burst', title: 'Jackpot Burst', group: 'ui', oneLiner: 'A big coin explosion for a jackpot win.', tags: ['ui', 'coins', 'jackpot'], capacity: 800, blend: 'normal', mode: 'burst', burstCount: 130, burstInterval: 1.8, velMin: [-240, -240], velMax: [240, 240], lifeMin: 1.4, lifeMax: 2.4, gravity: [0, 380], drag: 0.5, colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 3.2, scaleTo: 3.2, atlas: COINS }),
+  fx({ slug: 'gem-spin', title: 'Gem Spin', group: 'magic', oneLiner: 'A slow field of random gems tumbling in place.', tags: ['magic', 'gems', 'spin'], capacity: 220, blend: 'normal', shape: 'rect', size: [220, 130], rate: 14, velMin: [-8, -8], velMax: [8, 8], lifeMin: 2.5, lifeMax: 4.5, colorFrom: '#ffffffff', colorTo: '#ffffff33', colorEase: 'sine.inOut', scaleFrom: 3.6, scaleTo: 3.6, atlas: COINS }),
 ];

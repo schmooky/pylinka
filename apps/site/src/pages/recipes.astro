@@ -81,6 +81,21 @@ const groups = ['all', 'trails', 'fire', 'magic', 'ambient', 'ui', 'abstract'];
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       const MAX_ACTIVE = 12;
 
+      // load atlas textures (e.g. the coins); coin cards retry once loaded
+      const atlasImages = new Map<string, HTMLImageElement>();
+      const pending = new Set<HTMLCanvasElement>();
+      for (const u of [...new Set(RECIPES.filter((r) => r.atlas).map((r) => r.atlas!.url))]) {
+        const img = new Image();
+        img.onload = () => {
+          atlasImages.set(u, img);
+          for (const canvas of [...pending]) {
+            pending.delete(canvas);
+            start(canvas);
+          }
+        };
+        img.src = u;
+      }
+
       interface Live {
         fx: ParticlesHandle;
         group: string;
@@ -97,9 +112,20 @@ const groups = ['all', 'trails', 'fire', 'magic', 'ambient', 'ui', 'abstract'];
         if (!recipe) return;
         canvas.width = Math.floor(canvas.clientWidth * dpr);
         canvas.height = Math.floor(canvas.clientHeight * dpr);
+        const atlas = recipe.atlas
+          ? { ...recipe.atlas, image: atlasImages.get(recipe.atlas.url) }
+          : undefined;
+        if (recipe.atlas && !atlas?.image) {
+          pending.add(canvas); // atlas not loaded yet — retry on image load
+          return;
+        }
         let fx: ParticlesHandle;
         try {
-          fx = createParticles(canvas, recipe.project, { zoom: 1.8, sizeScale: 2.4 });
+          fx = createParticles(canvas, recipe.project, {
+            zoom: 1.8,
+            sizeScale: 2.4,
+            ...(atlas?.image ? { atlas: atlas as Parameters<typeof createParticles>[2]['atlas'] } : {}),
+          });
         } catch {
           return;
         }

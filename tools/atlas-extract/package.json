@@ -1,0 +1,13 @@
+{
+  "name": "@pylinka/atlas-extract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Extract the coin flip from a Spine/libgdx atlas into a tinted pixi spritesheet.",
+  "scripts": {
+    "extract": "node extract.mjs"
+  },
+  "dependencies": {
+    "sharp": "^0.34.5"
+  }
+}

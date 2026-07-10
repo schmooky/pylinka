@@ -120,6 +120,7 @@ layout(location = 0) in vec2 a_corner;   // -0.5..0.5
 layout(location = 1) in vec2 a_pos;      // instance
 layout(location = 2) in float a_age;
 layout(location = 3) in float a_life;
+layout(location = 4) in float a_seed;    // [0,1) per particle
 
 uniform vec2  u_resolution;
 uniform vec4  u_colorFrom;
@@ -128,6 +129,17 @@ uniform float u_sizeFrom;
 uniform float u_sizeTo;
 uniform int   u_colorEase;
 uniform int   u_sizeEase;
+
+// atlas-sequence uniforms (u_textured == 0 → procedural soft sprite)
+uniform int   u_textured;
+uniform vec2  u_atlasSize;   // px
+uniform vec2  u_frameSize;   // px
+uniform vec2  u_grid;        // cols, rows
+uniform float u_pad;         // px between cells
+uniform float u_fps;
+uniform int   u_play;        // 0 once-over-life, 1 loop
+uniform int   u_pick;        // 0 per-particle random row, 1 fixed row
+uniform float u_seqRow;      // fixed row when u_pick == 1
 
 out vec2 v_uv;
 out vec4 v_color;
@@ -142,20 +154,39 @@ void main() {
   vec2 clip = vec2(world.x / u_resolution.x * 2.0 - 1.0, 1.0 - world.y / u_resolution.y * 2.0);
   gl_Position = vec4(clip, 0.0, 1.0);
 
-  v_uv = a_corner + 0.5;
+  if (u_textured == 1) {
+    float row = (u_pick == 1) ? u_seqRow : floor(a_seed * u_grid.y);
+    row = clamp(row, 0.0, u_grid.y - 1.0);
+    float col = (u_play == 1)
+      ? mod(floor(a_age * u_fps), u_grid.x)
+      : clamp(floor(tN * u_grid.x), 0.0, u_grid.x - 1.0);
+    vec2 cellPx = vec2(col, row) * (u_frameSize + u_pad);
+    v_uv = (cellPx + (a_corner + 0.5) * u_frameSize) / u_atlasSize;
+  } else {
+    v_uv = a_corner + 0.5;
+  }
   v_color = mix(u_colorFrom, u_colorTo, easeSel(u_colorEase, tN));
 }`;
 
-/** Render fragment shader — soft radial sprite, premultiplied out. */
+/** Render fragment shader — soft radial sprite, or textured atlas cell. */
 export const RENDER_FS = `#version 300 es
 precision highp float;
+precision highp int;
 in vec2 v_uv;
 in vec4 v_color;
 out vec4 frag;
+uniform int u_textured;
+uniform sampler2D u_atlas;
 void main() {
-  float d = length(v_uv - 0.5) * 2.0;
-  float a = smoothstep(1.0, 0.0, d) * v_color.a;
-  frag = vec4(v_color.rgb * a, a);   // premultiplied
+  if (u_textured == 1) {
+    vec4 t = texture(u_atlas, v_uv);
+    float a = t.a * v_color.a;
+    frag = vec4(t.rgb * v_color.rgb * a, a);   // premultiplied
+  } else {
+    float d = length(v_uv - 0.5) * 2.0;
+    float a = smoothstep(1.0, 0.0, d) * v_color.a;
+    frag = vec4(v_color.rgb * a, a);
+  }
 }`;
 
 export const TF_VARYINGS = ['o_pos', 'o_vel', 'o_age', 'o_life', 'o_seed'];
