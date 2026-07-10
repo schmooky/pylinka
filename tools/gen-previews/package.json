@@ -1,0 +1,13 @@
+{
+  "name": "@pylinka/gen-previews",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Record each recipe to a looping webm + poster via headless Chromium.",
+  "scripts": {
+    "gen": "node gen.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.61.0"
+  }
+}

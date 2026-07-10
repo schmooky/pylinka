@@ -28,8 +28,7 @@ const groups = ['all', 'trails', 'fire', 'magic', 'ambient', 'ui', 'abstract'];
     <main class="mx-auto max-w-6xl px-5 py-8">
       <h1 class="text-2xl font-semibold tracking-tight">Recipes</h1>
       <p class="mt-1 text-sm text-muted-foreground">
-        {RECIPES.length} effects, each a real pylinka project rendering live on WebGL2. Hover to see
-        it react to your cursor.
+        {RECIPES.length} effects, each a real pylinka project. Open any in the editor to tweak it live.
       </p>
 
       <div id="filters" class="mt-5 flex flex-wrap gap-2">
@@ -45,9 +44,19 @@ const groups = ['all', 'trails', 'fire', 'magic', 'ambient', 'ui', 'abstract'];
       <div id="grid" class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {
           RECIPES.map((r) => (
-            <div class="recipe-card overflow-hidden rounded-xl border border-border bg-card" data-slug={r.slug} data-group={r.group}>
+            <div class="recipe-card overflow-hidden rounded-xl border border-border bg-card" data-group={r.group}>
               <div class="relative bg-black" style="height: 150px">
-                <canvas data-canvas={r.slug} class="block h-full w-full"></canvas>
+                <video
+                  data-video
+                  class="h-full w-full object-cover"
+                  muted
+                  loop
+                  playsinline
+                  preload="none"
+                  poster={`/recipes/${r.slug}/card.jpg`}
+                >
+                  <source src={`/recipes/${r.slug}/card.webm`} type="video/webm" />
+                </video>
                 <span class="absolute right-2 top-2 rounded-full border border-border bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur">
                   {r.group}
                 </span>
@@ -74,112 +83,19 @@ const groups = ['all', 'trails', 'fire', 'magic', 'ambient', 'ui', 'abstract'];
     </main>
 
     <script>
-      import { createParticles, type ParticlesHandle } from '@pylinka/core/webgl';
-      import { RECIPES } from '../recipes/data';
-
-      const bySlug = new Map(RECIPES.map((r) => [r.slug, r]));
-      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-      const MAX_ACTIVE = 12;
-
-      // load atlas textures (e.g. the coins); coin cards retry once loaded
-      const atlasImages = new Map<string, HTMLImageElement>();
-      const pending = new Set<HTMLCanvasElement>();
-      for (const u of [...new Set(RECIPES.filter((r) => r.atlas).map((r) => r.atlas!.url))]) {
-        const img = new Image();
-        img.onload = () => {
-          atlasImages.set(u, img);
-          for (const canvas of [...pending]) {
-            pending.delete(canvas);
-            start(canvas);
-          }
-        };
-        img.src = u;
-      }
-
-      interface Live {
-        fx: ParticlesHandle;
-        group: string;
-        canvas: HTMLCanvasElement;
-        t: number;
-        mouse: [number, number] | null;
-      }
-      const active = new Map<string, Live>();
-
-      function start(canvas: HTMLCanvasElement) {
-        const slug = canvas.dataset.canvas!;
-        if (active.has(slug) || active.size >= MAX_ACTIVE) return;
-        const recipe = bySlug.get(slug);
-        if (!recipe) return;
-        canvas.width = Math.floor(canvas.clientWidth * dpr);
-        canvas.height = Math.floor(canvas.clientHeight * dpr);
-        const atlas = recipe.atlas
-          ? { ...recipe.atlas, image: atlasImages.get(recipe.atlas.url) }
-          : undefined;
-        if (recipe.atlas && !atlas?.image) {
-          pending.add(canvas); // atlas not loaded yet — retry on image load
-          return;
-        }
-        let fx: ParticlesHandle;
-        try {
-          fx = createParticles(canvas, recipe.project, {
-            zoom: 1.8,
-            sizeScale: 2.4,
-            ...(atlas?.image ? { atlas: atlas as Parameters<typeof createParticles>[2]['atlas'] } : {}),
-          });
-        } catch {
-          return;
-        }
-        const live: Live = { fx, group: recipe.group, canvas, t: Math.random() * 6, mouse: null };
-        canvas.onpointermove = (e) => {
-          const r = canvas.getBoundingClientRect();
-          live.mouse = [(e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr];
-        };
-        canvas.onpointerleave = () => (live.mouse = null);
-        active.set(slug, live);
-      }
-
-      function stop(slug: string) {
-        const live = active.get(slug);
-        if (!live) return;
-        live.fx.destroy();
-        active.delete(slug);
-      }
-
+      // Play only on-screen videos (autoplaying 44 at once wastes CPU).
       const io = new IntersectionObserver(
         (entries) => {
           for (const en of entries) {
-            const card = en.target as HTMLElement;
-            const canvas = card.querySelector('canvas') as HTMLCanvasElement;
-            if (en.isIntersecting) start(canvas);
-            else stop(canvas.dataset.canvas!);
+            const v = en.target as HTMLVideoElement;
+            if (en.isIntersecting) v.play().catch(() => {});
+            else v.pause();
           }
         },
-        { rootMargin: '120px' },
+        { rootMargin: '150px' },
       );
-      document.querySelectorAll('.recipe-card').forEach((c) => io.observe(c));
+      document.querySelectorAll<HTMLVideoElement>('video[data-video]').forEach((v) => io.observe(v));
 
-      let last = performance.now();
-      function frame(now: number) {
-        const dt = Math.min((now - last) / 1000, 0.05);
-        last = now;
-        for (const live of active.values()) {
-          const { fx, canvas } = live;
-          live.t += dt;
-          const cx = canvas.width / 2;
-          const cy = canvas.height / 2;
-          if (live.mouse) fx.setEmitter(live.mouse[0], live.mouse[1]);
-          else if (live.group === 'trails') {
-            const r = Math.min(canvas.width, canvas.height) * 0.3;
-            fx.setEmitter(cx + Math.cos(live.t * 1.6) * r, cy + Math.sin(live.t * 1.6) * r);
-          } else if (live.group === 'ambient') fx.setEmitter(cx, canvas.height * 0.12);
-          else fx.setEmitter(cx, cy);
-          fx.update(dt);
-        }
-        requestAnimationFrame(frame);
-      }
-      requestAnimationFrame(frame);
-
-      // group filter
       const grid = document.getElementById('grid')!;
       document.querySelectorAll('.filter').forEach((btn) => {
         btn.addEventListener('click', () => {

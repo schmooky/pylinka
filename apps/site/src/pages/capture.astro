@@ -1,0 +1,73 @@
+---
+// Offline capture page — renders one recipe fullscreen on black for the
+// gen-previews tool (Playwright records the viewport to webm). ?slug=<slug>.
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pylinka capture</title>
+  </head>
+  <body style="margin:0;background:#000;overflow:hidden">
+    <canvas id="c" style="display:block;width:100vw;height:100vh"></canvas>
+    <script>
+      import { createParticles } from '@pylinka/core/webgl';
+      import { RECIPES } from '../recipes/data';
+
+      (window as unknown as { __slugs: string[] }).__slugs = RECIPES.map((r) => r.slug);
+
+      const slug = new URLSearchParams(location.search).get('slug');
+      const canvas = document.getElementById('c') as HTMLCanvasElement;
+      const recipe = RECIPES.find((r) => r.slug === slug);
+
+      const loadImage = (url: string) =>
+        new Promise<HTMLImageElement>((res, rej) => {
+          const i = new Image();
+          i.onload = () => res(i);
+          i.onerror = rej;
+          i.src = url;
+        });
+
+      async function boot() {
+        if (!recipe) return;
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+        let atlas: unknown;
+        if (recipe.atlas) {
+          try {
+            const image = await loadImage(recipe.atlas.url);
+            atlas = { ...recipe.atlas, image };
+          } catch {
+            /* ignore */
+          }
+        }
+        const fx = createParticles(canvas, recipe.project, {
+          zoom: 1.6,
+          sizeScale: 2.2,
+          ...(atlas ? { atlas: atlas as Parameters<typeof createParticles>[2]['atlas'] } : {}),
+        });
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        let t = 0;
+        function frame() {
+          t += 1 / 60;
+          if (recipe!.group === 'trails') {
+            const r = Math.min(canvas.width, canvas.height) * 0.26;
+            fx.setEmitter(cx + Math.cos(t * 1.6) * r, cy + Math.sin(t * 1.6) * r);
+          } else if (recipe!.group === 'ambient') {
+            fx.setEmitter(cx, canvas.height * 0.12);
+          } else {
+            fx.setEmitter(cx, cy);
+          }
+          fx.update(1 / 60);
+          requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+        (window as unknown as { __ready: boolean }).__ready = true;
+      }
+      boot();
+    </script>
+  </body>
+</html>

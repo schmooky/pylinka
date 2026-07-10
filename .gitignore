@@ -5,10 +5,8 @@ coverage/
 *.tsbuildinfo
 .DS_Store
 .astro/
-apps/site/public/recipes/*/card.webm
-apps/site/public/recipes/*/card.jpg
-apps/site/public/recipes/*/card.hash
 bench/results.json
 spike/dist/
 *.log
 .vitest/
+tools/atlas-extract/.cache/

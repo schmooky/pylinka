@@ -241,7 +241,7 @@ export class WebGL2Engine {
     gl.uniform1i(u.get('u_sizeEase')!, p.sizeEase);
 
     const a = this.atlas;
-    gl.uniform1i(u.get('u_textured')!, a ? 1 : 0);
+    gl.uniform1f(u.get('u_textured')!, a ? 1 : 0);
     if (a) {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.tex);
@@ -251,8 +251,8 @@ export class WebGL2Engine {
       gl.uniform2f(u.get('u_grid')!, a.cols, a.rows);
       gl.uniform1f(u.get('u_pad')!, a.pad);
       gl.uniform1f(u.get('u_fps')!, a.fps);
-      gl.uniform1i(u.get('u_play')!, a.play);
-      gl.uniform1i(u.get('u_pick')!, a.pick);
+      gl.uniform1f(u.get('u_play')!, a.play);
+      gl.uniform1f(u.get('u_pick')!, a.pick);
       gl.uniform1f(u.get('u_seqRow')!, a.row);
     }
 
