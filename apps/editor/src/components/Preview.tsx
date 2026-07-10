@@ -65,7 +65,6 @@ export function Preview() {
     };
     raf = requestAnimationFrame(loop);
     return () => { cancelAnimationFrame(raf); ro.disconnect(); fxRef.current?.destroy(); fxRef.current = null; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // live re-apply on graph changes
@@ -82,7 +81,6 @@ export function Preview() {
         setHud(String(e));
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rev]);
 
   const onMove = (e: React.PointerEvent) => {

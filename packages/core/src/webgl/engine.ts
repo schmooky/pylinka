@@ -61,9 +61,12 @@ export class WebGL2Engine {
   private spawnBase = 0;
   private frame = 0;
 
-  constructor(gl: WebGL2RenderingContext, params: EngineParams) {
+  private readonly sizeScale: number;
+
+  constructor(gl: WebGL2RenderingContext, params: EngineParams, sizeScale = 1) {
     this.gl = gl;
     this.capacity = params.capacity;
+    this.sizeScale = sizeScale;
     this.updateProg = link(gl, UPDATE_VS, UPDATE_FS, TF_VARYINGS);
     this.renderProg = link(gl, RENDER_VS, RENDER_FS);
 
@@ -199,8 +202,8 @@ export class WebGL2Engine {
     gl.uniform2f(u.get('u_resolution')!, width, height);
     gl.uniform4fv(u.get('u_colorFrom')!, p.colorFrom);
     gl.uniform4fv(u.get('u_colorTo')!, p.colorTo);
-    gl.uniform1f(u.get('u_sizeFrom')!, p.sizeFrom);
-    gl.uniform1f(u.get('u_sizeTo')!, p.sizeTo);
+    gl.uniform1f(u.get('u_sizeFrom')!, p.sizeFrom * this.sizeScale);
+    gl.uniform1f(u.get('u_sizeTo')!, p.sizeTo * this.sizeScale);
     gl.uniform1i(u.get('u_colorEase')!, p.colorEase);
     gl.uniform1i(u.get('u_sizeEase')!, p.sizeEase);
 

@@ -50,6 +50,14 @@ export interface ParticlesOptions {
   systemName?: string;
   /** dt clamp in seconds (default 0.05). */
   maxDt?: number;
+  /**
+   * View zoom-out factor (default 1). Renders a larger world region into the
+   * canvas, so effects authored for a full-size game view fit inside small
+   * thumbnails. Emitter/mouse coordinates stay in canvas pixels.
+   */
+  zoom?: number;
+  /** Particle sprite size multiplier (default 1) — keeps thumbnails legible. */
+  sizeScale?: number;
 }
 
 export { extractParams, parseColor, type EngineParams } from './params.js';
@@ -77,14 +85,15 @@ export function createParticles(
   for (const p of project.params) if (p.default.t === 'f32') knobValues[p.name] = p.default.v;
 
   const params: EngineParams = extractParams(system, project.params, knobValues);
-  const engine = new WebGL2Engine(gl, params);
+  const engine = new WebGL2Engine(gl, params, opts.sizeScale ?? 1);
   let scheduler = new SpawnScheduler(system.emitter, params.capacity);
   const systemName = system.name;
   const maxDt = opts.maxDt ?? 0.05;
 
   const canvas = gl.canvas as HTMLCanvasElement;
-  let ex = canvas.width / 2;
-  let ey = canvas.height / 2;
+  const zoom = opts.zoom ?? 1;
+  let ex = (canvas.width * zoom) / 2;
+  let ey = (canvas.height * zoom) / 2;
   let px = ex;
   let py = ey;
   const wind: [number, number] = [0, 0];
@@ -102,21 +111,19 @@ export function createParticles(
       const spawnCount = scheduler.tick(dt, dist);
       engine.step(dt, spawnCount, [ex, ey], wind, params);
 
-      const w = canvas.width;
-      const h = canvas.height;
-      gl.viewport(0, 0, w, h);
+      gl.viewport(0, 0, canvas.width, canvas.height);
       if (this.autoClear) {
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
       }
-      engine.render(w, h, params);
+      engine.render(canvas.width * zoom, canvas.height * zoom, params);
 
       px = ex;
       py = ey;
     },
     setEmitter(x: number, y: number) {
-      ex = x;
-      ey = y;
+      ex = x * zoom;
+      ey = y * zoom;
     },
     spawnBurst(count: number) {
       scheduler.spawnBurst(count);

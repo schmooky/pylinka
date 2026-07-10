@@ -44,7 +44,6 @@ export function App() {
     const f = toFlow(project, useEditor.getState().positions, useEditor.getState().selectedNodeId);
     setRfNodes(f.nodes);
     setRfEdges(f.edges);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structureSig]);
 
   useEffect(() => {
