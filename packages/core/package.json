@@ -1,0 +1,36 @@
+{
+  "name": "@pylinka/core",
+  "version": "0.0.0",
+  "description": "Pylinka runtime. CPU scheduling, knob bus, and (WIP) WebGPU simulation/render backends.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pylinka/graph": "workspace:*",
+    "@pylinka/compiler": "workspace:*"
+  },
+  "peerDependencies": {
+    "pixi.js": "^8"
+  },
+  "peerDependenciesMeta": {
+    "pixi.js": { "optional": true }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
