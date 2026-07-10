@@ -89,6 +89,15 @@ and the render half of R1 (`BackendProvider`). The **GPU bodies inside `execute(
 (compute dispatch + draw) and the device-loss path still need a real-hardware
 run** before they can be written with confidence.
 
+**Built (2026-07-10):** the scene-graph half of this module now exists and
+**typechecks against pixi v8 (8.19)** — `@pylinka/core/pixi`:
+`ParticleView extends ViewContainer` (`renderPipeId='pylinka'`, `batched=false`),
+`PylinkaRenderPipe` (WebGL+WebGPU pipes, `execute()` → `SimBackend.simulate/draw`
+with `view.worldTransform`), the Application plugin, `resolveBackend()`
+(`renderer.type` → device), `registerPylinka()`, and a `SimBackend` seam +
+factory registry. The GPU implementation behind `SimBackend` is the only part
+still waiting on the spike; `execute()` is a no-op until a backend is registered.
+
 ---
 
 ## Still outstanding (need real GPU hardware)

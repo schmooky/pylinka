@@ -16,7 +16,7 @@ the single source of truth. This README is only a pointer.
 | --- | --- | --- |
 | [`@pylinka/graph`](./packages/graph) | Shared kernel: graph types, node catalog, validation, hashing, slot assignment. Zero deps. | **in progress (M1.1)** |
 | [`@pylinka/compiler`](./packages/compiler) | SystemBundle → IR → GPU program codegen (WGSL M1, GLSL ES 3.00 M2). Zero deps. | **in progress (M1.2)** — golden green |
-| [`@pylinka/core`](./packages/core) | Runtime: pools, uniform bus, scheduler, backends, render. Peer `pixi.js@^8`. | **partial (M1.3)** — CPU scheduler/knobs/timing shipped; WebGPU backend gated on the M1.0 spike |
+| [`@pylinka/core`](./packages/core) | Runtime: pools, uniform bus, scheduler, backends, render. Peer `pixi.js@^8`. | **partial (M1.3)** — CPU scheduler/knobs/timing + pixi-v8 render integration (`/pixi`) shipped & typed; the WebGPU `SimBackend` (compute dispatch + draw) is gated on the M1.0 spike |
 | [`@pylinka/format`](./packages/format) | Serialize / parse / migrate the `pylinka` project format. | **shipped (M1.4)** |
 | [`@pylinka/editor`](./packages/editor) | React Flow editor + IndexedDB persistence. | scaffold |
 

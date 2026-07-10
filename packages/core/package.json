@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./pixi": {
+      "types": "./dist/render/index.d.ts",
+      "import": "./dist/render/index.js"
     }
   },
   "main": "./dist/index.js",
@@ -23,6 +27,9 @@
   "dependencies": {
     "@pylinka/graph": "workspace:*",
     "@pylinka/compiler": "workspace:*"
+  },
+  "devDependencies": {
+    "pixi.js": "^8"
   },
   "peerDependencies": {
     "pixi.js": "^8"

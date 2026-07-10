@@ -63,6 +63,7 @@ importers:
       '@pylinka/graph':
         specifier: workspace:*
         version: link:../graph
+    devDependencies:
       pixi.js:
         specifier: ^8
         version: 8.19.0
