@@ -32,6 +32,12 @@ export interface ParticlesHandle {
   spawnBurst(count: number): void;
   /** Set a named knob live (e.g. 'windPower', 'windDir'). */
   setKnob(name: string, value: number): void;
+  /**
+   * Re-read an edited project into the running effect with no restart (the
+   * uniform-driven live-edit path for editors). Returns false if a change needs
+   * a full re-create (only pool capacity does) — recreate via createParticles.
+   */
+  apply(project: PylinkaProject): boolean;
   /** Whether the canvas should be cleared each frame (default true). */
   autoClear: boolean;
   /** Alive particle count. Synchronous GPU readback — for debug/stats, not per-frame. */
@@ -72,7 +78,8 @@ export function createParticles(
 
   const params: EngineParams = extractParams(system, project.params, knobValues);
   const engine = new WebGL2Engine(gl, params);
-  const scheduler = new SpawnScheduler(system.emitter, params.capacity);
+  let scheduler = new SpawnScheduler(system.emitter, params.capacity);
+  const systemName = system.name;
   const maxDt = opts.maxDt ?? 0.05;
 
   const canvas = gl.canvas as HTMLCanvasElement;
@@ -119,6 +126,20 @@ export function createParticles(
       if (name === params.windPowerKnob) params.windPower = value;
       if (name === params.windDirKnob) params.windDir = value;
       recomputeWind();
+    },
+    apply(next: PylinkaProject): boolean {
+      const sys =
+        next.systems.find((s) => s.name === systemName) ??
+        next.systems.find((s) => s.enabled) ??
+        next.systems[0];
+      if (!sys) return false;
+      for (const pd of next.params) if (pd.default.t === 'f32' && !(pd.name in knobValues)) knobValues[pd.name] = pd.default.v;
+      const np = extractParams(sys, next.params, knobValues);
+      if (np.capacity !== params.capacity) return false; // needs a full re-create
+      Object.assign(params, np);
+      scheduler = new SpawnScheduler(sys.emitter, params.capacity);
+      recomputeWind();
+      return true;
     },
     aliveCount() {
       return engine.aliveCount();
