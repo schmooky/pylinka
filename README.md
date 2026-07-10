@@ -14,11 +14,12 @@ the single source of truth. This README is only a pointer.
 
 | Package | Description | Status |
 | --- | --- | --- |
-| [`@pylinka/graph`](./packages/graph) | Shared kernel: graph types, node catalog, validation, hashing, slot assignment. Zero deps. | **in progress (M1.1)** |
-| [`@pylinka/compiler`](./packages/compiler) | SystemBundle → IR → GPU program codegen (WGSL M1, GLSL ES 3.00 M2). Zero deps. | **in progress (M1.2)** — golden green |
-| [`@pylinka/core`](./packages/core) | Runtime. **`@pylinka/core/webgl` — a working WebGL2 transform-feedback engine** (`createParticles(canvas, project)`); CPU scheduler/knobs/timing; pixi-v8 render integration (`/pixi`). Peer `pixi.js@^8` (optional). | **usable (M1.3)** — WebGL2 runtime runs; WebGPU compute backend gated on the M1.0 spike |
-| [`@pylinka/format`](./packages/format) | Serialize / parse / migrate the `pylinka` project format. | **shipped (M1.4)** |
-| [`apps/site/src/editor`](./apps/site/src/editor) | **Working node editor** (served at `/editor`) — React Flow graph, typed handles, inline value editing, palette, and a live WebGL preview that updates on every edit with zero recompile. | **usable (M1.5)** |
+| [`@pylinka/graph`](./packages/graph) | Shared kernel: graph types, node catalog, validation, hashing, slot assignment. Zero deps. | ✅ shipped |
+| [`@pylinka/compiler`](./packages/compiler) | SystemBundle → IR → GPU program codegen (WGSL; GLSL ES 3.00 is M2). Zero deps. Golden byte-locked. | ✅ shipped |
+| [`@pylinka/format`](./packages/format) | Serialize / parse / migrate the `pylinka` project format. | ✅ shipped |
+| [`@pylinka/core`](./packages/core) | Runtime. **`@pylinka/core/webgl` — working WebGL2 transform-feedback engine** (`createParticles`, textured atlas sequences); CPU scheduler/knobs/timing; pixi-v8 render pipe (`/pixi`). Peer `pixi.js@^8` (optional). | ✅ WebGL2 runs · WebGPU compute backend = M2 (needs the spike) |
+| [`apps/site`](./apps/site) | Docs + **`/editor`** (React Flow node editor with live preview) + **`/recipes`** (44-effect webm gallery). | ✅ shipped |
+| [`tools/atlas-extract`](./tools/atlas-extract) · [`tools/gen-previews`](./tools/gen-previews) | Extract sprite sequences from a Spine atlas · record recipe webm/poster previews. | ✅ shipped |
 
 ## Development
 

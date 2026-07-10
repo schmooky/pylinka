@@ -13,7 +13,7 @@
   <body style="margin:0;background:#000;overflow:hidden">
     <canvas id="c" style="display:block;width:100vw;height:100vh"></canvas>
     <script>
-      import { createParticles } from '@pylinka/core/webgl';
+      import { createParticles, type AtlasOptions } from '@pylinka/core/webgl';
       import { RECIPES } from '../recipes/data';
 
       (window as unknown as { __slugs: string[] }).__slugs = RECIPES.map((r) => r.slug);
@@ -46,7 +46,7 @@
         const fx = createParticles(canvas, recipe.project, {
           zoom: 1.6,
           sizeScale: 2.2,
-          ...(atlas ? { atlas: atlas as Parameters<typeof createParticles>[2]['atlas'] } : {}),
+          ...(atlas ? { atlas: atlas as AtlasOptions } : {}),
         });
         const cx = canvas.width / 2;
         const cy = canvas.height / 2;
