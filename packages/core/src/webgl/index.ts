@@ -20,8 +20,51 @@
 import type { PylinkaProject } from '@pylinka/graph';
 import { SpawnScheduler } from '../scheduler.js';
 import { clampDt } from '../time.js';
-import { WebGL2Engine, type AtlasConfig } from './engine.js';
+import { WebGL2Engine, type AtlasConfig, type MaskConfig } from './engine.js';
 import { extractParams, type EngineParams } from './params.js';
+
+/**
+ * Rasterize an emission mask into a point table: one emitter-relative offset
+ * per opaque texel. The mask is downsampled so the table stays small (≤ ~36k
+ * points); an all-transparent mask yields undefined (falls back to the shape).
+ */
+function buildMaskTable(o: EmissionMaskOptions | undefined): MaskConfig | undefined {
+  if (!o) return undefined;
+  const im = o.image as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number };
+  const iw = im.naturalWidth ?? im.width ?? 0;
+  const ih = im.naturalHeight ?? im.height ?? 0;
+  if (!iw || !ih) return undefined;
+  const worldW = o.width;
+  const worldH = o.height ?? (worldW * ih) / iw;
+  const [ox, oy] = o.offset ?? [0, 0];
+
+  const MAX_SIDE = 192;
+  const k = Math.min(1, MAX_SIDE / Math.max(iw, ih));
+  const w = Math.max(1, Math.round(iw * k));
+  const h = Math.max(1, Math.round(ih * k));
+  const cnv =
+    typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : document.createElement('canvas');
+  cnv.width = w;
+  cnv.height = h;
+  const ctx = cnv.getContext('2d', { willReadFrequently: true }) as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null;
+  if (!ctx) return undefined;
+  ctx.drawImage(o.image as CanvasImageSource, 0, 0, w, h);
+  const px = ctx.getImageData(0, 0, w, h).data;
+
+  const pts: number[] = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (px[(y * w + x) * 4 + 3]! > 127) {
+        pts.push(((x + 0.5) / w - 0.5) * worldW + ox, ((y + 0.5) / h - 0.5) * worldH + oy);
+      }
+    }
+  }
+  const count = pts.length / 2;
+  return count > 0 ? { points: new Float32Array(pts), count } : undefined;
+}
 
 function resolveAtlas(o: AtlasOptions | undefined): AtlasConfig | undefined {
   if (!o) return undefined;
@@ -93,6 +136,22 @@ export interface ParticlesOptions {
    * The child mirrors the parent 1:1 and inherits the parent's pool capacity.
    */
   subParent?: ParticlesHandle;
+  /**
+   * Emit only inside a painted/image area: opaque texels of `image` become
+   * spawn positions (replaces the graph's analytic spawn shape). The mask is
+   * centred on the emitter and moves with it. Ignored for sub-emitters.
+   */
+  emissionMask?: EmissionMaskOptions;
+}
+
+export interface EmissionMaskOptions {
+  /** mask image — alpha > 127 marks emitting texels */
+  image: TexImageSource;
+  /** world width the mask maps to (px); height defaults to the aspect ratio */
+  width: number;
+  height?: number;
+  /** offset of the mask centre from the emitter (px, default [0, 0]) */
+  offset?: [number, number];
 }
 
 export interface AtlasOptions {
@@ -149,8 +208,12 @@ export function createParticles(
   const engine = new WebGL2Engine(
     gl, params, opts.sizeScale ?? 1, resolveAtlas(opts.atlas),
     parentEngine ? { parent: parentEngine } : undefined,
+    buildMaskTable(opts.emissionMask),
   );
   let scheduler = new SpawnScheduler(system.emitter, params.capacity);
+  // last-applied graph, so setKnob can re-interpret every knob-bound port live
+  let curSystem = system;
+  let curParams = project.params;
   const systemName = system.name;
   const maxDt = opts.maxDt ?? 0.05;
 
@@ -194,8 +257,7 @@ export function createParticles(
     },
     setKnob(name: string, value: number) {
       knobValues[name] = value;
-      if (name === params.windPowerKnob) params.windPower = value;
-      if (name === params.windDirKnob) params.windDir = value;
+      Object.assign(params, extractParams(curSystem, curParams, knobValues));
       recomputeWind();
     },
     apply(next: PylinkaProject): boolean {
@@ -207,6 +269,8 @@ export function createParticles(
       for (const pd of next.params) if (pd.default.t === 'f32' && !(pd.name in knobValues)) knobValues[pd.name] = pd.default.v;
       const np = extractParams(sys, next.params, knobValues);
       if (np.capacity !== params.capacity) return false; // needs a full re-create
+      curSystem = sys;
+      curParams = next.params;
       Object.assign(params, np);
       scheduler = new SpawnScheduler(sys.emitter, params.capacity);
       recomputeWind();

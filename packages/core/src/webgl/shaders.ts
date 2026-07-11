@@ -34,6 +34,56 @@ export const EASE_INDEX: Record<string, number> = {
   'expo.out': 8,
 };
 
+/**
+ * Shared force-field GLSL for both update shaders: up to 4 "point fields"
+ * (vortex swirl / radial attract-repel) + curl-of-value-noise turbulence.
+ * u_pfA[k] = center.xy, tangential, pull(+ = inward);
+ * u_pfB[k] = falloffRadius(0 = global), emitterRelative(0/1).
+ */
+const FORCE_GLSL = `
+uniform float u_pfCount;
+uniform vec4  u_pfA[4];
+uniform vec2  u_pfB[4];
+uniform vec3  u_turb;   // strength, cell px, speed
+uniform float u_time;
+
+vec2 pointForces(vec2 pos, vec2 emitter) {
+  vec2 f = vec2(0.0);
+  for (int k = 0; k < 4; k++) {
+    if (float(k) >= u_pfCount) break;
+    vec2 c = u_pfA[k].xy + (u_pfB[k].y > 0.5 ? emitter : vec2(0.0));
+    vec2 d = pos - c;
+    float len = max(length(d), 1e-3);
+    vec2 dir = d / len;
+    float w = u_pfB[k].x > 0.0 ? clamp(1.0 - len / u_pfB[k].x, 0.0, 1.0) : 1.0;
+    f += (vec2(-dir.y, dir.x) * u_pfA[k].z - dir * u_pfA[k].w) * w;
+  }
+  return f;
+}
+
+float vnHash(vec2 i, float t) { return fract(sin(dot(i, vec2(127.1, 311.7)) + t) * 43758.5453); }
+float vnoise(vec2 p, float t) {
+  vec2 i = floor(p);
+  vec2 fr = fract(p);
+  vec2 u = fr * fr * (3.0 - 2.0 * fr);
+  float a = vnHash(i, t);
+  float b = vnHash(i + vec2(1.0, 0.0), t);
+  float c = vnHash(i + vec2(0.0, 1.0), t);
+  float d = vnHash(i + vec2(1.0, 1.0), t);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+vec2 turbForce(vec2 pos) {
+  if (u_turb.x == 0.0) return vec2(0.0);
+  vec2 uv = pos / max(u_turb.y, 1.0);
+  float t = u_time * u_turb.z;
+  float e = 0.35;
+  float nx0 = vnoise(uv - vec2(e, 0.0), t);
+  float nx1 = vnoise(uv + vec2(e, 0.0), t);
+  float ny0 = vnoise(uv - vec2(0.0, e), t);
+  float ny1 = vnoise(uv + vec2(0.0, e), t);
+  return vec2(ny1 - ny0, -(nx1 - nx0)) / (2.0 * e) * u_turb.x;
+}`;
+
 /** Update (simulation) vertex shader — outputs new state via transform feedback. */
 export const UPDATE_VS = `#version 300 es
 precision highp float;
@@ -66,9 +116,14 @@ uniform float u_frame;
 uniform int   u_shape;       // 0 point, 1 circle, 2 rect
 uniform float u_shapeR;
 uniform vec2  u_shapeSize;
+// emission mask: a point table of emitter-relative offsets (RG32F, row-major
+// 2048-wide). u_maskCount == 0 → no mask, use the analytic shape.
+uniform highp sampler2D u_maskTbl;
+uniform float u_maskCount;
 
 float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
 float rnd(float s, float k) { return hash11(s * 57.31 + k * 131.7 + 0.123); }
+${FORCE_GLSL}
 
 void main() {
   gl_Position = vec4(0.0, 0.0, 0.0, 1.0); // required by ANGLE/Metal even under rasterizer discard
@@ -81,7 +136,12 @@ void main() {
   if (!alive && inWindow) {
     float s = hash11(id * 7.77 + u_frame * 3.13 + 1.0);
     vec2 off = vec2(0.0);
-    if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); off = vec2(cos(a), sin(a)) * u_shapeR * sqrt(rnd(s, 9.0)); }
+    if (u_maskCount > 0.5) {
+      int idx = int(rnd(s, 11.0) * u_maskCount);
+      idx = clamp(idx, 0, int(u_maskCount) - 1);
+      off = texelFetch(u_maskTbl, ivec2(idx % 2048, idx / 2048), 0).rg;
+    }
+    else if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); off = vec2(cos(a), sin(a)) * u_shapeR * sqrt(rnd(s, 9.0)); }
     else if (u_shape == 2) { off = (vec2(rnd(s, 1.0), rnd(s, 2.0)) - 0.5) * u_shapeSize; }
     o_pos  = u_emitter + off;
     o_vel  = mix(u_velMin, u_velMax, vec2(rnd(s, 3.0), rnd(s, 4.0)));
@@ -96,7 +156,7 @@ void main() {
     return;
   }
 
-  vec2 force = u_gravity + u_wind;
+  vec2 force = u_gravity + u_wind + pointForces(i_pos, u_emitter) + turbForce(i_pos);
   vec2 vel = i_vel + force * u_dt;
   vel *= exp(-u_drag * u_dt);
   o_pos  = i_pos + vel * u_dt;
@@ -141,6 +201,7 @@ uniform float u_dt;
 uniform vec2  u_gravity;
 uniform vec2  u_wind;
 uniform float u_drag;
+uniform vec2  u_emitter;
 uniform vec2  u_velMin;
 uniform vec2  u_velMax;
 uniform float u_lifeMin;
@@ -152,6 +213,7 @@ uniform vec2  u_shapeSize;
 
 float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
 float rnd(float s, float k) { return hash11(s * 57.31 + k * 131.7 + 0.123); }
+${FORCE_GLSL}
 
 void main() {
   gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
@@ -180,7 +242,7 @@ void main() {
     return;
   }
 
-  vec2 force = u_gravity + u_wind;
+  vec2 force = u_gravity + u_wind + pointForces(i_pos, u_emitter) + turbForce(i_pos);
   vec2 vel = i_vel + force * u_dt;
   vel *= exp(-u_drag * u_dt);
   o_pos  = i_pos + vel * u_dt;

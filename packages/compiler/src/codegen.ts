@@ -256,6 +256,57 @@ export const NODE_CODEGEN: Record<string, NodeCodegen> = {
     outputs: { force: `${ctx.safeNormalize(`p.pos - ${i.center}`)} * ${i.strength}` },
   }),
   'field.drag': (_c, i) => ({ outputs: { drag: i.coefficient! } }),
+  // vortex: swirl around (emitterPos + center); tangential strength, inward
+  // pull, linear falloff over radius (radius <= 0 → global)
+  'field.vortex': (ctx, i) => {
+    const d = ctx.temp('vec2');
+    const len = ctx.temp('f32');
+    const dir = ctx.temp('vec2');
+    const w = ctx.temp('f32');
+    ctx.line(`let ${d} = p.pos - (U.emitterPos + ${i.center});`);
+    ctx.line(`let ${len} = max(length(${d}), 1e-3);`);
+    ctx.line(`let ${dir} = ${d} / ${len};`);
+    ctx.line(`let ${w} = select(1.0, clamp(1.0 - ${len} / max(${i.radius}, 1e-3), 0.0, 1.0), ${i.radius} > 0.0);`);
+    return { outputs: { force: `(vec2f(-${dir}.y, ${dir}.x) * ${i.strength} - ${dir} * ${i.pull}) * ${w}` } };
+  },
+  // turbulence: curl of animated 2D value noise via central differences —
+  // divergence-free swirls, backend-neutral arithmetic only (no helper fns)
+  'field.turbulence': (ctx, i) => {
+    const uv = ctx.temp('vec2');
+    const tt = ctx.temp('f32');
+    ctx.line(`let ${uv} = p.pos / max(${i.scale}, 1.0);`);
+    ctx.line(`let ${tt} = U.time * ${i.speed};`);
+    // value noise at uv + off, fully inlined (hash = fract(sin(dot)+t)·K)
+    const noiseAt = (dx: string, dy: string): string => {
+      const q = ctx.temp('vec2');
+      const ip = ctx.temp('vec2');
+      const fp = ctx.temp('vec2');
+      const uu = ctx.temp('vec2');
+      const n = ctx.temp('f32');
+      ctx.line(`let ${q} = ${uv} + vec2f(${dx}, ${dy});`);
+      ctx.line(`let ${ip} = floor(${q});`);
+      ctx.line(`let ${fp} = fract(${q});`);
+      ctx.line(`let ${uu} = ${fp} * ${fp} * (3.0 - 2.0 * ${fp});`);
+      ctx.line(
+        `let ${n} = mix(` +
+          `mix(fract(sin(dot(${ip}, vec2f(127.1, 311.7)) + ${tt}) * 43758.5453), ` +
+          `fract(sin(dot(${ip} + vec2f(1.0, 0.0), vec2f(127.1, 311.7)) + ${tt}) * 43758.5453), ${uu}.x), ` +
+          `mix(fract(sin(dot(${ip} + vec2f(0.0, 1.0), vec2f(127.1, 311.7)) + ${tt}) * 43758.5453), ` +
+          `fract(sin(dot(${ip} + vec2f(1.0, 1.0), vec2f(127.1, 311.7)) + ${tt}) * 43758.5453), ${uu}.x), ${uu}.y);`,
+      );
+      return n;
+    };
+    const e = '0.35';
+    const nx0 = noiseAt(`-${e}`, '0.0');
+    const nx1 = noiseAt(e, '0.0');
+    const ny0 = noiseAt('0.0', `-${e}`);
+    const ny1 = noiseAt('0.0', e);
+    return {
+      outputs: {
+        force: `vec2f(${ny1} - ${ny0}, -(${nx1} - ${nx0})) / (2.0 * ${e}) * ${i.strength}`,
+      },
+    };
+  },
 
   // shape.*  (output named 'pos')
   'shape.point': (_c, i) => ({ outputs: { pos: i.offset! } }),

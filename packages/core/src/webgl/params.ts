@@ -33,6 +33,20 @@ export interface EngineParams {
   sizeFrom: number;
   sizeTo: number;
   sizeEase: number;
+  /**
+   * Up to 4 point fields (field.vortex / field.radial). tangential = swirl
+   * px/s² (sign = direction), pull = inward suction (+) / push (−), radius =
+   * linear falloff distance (0 = global), relative = center is emitter-relative.
+   */
+  pointFields: {
+    center: [number, number];
+    tangential: number;
+    pull: number;
+    radius: number;
+    relative: 0 | 1;
+  }[];
+  /** field.turbulence: [strength, noise cell px, speed] ([0,…] = off). */
+  turbulence: [number, number, number];
 }
 
 const f = (l: Literal | undefined, d: number): number => (l?.t === 'f32' ? l.v : d);
@@ -65,6 +79,18 @@ export function extractParams(
     return e ? nodes.get(e.from.nodeId) : undefined;
   };
   const byKind = (kind: string) => g.nodes.find((n) => n.kind === kind);
+  /** f32 port value: knob-driven (param.ref edge or knobBinding) or the literal. */
+  const fk = (n: Node | undefined, portId: string, d: number): number => {
+    if (!n) return d;
+    const knob = resolveKnob(n, portId, source, paramById);
+    if (knob !== undefined) {
+      const live = knobValues[knob];
+      if (live !== undefined) return live;
+      const pd = params.find((x) => x.name === knob);
+      return pd?.default.t === 'f32' ? pd.default.v : d;
+    }
+    return f(n.values?.[portId], d);
+  };
 
   const p: EngineParams = {
     capacity: system.capacity,
@@ -87,12 +113,14 @@ export function extractParams(
     sizeFrom: 8,
     sizeTo: 0,
     sizeEase: 0,
+    pointFields: [],
+    turbulence: [0, 120, 1],
   };
 
   const shapeNode = source(byKind('output.spawnPosition')?.id, 'pos');
   if (shapeNode?.kind === 'shape.circle') {
     p.shape = 1;
-    p.shapeRadius = f(shapeNode.values?.radius, 40);
+    p.shapeRadius = fk(shapeNode, 'radius', 40);
   } else if (shapeNode?.kind === 'shape.rectangle') {
     p.shape = 2;
     p.shapeSize = v2(shapeNode.values?.size, [80, 80]);
@@ -106,8 +134,8 @@ export function extractParams(
 
   const lifeNode = source(byKind('output.initLife')?.id, 'life');
   if (lifeNode?.kind === 'gen.randomRange') {
-    p.lifeMin = f(lifeNode.values?.min, 1);
-    p.lifeMax = f(lifeNode.values?.max, 1.5);
+    p.lifeMin = fk(lifeNode, 'min', 1);
+    p.lifeMax = fk(lifeNode, 'max', 1.5);
   } else {
     const lit = byKind('output.initLife')?.values?.life;
     if (lit?.t === 'f32') {
@@ -118,7 +146,29 @@ export function extractParams(
 
   for (const n of g.nodes) {
     if (n.kind === 'field.gravity') p.gravity = v2(n.values?.g, [0, 300]);
-    if (n.kind === 'field.drag') p.drag = f(n.values?.coefficient, 0);
+    if (n.kind === 'field.drag') p.drag = fk(n, 'coefficient', 0);
+    if (n.kind === 'field.vortex' && p.pointFields.length < 4) {
+      p.pointFields.push({
+        center: v2(n.values?.center, [0, 0]),
+        tangential: fk(n, 'strength', 300),
+        pull: fk(n, 'pull', 0),
+        radius: fk(n, 'radius', 240),
+        relative: 1,
+      });
+    }
+    if (n.kind === 'field.radial' && p.pointFields.length < 4) {
+      // schema: +strength pushes away from center → pull is the negation
+      p.pointFields.push({
+        center: v2(n.values?.center, [0, 0]),
+        tangential: 0,
+        pull: -fk(n, 'strength', 0),
+        radius: 0,
+        relative: 0,
+      });
+    }
+    if (n.kind === 'field.turbulence') {
+      p.turbulence = [fk(n, 'strength', 200), fk(n, 'scale', 120), fk(n, 'speed', 1)];
+    }
     if (n.kind === 'field.directional') {
       const strengthKnob = resolveKnob(n, 'strength', source, paramById);
       const angleKnob = resolveKnob(n, 'angle', source, paramById);
@@ -142,8 +192,8 @@ export function extractParams(
 
   const scaleNode = byKind('gen.scaleOverLife');
   if (scaleNode) {
-    p.sizeFrom = f(scaleNode.values?.from, 1) * 8;
-    p.sizeTo = f(scaleNode.values?.to, 0) * 8;
+    p.sizeFrom = fk(scaleNode, 'from', 1) * 8;
+    p.sizeTo = fk(scaleNode, 'to', 0) * 8;
     p.sizeEase = EASE_INDEX[scaleNode.structural?.ease ?? 'linear'] ?? 0;
   }
 

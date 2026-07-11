@@ -3,8 +3,10 @@ import {
   Background,
   Controls,
   ReactFlow,
+  ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   type Connection,
   type Edge as RFEdge,
   type Node as RFNode,
@@ -12,13 +14,22 @@ import {
 import { useEditor } from './store';
 import { toFlow } from './graphAdapter';
 import { PylinkaNode } from './components/PylinkaNode';
-import { Palette } from './components/Palette';
+import { Palette, DND_KIND } from './components/Palette';
 import { Preview } from './components/Preview';
 import { Systems } from './components/Systems';
+import { ProjectsMenu } from './components/ProjectsMenu';
 
 const nodeTypes = { pylinka: PylinkaNode };
 
 export function App() {
+  return (
+    <ReactFlowProvider>
+      <EditorApp />
+    </ReactFlowProvider>
+  );
+}
+
+function EditorApp() {
   const project = useEditor((s) => s.project);
   const activeSystemId = useEditor((s) => s.activeSystemId);
   const selectedNodeId = useEditor((s) => s.selectedNodeId);
@@ -27,9 +38,7 @@ export function App() {
   const deleteNode = useEditor((s) => s.deleteNode);
   const deleteEdge = useEditor((s) => s.deleteEdge);
   const select = useEditor((s) => s.select);
-  const reset = useEditor((s) => s.reset);
   const rename = useEditor((s) => s.rename);
-  const newProject = useEditor((s) => s.newProject);
   const importProject = useEditor((s) => s.importProject);
   const snapshot = useEditor((s) => s.snapshot);
 
@@ -55,8 +64,44 @@ export function App() {
     r.readAsText(file);
   };
 
+  // drop a .pylinka.json anywhere on the editor to import it
+  useEffect(() => {
+    const isJsonFileDrag = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false;
+    const over = (e: DragEvent) => {
+      if (isJsonFileDrag(e)) e.preventDefault();
+    };
+    const drop = (e: DragEvent) => {
+      const f = e.dataTransfer?.files?.[0];
+      if (!f || !(f.type === 'application/json' || f.name.endsWith('.json'))) return;
+      e.preventDefault();
+      if (confirm(`Import "${f.name}" and replace the current project?`)) onImportFile(f);
+    };
+    window.addEventListener('dragover', over);
+    window.addEventListener('drop', drop);
+    return () => {
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('drop', drop);
+    };
+  }, []);
+
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
+  const { screenToFlowPosition } = useReactFlow();
+  const addNode = useEditor((s) => s.addNode);
+
+  // palette → canvas drag-and-drop
+  const onDragOver = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes(DND_KIND)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+  const onDrop = (e: React.DragEvent) => {
+    const kind = e.dataTransfer.getData(DND_KIND);
+    if (!kind) return;
+    e.preventDefault();
+    const at = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    addNode(kind, at.x - 105, at.y - 15); // centre the node on the cursor
+  };
 
   // rebuild flow only when the active graph's STRUCTURE changes (not on value scrubs / drags)
   const structureSig = useMemo(() => {
@@ -97,13 +142,8 @@ export function App() {
           aria-label="Project name"
         />
         <div className="ml-auto flex items-center gap-2 text-xs">
-          <button onClick={newProject} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">New</button>
-          <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
-            Import
-            <input type="file" accept=".json,application/json" className="hidden" onChange={(e) => e.target.files?.[0] && onImportFile(e.target.files[0])} />
-          </label>
+          <ProjectsMenu />
           <button onClick={exportJson} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">Export</button>
-          <button onClick={reset} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">Reset</button>
         </div>
       </header>
 
@@ -124,6 +164,8 @@ export function App() {
             onEdgesDelete={(es) => es.forEach((e) => deleteEdge(e.id))}
             onNodeClick={(_e, n) => select(n.id)}
             onPaneClick={() => select(null)}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
             fitView
             minZoom={0.2}
             defaultEdgeOptions={{ animated: true }}

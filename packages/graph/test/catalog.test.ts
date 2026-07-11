@@ -63,8 +63,23 @@ describe('node catalog — §16', () => {
   });
 
   it('M2-only nodes are absent from the v1 catalog', () => {
-    for (const kind of ['gen.curl', 'field.vortex', 'field.curlField', 'shape.drawnArea', 'math.expression']) {
+    // field.vortex was promoted to v1 on 2026-07-11 (owner request, QUESTIONS.md)
+    for (const kind of ['gen.curl', 'field.curlField', 'shape.drawnArea', 'math.expression']) {
       expect(getSchema(V1_CATALOG, kind), kind).toBeUndefined();
     }
+  });
+
+  it('v1 swirl fields are registered', () => {
+    expect(getSchema(V1_CATALOG, 'field.vortex')!.inputs.map((p) => p.id)).toEqual([
+      'center',
+      'strength',
+      'pull',
+      'radius',
+    ]);
+    expect(getSchema(V1_CATALOG, 'field.turbulence')!.inputs.map((p) => p.id)).toEqual([
+      'strength',
+      'scale',
+      'speed',
+    ]);
   });
 });

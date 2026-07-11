@@ -92,8 +92,16 @@ export function Assets() {
       <div className="mt-3 rounded-lg border border-border p-2">
         {!draft ? (
           <div className="flex flex-col gap-2">
-            <label className="flex cursor-pointer items-center justify-center rounded-md border border-dashed border-border py-3 text-muted-foreground hover:bg-accent">
-              + Upload atlas image
+            <label
+              className="flex cursor-pointer flex-col items-center justify-center gap-0.5 rounded-md border border-dashed border-border py-3 text-muted-foreground hover:bg-accent"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer.files?.[0];
+                if (f?.type.startsWith('image/')) void onFile(f);
+              }}>
+              <span>+ Upload image</span>
+              <span className="text-[9px]">single sprite or sprite sheet — click or drop a file</span>
               <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
             </label>
             <button className="rounded-md border border-border py-1.5 text-muted-foreground hover:bg-accent" onClick={addCoins}>

@@ -189,6 +189,12 @@ const fields: NodeSchema[] = [
   schema({ kind: 'field.directional', label: 'Directional (wind)', namespace: 'field', evalTime: 'update', impact: 'low', inputs: [inPort('strength', 'f32', f(0)), inPort('angle', 'f32', f(0))], outputs: [outPort('force', 'vec2')] }),
   schema({ kind: 'field.radial', label: 'Radial', namespace: 'field', evalTime: 'update', impact: 'low', inputs: [inPort('center', 'vec2', v2(0, 0)), inPort('strength', 'f32', f(0))], outputs: [outPort('force', 'vec2')] }),
   schema({ kind: 'field.drag', label: 'Drag', namespace: 'field', evalTime: 'update', impact: 'low', inputs: [inPort('coefficient', 'f32', f(1))], outputs: [outPort('drag', 'f32')] }),
+  // promoted from M2 (2026-07-11, owner request): swirl around emitter+center;
+  // strength = tangential px/s² (sign = direction), pull = inward suction,
+  // radius = linear falloff distance (0 = global)
+  schema({ kind: 'field.vortex', label: 'Vortex', namespace: 'field', evalTime: 'update', impact: 'medium', inputs: [inPort('center', 'vec2', v2(0, 0)), inPort('strength', 'f32', f(300)), inPort('pull', 'f32', f(0)), inPort('radius', 'f32', f(240))], outputs: [outPort('force', 'vec2')] }),
+  // curl of animated value noise (divergence-free swirls); scale = noise cell px
+  schema({ kind: 'field.turbulence', label: 'Turbulence', namespace: 'field', evalTime: 'update', impact: 'medium', inputs: [inPort('strength', 'f32', f(200)), inPort('scale', 'f32', f(120)), inPort('speed', 'f32', f(1))], outputs: [outPort('force', 'vec2')] }),
 ];
 
 // ===========================================================================

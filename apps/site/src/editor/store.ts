@@ -1,10 +1,10 @@
 import { create } from 'zustand';
-import type { Edge, Literal, Node, System } from '@pylinka/graph';
+import type { Edge, Literal, Node, ParamDef, System } from '@pylinka/graph';
 import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { seedProject } from './seed';
 import { autoLayout } from './layout';
 import { RECIPES, type RecipeAtlas } from '../recipes/data';
-import type { EditorProject, EditorTexture } from './types';
+import type { EditorProject, EditorTexture, EmissionMaskData, EmitterPathData } from './types';
 
 const KEY = 'pylinka.editor.project';
 type XY = { x: number; y: number };
@@ -88,6 +88,26 @@ function load(): EditorProject {
   return normalize(seedProject() as EditorProject);
 }
 
+/** Next free param id ('p1', 'p2', …). */
+function nextParamId(p: EditorProject): string {
+  let max = 0;
+  for (const pd of p.params) {
+    const m = /^p(\d+)$/.exec(pd.id);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `p${max + 1}`;
+}
+
+/** A valid, unique knob name derived from `base` ('scale_from', 'scale_from2', …). */
+function uniqueParamName(p: EditorProject, base: string): string {
+  let name = base.replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^(\d)/, '_$1') || 'knob';
+  const taken = new Set(p.params.map((pd) => pd.name));
+  if (!taken.has(name)) return name;
+  let n = 2;
+  while (taken.has(`${name}${n}`)) n++;
+  return `${name}${n}`;
+}
+
 /** Global-unique node id across ALL systems (positions are keyed by bare node id). */
 function nextNodeId(p: EditorProject): string {
   let max = 0;
@@ -157,10 +177,24 @@ interface EditorState {
   toggleSystem(id: string): void;
   /** make `childId` spawn on `parentId`'s particle deaths (null = born at cursor) */
   setSubParent(childId: string, parentId: string | null): void;
+  // knobs (project params)
+  /** add a new f32 knob; returns its id */
+  addParam(init?: Partial<Pick<ParamDef, 'name' | 'min' | 'max' | 'default' | 'unit' | 'group'>>): string;
+  updateParam(id: string, patch: Partial<Pick<ParamDef, 'name' | 'min' | 'max' | 'default' | 'unit' | 'group'>>): void;
+  /** delete a knob + every param.ref node / knobBinding that references it */
+  removeParam(id: string): void;
+  /** promote an unconnected f32 port to a new knob (knobBindings) */
+  promoteValue(nodeId: string, portId: string): void;
+  /** detach a port from its knob (value falls back to the literal) */
+  unbindKnob(nodeId: string, portId: string): void;
   // textures (bound to the active system)
   addTexture(tex: Omit<EditorTexture, 'id'>): void;
   removeTexture(id: string): void;
   setActiveTexture(id: string | null): void;
+  /** set/clear the painted emission area of the ACTIVE system */
+  setMask(mask: EmissionMaskData | null): void;
+  /** set/clear the emitter trajectory of the ACTIVE system (preview reads it live) */
+  setPath(path: EmitterPathData | null): void;
   reset(): void;
   newProject(): void;
   importProject(obj: unknown): void;
@@ -327,6 +361,8 @@ export const useEditor = create<EditorState>((set, get) => {
         const project = structuredClone(s.project);
         project.systems = project.systems.filter((x) => x.id !== id);
         if (project.systemTextures) delete project.systemTextures[id];
+        if (project.systemMasks) delete project.systemMasks[id];
+        if (project.systemPaths) delete project.systemPaths[id];
         if (project.subEmitters) {
           delete project.subEmitters[id]; // as a child
           for (const [c, par] of Object.entries(project.subEmitters))
@@ -373,6 +409,92 @@ export const useEditor = create<EditorState>((set, get) => {
       }, true);
     },
 
+    addParam(init) {
+      let id = '';
+      commit((p) => {
+        id = nextParamId(p);
+        const def = init?.default?.t === 'f32' ? init.default : { t: 'f32' as const, v: 0 };
+        p.params.push({
+          id,
+          name: uniqueParamName(p, init?.name ?? 'knob'),
+          type: 'f32',
+          min: init?.min ?? 0,
+          max: init?.max ?? 1,
+          scale: 'linear',
+          default: def,
+          ...(init?.unit ? { unit: init.unit } : {}),
+          ...(init?.group ? { group: init.group } : {}),
+        });
+      });
+      return id;
+    },
+
+    updateParam(id, patch) {
+      commit((p) => {
+        const pd = p.params.find((x) => x.id === id);
+        if (!pd) return;
+        if (patch.name !== undefined && patch.name !== pd.name) pd.name = uniqueParamName(p, patch.name);
+        if (patch.min !== undefined) pd.min = patch.min;
+        if (patch.max !== undefined) pd.max = patch.max;
+        if (patch.default !== undefined) pd.default = patch.default;
+        if (patch.unit !== undefined) pd.unit = patch.unit || undefined;
+        if (patch.group !== undefined) pd.group = patch.group || undefined;
+        if (pd.min !== undefined && pd.max !== undefined && pd.max < pd.min) [pd.min, pd.max] = [pd.max, pd.min];
+      });
+    },
+
+    removeParam(id) {
+      commit((p) => {
+        p.params = p.params.filter((x) => x.id !== id);
+        for (const sys of p.systems) {
+          const g = sys.graph;
+          const dead = new Set(g.nodes.filter((n) => n.kind === 'param.ref' && n.structural?.param === id).map((n) => n.id));
+          if (dead.size) {
+            g.nodes = g.nodes.filter((n) => !dead.has(n.id));
+            g.edges = g.edges.filter((e) => !dead.has(e.from.nodeId) && !dead.has(e.to.nodeId));
+          }
+          for (const n of g.nodes) {
+            if (!n.knobBindings) continue;
+            for (const [port, pid] of Object.entries(n.knobBindings)) if (pid === id) delete n.knobBindings[port];
+            if (!Object.keys(n.knobBindings).length) delete n.knobBindings;
+          }
+        }
+      });
+    },
+
+    promoteValue(nodeId, portId) {
+      commit((p, sys) => {
+        const node = sys.graph.nodes.find((n) => n.id === nodeId);
+        if (!node) return;
+        const schema = getSchema(V1_CATALOG, node.kind);
+        const port = schema?.inputs.find((x) => x.id === portId);
+        if (!port || port.type !== 'f32') return;
+        const lit = node.values?.[portId] ?? port.defaultValue;
+        const v = lit?.t === 'f32' ? lit.v : 0;
+        const id = nextParamId(p);
+        const span = Math.abs(v) || 1;
+        p.params.push({
+          id,
+          name: uniqueParamName(p, `${node.kind.split('.')[1]}_${portId}`),
+          type: 'f32',
+          min: Math.min(0, v - span),
+          max: v + span,
+          scale: 'linear',
+          default: { t: 'f32', v },
+        });
+        node.knobBindings = { ...(node.knobBindings ?? {}), [portId]: id };
+      });
+    },
+
+    unbindKnob(nodeId, portId) {
+      commit((_p, sys) => {
+        const node = sys.graph.nodes.find((n) => n.id === nodeId);
+        if (!node?.knobBindings) return;
+        delete node.knobBindings[portId];
+        if (!Object.keys(node.knobBindings).length) delete node.knobBindings;
+      });
+    },
+
     addTexture(tex) {
       const id = crypto.randomUUID();
       commit((p, sys) => {
@@ -394,6 +516,20 @@ export const useEditor = create<EditorState>((set, get) => {
       commit((p, sys) => {
         p.systemTextures = { ...(p.systemTextures ?? {}), [sys.id]: id };
       }, true);
+    },
+
+    setMask(mask) {
+      // masks are construction-time (point-table texture) → full re-create
+      commit((p, sys) => {
+        p.systemMasks = { ...(p.systemMasks ?? {}), [sys.id]: mask };
+      }, true);
+    },
+
+    setPath(path) {
+      // the preview reads paths live from the project each frame — no re-create
+      commit((p, sys) => {
+        p.systemPaths = { ...(p.systemPaths ?? {}), [sys.id]: path };
+      });
     },
 
     reset() {

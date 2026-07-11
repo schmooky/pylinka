@@ -20,6 +20,16 @@ export interface SubSource {
   parent: WebGL2Engine;
 }
 
+/**
+ * Emission-mask point table: emitter-relative spawn offsets (px), one xy pair
+ * per emitting texel of the authored mask. Built CPU-side, sampled per spawn.
+ */
+export interface MaskConfig {
+  /** interleaved xy offsets, length == 2 * count */
+  points: Float32Array;
+  count: number;
+}
+
 /** Resolved atlas-sequence config the engine renders. */
 export interface AtlasConfig {
   image: TexImageSource;
@@ -84,24 +94,48 @@ export class WebGL2Engine {
   private cur = 0;
   private spawnBase = 0;
   private frame = 0;
+  private timeAcc = 0;
+  // scratch for the point-field uniform arrays (avoids per-frame allocation)
+  private readonly pfA = new Float32Array(16);
+  private readonly pfB = new Float32Array(8);
 
   private readonly sizeScale: number;
   private readonly atlas: AtlasConfig | undefined;
   private readonly tex: WebGLTexture | null = null;
   private readonly sub: SubSource | undefined;
+  private readonly maskTex: WebGLTexture | null = null;
+  private readonly maskCount: number = 0;
 
   /** current ping-pong index (which buffer holds this-frame state). */
   get curIndex(): number { return this.cur; }
   bufferAt(i: number): WebGLBuffer { return this.bufs[i]!; }
   get capacityValue(): number { return this.capacity; }
 
-  constructor(gl: WebGL2RenderingContext, params: EngineParams, sizeScale = 1, atlas?: AtlasConfig, sub?: SubSource) {
+  constructor(gl: WebGL2RenderingContext, params: EngineParams, sizeScale = 1, atlas?: AtlasConfig, sub?: SubSource, mask?: MaskConfig) {
     this.gl = gl;
     // a sub-emitter mirrors its parent 1:1, so it must share the parent's capacity
     this.capacity = sub ? sub.parent.capacityValue : params.capacity;
     this.sizeScale = sizeScale;
     this.atlas = atlas;
     this.sub = sub;
+
+    if (mask && mask.count > 0 && !sub) {
+      // RG32F row-major table, 2048 wide; sampled with texelFetch (no filtering)
+      const w = Math.min(mask.count, 2048);
+      const h = Math.ceil(mask.count / 2048);
+      const data = new Float32Array(w * h * 2);
+      data.set(mask.points.subarray(0, mask.count * 2));
+      this.maskTex = gl.createTexture();
+      this.maskCount = mask.count;
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, w, h, 0, gl.RG, gl.FLOAT, data);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
     this.updateProg = link(gl, sub ? UPDATE_VS_SUB : UPDATE_VS, UPDATE_FS, TF_VARYINGS);
     this.renderProg = link(gl, RENDER_VS, RENDER_FS);
 
@@ -260,6 +294,33 @@ export class WebGL2Engine {
     gl.uniform1f(u.get('u_shapeR')!, p.shapeRadius);
     gl.uniform2f(u.get('u_shapeSize')!, p.shapeSize[0], p.shapeSize[1]);
 
+    const pf = p.pointFields;
+    gl.uniform1f(u.get('u_pfCount')!, Math.min(pf.length, 4));
+    this.pfA.fill(0);
+    this.pfB.fill(0);
+    for (let k = 0; k < Math.min(pf.length, 4); k++) {
+      const e = pf[k]!;
+      this.pfA[k * 4] = e.center[0];
+      this.pfA[k * 4 + 1] = e.center[1];
+      this.pfA[k * 4 + 2] = e.tangential;
+      this.pfA[k * 4 + 3] = e.pull;
+      this.pfB[k * 2] = e.radius;
+      this.pfB[k * 2 + 1] = e.relative;
+    }
+    gl.uniform4fv(u.get('u_pfA')!, this.pfA);
+    gl.uniform2fv(u.get('u_pfB')!, this.pfB);
+    gl.uniform3f(u.get('u_turb')!, p.turbulence[0], p.turbulence[1], p.turbulence[2]);
+    gl.uniform1f(u.get('u_time')!, this.timeAcc);
+    this.timeAcc += dt;
+
+    gl.uniform1f(u.get('u_maskCount')!, this.maskCount);
+    if (this.maskTex) {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+      gl.uniform1i(u.get('u_maskTbl')!, 1);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+
     const dst = 1 - this.cur;
     const vao = this.sub
       ? this.subVAOs[this.cur]![this.sub.parent.curIndex]!
@@ -354,6 +415,7 @@ export class WebGL2Engine {
     for (const v of this.renderVAOs) gl.deleteVertexArray(v);
     gl.deleteTransformFeedback(this.tf);
     if (this.tex) gl.deleteTexture(this.tex);
+    if (this.maskTex) gl.deleteTexture(this.maskTex);
   }
 }
 
@@ -361,6 +423,8 @@ const UPDATE_UNIFORMS = [
   'u_dt', 'u_gravity', 'u_wind', 'u_drag', 'u_emitter', 'u_velMin', 'u_velMax',
   'u_lifeMin', 'u_lifeMax', 'u_spawnBase', 'u_spawnCount', 'u_capacity', 'u_frame',
   'u_shape', 'u_shapeR', 'u_shapeSize',
+  'u_pfCount', 'u_pfA', 'u_pfB', 'u_turb', 'u_time',
+  'u_maskTbl', 'u_maskCount',
 ];
 const RENDER_UNIFORMS = [
   'u_resolution', 'u_colorFrom', 'u_colorTo', 'u_sizeFrom', 'u_sizeTo', 'u_colorEase', 'u_sizeEase',

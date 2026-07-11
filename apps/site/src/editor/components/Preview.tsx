@@ -1,9 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { createParticles, type AtlasOptions, type ParticlesHandle } from '@pylinka/core/webgl';
+import {
+  createParticles,
+  type AtlasOptions,
+  type EmissionMaskOptions,
+  type ParticlesHandle,
+} from '@pylinka/core/webgl';
+import { createPathDriver, type PathDriver } from '@pylinka/core';
 import type { System } from '@pylinka/graph';
 import { useEditor } from '../store';
 import { frameSize, type EditorProject } from '../types';
 import { Assets } from './Assets';
+import { Knobs } from './Knobs';
+import { EmitterPanel } from './EmitterPanel';
+import { PathOverlay } from './PathOverlay';
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
@@ -23,13 +32,21 @@ async function buildAtlas(proj: EditorProject, sys: System): Promise<AtlasOption
   return { image, width: t.width, height: t.height, cols: t.cols, rows: t.rows, frameW, frameH, pad: t.pad, fps: t.fps, play: t.play, pick: t.pick };
 }
 
+async function buildMask(proj: EditorProject, sys: System): Promise<EmissionMaskOptions | undefined> {
+  const m = (proj.systemMasks ?? {})[sys.id];
+  if (!m) return undefined;
+  const image = await loadImage(m.src);
+  return { image, width: m.width, offset: m.offset };
+}
+
 export function Preview() {
   const project = useEditor((s) => s.project);
   const rev = useEditor((s) => s.rev);
   const texRev = useEditor((s) => s.texRev);
-  const params = useEditor((s) => s.project.params);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fxRef = useRef<ParticlesHandle[]>([]);
+  const fxSysRef = useRef<string[]>([]);
+  const driversRef = useRef<Map<string, { key: string; drv: PathDriver }>>(new Map());
   const projRef = useRef(project);
   projRef.current = project;
 
@@ -41,7 +58,8 @@ export function Preview() {
   const [knobs, setKnobs] = useState<Record<string, number>>({});
   const knobsRef = useRef(knobs);
   knobsRef.current = knobs;
-  const [tab, setTab] = useState<'knobs' | 'assets'>('knobs');
+  const [tab, setTab] = useState<'knobs' | 'emitter' | 'assets'>('knobs');
+  const [pathEdit, setPathEdit] = useState(false);
 
   // (re)create one particle handle per ENABLED system, PARENTS FIRST so a
   // sub-emitter can wire to its parent's live handle. Only the first handle
@@ -75,13 +93,16 @@ export function Preview() {
 
     const byId = new Map<string, ParticlesHandle>();
     const handles: ParticlesHandle[] = [];
+    const sysIds: string[] = [];
     for (let i = 0; i < ordered.length; i++) {
       const sys = ordered[i]!;
       let atlas: AtlasOptions | undefined;
+      let emissionMask: EmissionMaskOptions | undefined;
       try {
         atlas = await buildAtlas(proj, sys);
+        emissionMask = await buildMask(proj, sys);
       } catch {
-        /* texture failed to load → soft sprite */
+        /* texture/mask failed to load → soft sprite / analytic shape */
       }
       const parId = parentOf(sys.id);
       const subParent = parId ? byId.get(parId) : undefined;
@@ -89,17 +110,20 @@ export function Preview() {
         const h = createParticles(canvas, proj, {
           systemName: sys.name,
           ...(atlas ? { atlas } : {}),
+          ...(emissionMask ? { emissionMask } : {}),
           ...(subParent ? { subParent } : {}),
         });
         h.autoClear = i === 0;
         for (const [n, v] of Object.entries(knobsRef.current)) h.setKnob(n, v);
         byId.set(sys.id, h);
         handles.push(h);
+        sysIds.push(sys.id);
       } catch (e) {
         setHud(String(e));
       }
     }
     fxRef.current = handles;
+    fxSysRef.current = sysIds;
   };
 
   // init once: size canvas, seed knobs, start the loop, create the handles
@@ -139,7 +163,31 @@ export function Preview() {
           ey = canvas.height / 2 + Math.sin(t * 1.8) * r;
         } else { ex = canvas.width / 2; ey = canvas.height / 2; }
         let alive = 0;
-        for (const fx of handles) { fx.setEmitter(ex, ey); fx.update(dt); }
+        for (let i = 0; i < handles.length; i++) {
+          const fx = handles[i]!;
+          // a system with a trajectory spline follows it; others follow mouse/orbit
+          const sysId = fxSysRef.current[i];
+          const path = sysId ? (projRef.current.systemPaths ?? {})[sysId] : null;
+          if (path && path.points.length >= 2) {
+            const key = JSON.stringify(path) + canvas.width + 'x' + canvas.height;
+            let entry = driversRef.current.get(sysId!);
+            if (!entry || entry.key !== key) {
+              const pts = path.points.map(
+                (p) => [p[0] * canvas.width, p[1] * canvas.height] as [number, number],
+              );
+              entry = {
+                key,
+                drv: createPathDriver(pts, { duration: path.duration, mode: path.mode, closed: path.closed }),
+              };
+              driversRef.current.set(sysId!, entry);
+            }
+            const [px2, py2] = entry.drv.at(t);
+            fx.setEmitter(px2, py2);
+          } else {
+            fx.setEmitter(ex, ey);
+          }
+          fx.update(dt);
+        }
         acc += dt; frames++;
         if (acc >= 0.5) {
           for (const fx of handles) alive += fx.aliveCount();
@@ -187,6 +235,12 @@ export function Preview() {
       </div>
       <div className="relative min-h-[340px] flex-1 bg-black">
         <canvas ref={canvasRef} className="block h-full w-full" onPointerMove={onMove} onPointerLeave={() => (mouseRef.current = null)} />
+        <PathOverlay editing={pathEdit} />
+        {pathEdit && (
+          <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[10px] text-[#c4b5fd]">
+            drawing path — click to add · drag to move · double-click to delete
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-3 border-b border-border px-3 py-2 text-xs">
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={orbit} onChange={(e) => setOrbit(e.target.checked)} /> orbit</label>
@@ -194,40 +248,23 @@ export function Preview() {
         <span className="text-muted-foreground">move mouse over canvas</span>
       </div>
       <div className="flex border-b border-border text-xs">
-        {(['knobs', 'assets'] as const).map((k) => (
+        {(['knobs', 'emitter', 'assets'] as const).map((k) => (
           <button key={k} onClick={() => setTab(k)}
             className={`flex-1 border-b-2 py-2 capitalize ${tab === k ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
             {k}
           </button>
         ))}
       </div>
-      <div className="max-h-64 shrink-0 overflow-y-auto p-3">
+      <div className="max-h-[42vh] shrink-0 overflow-y-auto p-3">
         {tab === 'assets' ? (
           <Assets />
+        ) : tab === 'emitter' ? (
+          <EmitterPanel pathEdit={pathEdit} setPathEdit={setPathEdit} />
         ) : (
-          <>
-            <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Knobs</div>
-            {params.length === 0 && <div className="text-xs text-muted-foreground">No knobs. Promote a value or add param.ref nodes.</div>}
-            {params.map((p) => {
-              const min = p.min ?? 0;
-              const max = p.max ?? 1;
-              const val = knobs[p.name] ?? (p.default.t === 'f32' ? p.default.v : 0);
-              return (
-                <div key={p.id} className="mb-2">
-                  <div className="mb-1 flex justify-between text-xs">
-                    <span>{p.name}</span>
-                    <span className="font-mono text-muted-foreground">{val.toFixed(2)}{p.unit ? ' ' + p.unit : ''}</span>
-                  </div>
-                  <input type="range" className="w-full" min={min} max={max} step={(max - min) / 200 || 0.01} value={val}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      setKnobs((k) => ({ ...k, [p.name]: v }));
-                      fxRef.current.forEach((h) => h.setKnob(p.name, v));
-                    }} />
-                </div>
-              );
-            })}
-          </>
+          <Knobs values={knobs} onSet={(name, v) => {
+            setKnobs((k) => ({ ...k, [name]: v }));
+            fxRef.current.forEach((h) => h.setKnob(name, v));
+          }} />
         )}
       </div>
     </div>

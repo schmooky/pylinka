@@ -15,6 +15,25 @@ export interface EditorTexture {
   pick: 'per-particle' | 'per-spawn';
 }
 
+/** A painted/image emission area: opaque pixels of `src` mark where particles spawn. */
+export interface EmissionMaskData {
+  /** png data URL; the alpha channel is the mask */
+  src: string;
+  /** world width the mask maps to (px, emitter-centred; height follows aspect) */
+  width: number;
+  /** offset of the mask centre from the emitter */
+  offset: [number, number];
+}
+
+/** An emitter trajectory: Catmull-Rom through `points` (normalized 0..1 canvas coords). */
+export interface EmitterPathData {
+  points: [number, number][];
+  /** seconds per full traversal */
+  duration: number;
+  mode: 'loop' | 'pingpong' | 'once';
+  closed: boolean;
+}
+
 /**
  * The editor's project shape: a standard pylinka/v1 project plus editor-only
  * texture bindings. The core fields round-trip through any pylinka consumer;
@@ -27,6 +46,10 @@ export interface EditorProject extends PylinkaProject {
   systemTextures?: Record<string, string | null>;
   /** sub-emitters: childSystemId → parentSystemId (child spawns on parent deaths) */
   subEmitters?: Record<string, string>;
+  /** painted emission areas per system (systemId → mask | null) */
+  systemMasks?: Record<string, EmissionMaskData | null>;
+  /** emitter trajectory splines per system (systemId → path | null) */
+  systemPaths?: Record<string, EmitterPathData | null>;
 }
 
 /** Per-frame atlas dims from a uniform grid (matches the runtime's tools). */

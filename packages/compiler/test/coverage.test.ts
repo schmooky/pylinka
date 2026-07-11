@@ -71,6 +71,38 @@ describe('compile — node coverage', () => {
     expect(c.updateSrc).not.toContain('p.vel += force * U.dt;');
   });
 
+  it('vortex + turbulence forces compile to update-pass WGSL', () => {
+    const c = compile(
+      bundle({
+        nodes: [
+          { id: 'n1', kind: 'shape.point', values: { offset: { t: 'vec2', v: [0, 0] } } },
+          { id: 'n2', kind: 'output.spawnPosition' },
+          { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 2 } } },
+          { id: 'n4', kind: 'field.vortex', values: { center: { t: 'vec2', v: [0, 0] }, strength: { t: 'f32', v: 300 }, pull: { t: 'f32', v: 40 }, radius: { t: 'f32', v: 240 } } },
+          { id: 'n5', kind: 'output.addForce' },
+          { id: 'n6', kind: 'field.turbulence', values: { strength: { t: 'f32', v: 200 }, scale: { t: 'f32', v: 120 }, speed: { t: 'f32', v: 1 } } },
+          { id: 'n7', kind: 'output.addForce' },
+        ],
+        edges: [
+          { id: 'e1', from: { nodeId: 'n1', portId: 'pos' }, to: { nodeId: 'n2', portId: 'pos' } },
+          { id: 'e2', from: { nodeId: 'n4', portId: 'force' }, to: { nodeId: 'n5', portId: 'force' } },
+          { id: 'e3', from: { nodeId: 'n6', portId: 'force' }, to: { nodeId: 'n7', portId: 'force' } },
+        ],
+      }),
+      V1_CATALOG,
+      'webgpu',
+    );
+    // vortex: emitter-relative center, tangential swirl + pull, linear falloff
+    expect(c.updateSrc).toContain('p.pos - (U.emitterPos + ');
+    expect(c.updateSrc).toContain('select(1.0, clamp(1.0 - ');
+    // turbulence: animated value-noise curl via central differences
+    expect(c.updateSrc).toContain('* 43758.5453');
+    expect(c.updateSrc).toContain('U.time *');
+    expect(c.updateSrc).toContain('/ (2.0 * 0.35) *');
+    // both accumulate into the shared force register
+    expect(c.updateSrc).toContain('force +=');
+  });
+
   it('multiple distinct eases are rejected in v1', () => {
     expect(() =>
       compile(
