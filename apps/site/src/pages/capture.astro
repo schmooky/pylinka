@@ -14,9 +14,11 @@
   <body style="margin:0;background:#000;overflow:hidden">
     <canvas id="c" style="display:block;width:100vw;height:100vh"></canvas>
     <script>
-      import { createParticles, type AtlasOptions, type ParticlesHandle } from '@pylinka/core/webgl';
+      import { createParticles, type AtlasOptions, type EmissionMaskOptions, type ParticlesHandle } from '@pylinka/core/webgl';
+      import { createPathDriver, type PathDriver } from '@pylinka/core';
       import type { System } from '@pylinka/graph';
       import { RECIPES } from '../recipes/data';
+      import type { EditorProject } from '../editor/types';
 
       (window as unknown as { __slugs: string[] }).__slugs = RECIPES.map((r) => r.slug);
 
@@ -54,6 +56,17 @@
             return undefined;
           }
         };
+        // drawn emission area / trajectory spline (editor extras on the project)
+        const extras = recipe.project as EditorProject;
+        const maskFor = async (sys: System): Promise<EmissionMaskOptions | undefined> => {
+          const m = extras.systemMasks?.[sys.id];
+          if (!m) return undefined;
+          try {
+            return { image: await loadImage(m.src), width: m.width, offset: m.offset };
+          } catch {
+            return undefined;
+          }
+        };
         // topological order: a system after its parent
         const ordered: System[] = [];
         const placed = new Set<string>();
@@ -68,8 +81,10 @@
 
         const byId = new Map<string, ParticlesHandle>();
         const handles: ParticlesHandle[] = [];
+        const drivers: (PathDriver | undefined)[] = [];
         for (const sys of ordered) {
           const atlas = await atlasFor(sys);
+          const emissionMask = await maskFor(sys);
           const par = parentOf(sys.id);
           const subParent = par ? byId.get(par) : undefined;
           const fx = createParticles(canvas, recipe.project, {
@@ -77,11 +92,21 @@
             zoom: 1.6,
             sizeScale: 2.2,
             ...(atlas ? { atlas } : {}),
+            ...(emissionMask ? { emissionMask } : {}),
             ...(subParent ? { subParent } : {}),
           });
           fx.autoClear = handles.length === 0;
           byId.set(sys.id, fx);
           handles.push(fx);
+          const path = extras.systemPaths?.[sys.id];
+          drivers.push(
+            path && path.points.length >= 2
+              ? createPathDriver(
+                  path.points.map((p) => [p[0] * canvas.width, p[1] * canvas.height] as [number, number]),
+                  { duration: path.duration, mode: path.mode, closed: path.closed },
+                )
+              : undefined,
+          );
         }
 
         const cx = canvas.width / 2;
@@ -97,7 +122,17 @@
           } else if (recipe!.group === 'ambient') {
             ex = cx; ey = canvas.height * 0.12;
           }
-          for (const fx of handles) { fx.setEmitter(ex, ey); fx.update(1 / 60); }
+          for (let i = 0; i < handles.length; i++) {
+            const fx = handles[i]!;
+            const drv = drivers[i];
+            if (drv) {
+              const [px, py] = drv.at(t);
+              fx.setEmitter(px, py);
+            } else {
+              fx.setEmitter(ex, ey);
+            }
+            fx.update(1 / 60);
+          }
           requestAnimationFrame(frame);
         }
         requestAnimationFrame(frame);

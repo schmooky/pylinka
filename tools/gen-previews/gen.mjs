@@ -31,8 +31,16 @@ const browser = await chromium.launch({
 const p0 = await browser.newPage();
 await p0.goto(`${SITE}/capture`, { waitUntil: 'load' });
 await p0.waitForFunction(() => Array.isArray(window.__slugs), { timeout: 20000 });
-const slugs = await p0.evaluate(() => window.__slugs);
+let slugs = await p0.evaluate(() => window.__slugs);
 await p0.close();
+
+// --only slug1,slug2 → record just those (e.g. newly added recipes)
+const onlyArg = process.argv.find((a) => a.startsWith('--only'));
+if (onlyArg) {
+  const list = (onlyArg.includes('=') ? onlyArg.split('=')[1] : process.argv[process.argv.indexOf(onlyArg) + 1] ?? '')
+    .split(',').map((s) => s.trim()).filter(Boolean);
+  slugs = slugs.filter((s) => list.includes(s));
+}
 console.log(`recording ${slugs.length} recipes at ${W}x${H}…`);
 
 for (const slug of slugs) {

@@ -3,8 +3,9 @@
  * set the WebGL2 runtime interprets, so every one renders live in the gallery.
  */
 import type { Literal, Node, PylinkaProject, System } from '@pylinka/graph';
+import type { EditorProject, EmitterPathData } from '../editor/types';
 
-export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'combo';
+export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'swirl' | 'drawn' | 'combo';
 
 export interface RecipeAtlas {
   url: string;
@@ -61,6 +62,10 @@ interface FxOpts {
   gravity?: Vec2;
   drag?: number;
   wind?: Vec2; // [power, angle]
+  /** field.vortex around the emitter: [tangential strength, inward pull, falloff radius (0 = global)] */
+  vortex?: [number, number, number];
+  /** field.turbulence: [strength, noise cell px, speed] */
+  turb?: [number, number, number];
   colorFrom: string;
   colorTo: string;
   colorEase?: string;
@@ -68,6 +73,10 @@ interface FxOpts {
   scaleTo?: number;
   scaleEase?: string;
   atlas?: RecipeAtlas;
+  /** drawn emission area: particles spawn only inside this mask (data-URL image) */
+  mask?: { src: string; width: number };
+  /** emitter trajectory spline (normalized 0..1 canvas points) */
+  path?: EmitterPathData;
 }
 
 const f = (v: number): Literal => ({ t: 'f32', v });
@@ -116,14 +125,26 @@ function buildSystem(o: SysOpts, id: string, idp: string, name: string, enabled 
     nodes.push({ id: nid(12), kind: 'output.addForce' });
     link(11, 'force', 12, 'force');
   }
+  if (o.vortex) {
+    nodes.push({ id: nid(17), kind: 'field.vortex', values: { center: v2([0, 0]), strength: f(o.vortex[0]), pull: f(o.vortex[1]), radius: f(o.vortex[2]) } });
+    nodes.push({ id: nid(18), kind: 'output.addForce' });
+    link(17, 'force', 18, 'force');
+  }
+  if (o.turb) {
+    nodes.push({ id: nid(19), kind: 'field.turbulence', values: { strength: f(o.turb[0]), scale: f(o.turb[1]), speed: f(o.turb[2]) } });
+    nodes.push({ id: nid(20), kind: 'output.addForce' });
+    link(19, 'force', 20, 'force');
+  }
 
-  nodes.push({ id: nid(13), kind: 'gen.colorOverLife', structural: { ease: o.colorEase ?? 'linear' }, values: { from: col(o.colorFrom), to: col(o.colorTo) } });
-  nodes.push({ id: nid(14), kind: 'output.writeColor' });
-  link(13, 'out', 14, 'color');
+  // look nodes get ids AFTER every force id (17-20) so auto-layout keeps the
+  // Forces annotation group vertically contiguous
+  nodes.push({ id: nid(21), kind: 'gen.colorOverLife', structural: { ease: o.colorEase ?? 'linear' }, values: { from: col(o.colorFrom), to: col(o.colorTo) } });
+  nodes.push({ id: nid(22), kind: 'output.writeColor' });
+  link(21, 'out', 22, 'color');
 
-  nodes.push({ id: nid(15), kind: 'gen.scaleOverLife', structural: { ease: o.scaleEase ?? 'linear' }, values: { from: f(o.scaleFrom ?? 1), to: f(o.scaleTo ?? 0) } });
-  nodes.push({ id: nid(16), kind: 'output.writeScale' });
-  link(15, 'out', 16, 'scale');
+  nodes.push({ id: nid(23), kind: 'gen.scaleOverLife', structural: { ease: o.scaleEase ?? 'linear' }, values: { from: f(o.scaleFrom ?? 1), to: f(o.scaleTo ?? 0) } });
+  nodes.push({ id: nid(24), kind: 'output.writeScale' });
+  link(23, 'out', 24, 'scale');
 
   const emitter: System['emitter'] =
     o.mode === 'burst'
@@ -137,8 +158,25 @@ const META = { format: 'pylinka/v1' as const, version: 1, catalogVersion: 1, cre
 
 function fx(o: FxOpts): Recipe {
   const project: PylinkaProject = { ...META, id: o.slug, name: o.title, params: [], assets: [], systems: [buildSystem(o, 's1', 'n', 'fx')] };
+  // drawn emission areas + trajectory splines ride on the project as editor
+  // extras — forkRecipe structured-clones them straight into the editor
+  if (o.mask) (project as EditorProject).systemMasks = { s1: { src: o.mask.src, width: o.mask.width, offset: [0, 0] } };
+  if (o.path) (project as EditorProject).systemPaths = { s1: o.path };
   return { slug: o.slug, title: o.title, group: o.group, oneLiner: o.oneLiner, tags: o.tags, project, ...(o.atlas ? { atlas: o.atlas } : {}) };
 }
+
+/** White-on-transparent SVG as a data URL — a hand-drawn emission mask. */
+function svgMask(inner: string, w = 240, h = 240): string {
+  return `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><g fill="#fff">${inner}</g></svg>`,
+  )}`;
+}
+
+const MASK_HEART = svgMask('<path d="M120 210 C 30 140 10 80 55 48 C 90 24 115 44 120 64 C 125 44 150 24 185 48 C 230 80 210 140 120 210 Z"/>');
+const MASK_STAR = svgMask('<polygon points="120,14 149,86 226,86 164,132 186,206 120,161 54,206 76,132 14,86 91,86"/>');
+const MASK_BOLT = svgMask('<polygon points="134,8 58,132 108,132 94,232 184,94 128,94"/>');
+const MASK_WIN = svgMask('<text x="120" y="152" font-family="Arial, Helvetica, sans-serif" font-size="88" font-weight="900" text-anchor="middle">WIN</text>');
+const MASK_RING = svgMask('<path d="M120 26 A94 94 0 1 0 120.1 26 Z M120 62 A58 58 0 1 1 119.9 62 Z" fill-rule="evenodd"/>');
 
 /** One emitter in a multi-emitter recipe. */
 type Layer = SysOpts & { name: string; atlas?: RecipeAtlas };
@@ -290,4 +328,96 @@ export const RECIPES: Recipe[] = [
       { name: 'smoke', capacity: 2500, blend: 'normal', rate: 120, rod: 0.8, velMin: [-8, -10], velMax: [8, -30], lifeMin: 1, lifeMax: 1.8, drag: 0.6, colorFrom: '#88aaccaa', colorTo: '#33445500', colorEase: 'sine.out', scaleFrom: 0.8, scaleTo: 2.2, scaleEase: 'sine.out' },
     ],
   }),
+
+  // ── swirl — vortex / helix / turbulence ──────────────────────────────
+  fx({ slug: 'whirlpool', title: 'Whirlpool', group: 'swirl',
+    oneLiner: 'Water sucked around and down a spinning drain.',
+    tags: ['vortex', 'water', 'swirl'],
+    capacity: 5000, rate: 700, shape: 'circle', radius: 190, velMin: [-20, -20], velMax: [20, 20],
+    lifeMin: 1.6, lifeMax: 2.8, drag: 0.5, vortex: [900, 260, 380],
+    colorFrom: '#7dd3fcff', colorTo: '#1e3a8a00', colorEase: 'sine.out', scaleFrom: 1.1, scaleTo: 0.2 }),
+  fx({ slug: 'black-hole', title: 'Black Hole', group: 'swirl',
+    oneLiner: 'Everything spirals into the singularity and blinks out.',
+    tags: ['vortex', 'pull', 'space'],
+    capacity: 5000, rate: 600, shape: 'circle', radius: 240, velMin: [-10, -10], velMax: [10, 10],
+    lifeMin: 1.4, lifeMax: 2.4, vortex: [420, 620, 0],
+    colorFrom: '#c4b5fdff', colorTo: '#ffffff00', colorEase: 'power2.in', scaleFrom: 0.9, scaleTo: 0.15 }),
+  fx({ slug: 'galaxy', title: 'Galaxy', group: 'swirl',
+    oneLiner: 'A slow spiral of stars with a hint of turbulence.',
+    tags: ['vortex', 'stars', 'ambient'],
+    capacity: 6000, rate: 450, shape: 'circle', radius: 260, velMin: [-6, -6], velMax: [6, 6],
+    lifeMin: 3, lifeMax: 5, vortex: [230, 40, 0], turb: [60, 220, 0.4],
+    colorFrom: '#e0f2feff', colorTo: '#818cf800', colorEase: 'sine.out', scaleFrom: 0.55, scaleTo: 0.1 }),
+  fx({ slug: 'cyclone', title: 'Cyclone', group: 'swirl',
+    oneLiner: 'A tight funnel — swirl, suction and updraft.',
+    tags: ['vortex', 'wind', 'helix'],
+    capacity: 4500, rate: 620, shape: 'rect', size: [70, 240], velMin: [-25, -30], velMax: [25, 30],
+    lifeMin: 1, lifeMax: 2, vortex: [1200, 220, 260], wind: [150, -1.5708],
+    colorFrom: '#e2e8f0ff', colorTo: '#64748b00', colorEase: 'sine.out', scaleFrom: 0.9, scaleTo: 1.8, scaleEase: 'sine.out' }),
+  fx({ slug: 'helix-climb', title: 'Helix Climb', group: 'swirl',
+    oneLiner: 'Particles corkscrew upward around the emitter — a rising helix.',
+    tags: ['helix', 'vortex', 'updraft'],
+    capacity: 4000, rate: 520, velMin: [-140, -20], velMax: [140, 20],
+    lifeMin: 1.4, lifeMax: 2.2, gravity: [0, -230], vortex: [820, 340, 0], drag: 0.25,
+    colorFrom: '#99f6e4ff', colorTo: '#0d948800', colorEase: 'sine.out', scaleFrom: 1, scaleTo: 0.2 }),
+  fx({ slug: 'ember-vortex', title: 'Ember Vortex', group: 'swirl',
+    oneLiner: 'A fire devil — embers caught in a burning swirl.',
+    tags: ['vortex', 'fire', 'embers'],
+    capacity: 4500, rate: 560, shape: 'circle', radius: 90, velMin: [-40, -120], velMax: [40, -30],
+    lifeMin: 0.9, lifeMax: 1.8, vortex: [950, 180, 300], turb: [140, 90, 1.2],
+    colorFrom: '#ffd27aff', colorTo: '#ef444400', colorEase: 'power2.out', scaleFrom: 1.3, scaleTo: 0 }),
+  fx({ slug: 'turbulent-motes', title: 'Turbulent Motes', group: 'swirl',
+    oneLiner: 'Dust motes wandering on curling air — pure turbulence.',
+    tags: ['turbulence', 'dust', 'ambient'],
+    capacity: 3000, rate: 260, shape: 'circle', radius: 250, velMin: [-8, -8], velMax: [8, 8],
+    lifeMin: 2.5, lifeMax: 4.5, drag: 0.7, turb: [420, 110, 0.6],
+    colorFrom: '#f8fafccc', colorTo: '#94a3b800', colorEase: 'sine.inOut', scaleFrom: 0.5, scaleTo: 0.9, scaleEase: 'sine.inOut' }),
+
+  // ── drawn — painted / image emission areas ───────────────────────────
+  fx({ slug: 'heart-glow', title: 'Heart Glow', group: 'drawn',
+    oneLiner: 'A heart drawn in softly rising rose sparkles.',
+    tags: ['drawn', 'mask', 'love'],
+    capacity: 4000, rate: 700, velMin: [-8, -30], velMax: [8, -8],
+    lifeMin: 0.8, lifeMax: 1.6, mask: { src: MASK_HEART, width: 330 },
+    colorFrom: '#fda4afff', colorTo: '#e11d4800', colorEase: 'sine.out', scaleFrom: 0.8, scaleTo: 0.1 }),
+  fx({ slug: 'star-stamp', title: 'Star Stamp', group: 'drawn',
+    oneLiner: 'A five-point star stamped in golden glitter.',
+    tags: ['drawn', 'mask', 'gold'],
+    capacity: 4000, rate: 750, velMin: [-12, -12], velMax: [12, 12],
+    lifeMin: 0.6, lifeMax: 1.4, mask: { src: MASK_STAR, width: 340 },
+    colorFrom: '#fde68aff', colorTo: '#f59e0b00', colorEase: 'power2.out', scaleFrom: 0.9, scaleTo: 0.1 }),
+  fx({ slug: 'bolt-strike', title: 'Bolt Strike', group: 'drawn',
+    oneLiner: 'A lightning bolt crackling with electric sparks.',
+    tags: ['drawn', 'mask', 'electric'],
+    capacity: 4500, rate: 900, velMin: [-25, -25], velMax: [25, 25],
+    lifeMin: 0.25, lifeMax: 0.7, mask: { src: MASK_BOLT, width: 300 },
+    colorFrom: '#e0f2feff', colorTo: '#22d3ee00', colorEase: 'power2.out', scaleFrom: 1, scaleTo: 0.15 }),
+  fx({ slug: 'win-sign', title: 'WIN Sign', group: 'drawn',
+    oneLiner: 'The word WIN burning in casino-gold sparks.',
+    tags: ['drawn', 'mask', 'slot', 'text'],
+    capacity: 5000, rate: 950, velMin: [-10, -35], velMax: [10, -6],
+    lifeMin: 0.6, lifeMax: 1.2, mask: { src: MASK_WIN, width: 430 },
+    colorFrom: '#fef08aff', colorTo: '#f9731600', colorEase: 'power2.out', scaleFrom: 0.9, scaleTo: 0.1 }),
+  fx({ slug: 'halo-ring', title: 'Halo Ring', group: 'drawn',
+    oneLiner: 'A drawn ring shimmering like a halo.',
+    tags: ['drawn', 'mask', 'ring'],
+    capacity: 3500, rate: 620, velMin: [-10, -18], velMax: [10, -4],
+    lifeMin: 0.9, lifeMax: 1.8, mask: { src: MASK_RING, width: 320 },
+    colorFrom: '#fef9c3ff', colorTo: '#eab30800', colorEase: 'sine.out', scaleFrom: 0.7, scaleTo: 0.1 }),
+
+  // ── path-driven trails ───────────────────────────────────────────────
+  fx({ slug: 'infinity-loop', title: 'Infinity Loop', group: 'trails',
+    oneLiner: 'A comet rides a figure-eight spline forever.',
+    tags: ['path', 'spline', 'trail'],
+    capacity: 4500, rate: 520, rod: 1.6, velMin: [-15, -15], velMax: [15, 15],
+    lifeMin: 0.7, lifeMax: 1.4, drag: 1.2,
+    path: { points: [[0.2, 0.5], [0.35, 0.3], [0.5, 0.5], [0.65, 0.7], [0.82, 0.5], [0.65, 0.3], [0.5, 0.5], [0.35, 0.7]], duration: 6, mode: 'loop', closed: true },
+    colorFrom: '#a5f3fcff', colorTo: '#6366f100', colorEase: 'power2.out', scaleFrom: 1.2, scaleTo: 0 }),
+  fx({ slug: 'pendulum-sparks', title: 'Pendulum Sparks', group: 'trails',
+    oneLiner: 'Sparks swing along an arc — a spline played ping-pong.',
+    tags: ['path', 'spline', 'sparks'],
+    capacity: 4000, rate: 480, rod: 1.2, velMin: [-20, -60], velMax: [20, 10],
+    lifeMin: 0.6, lifeMax: 1.2, gravity: [0, 320],
+    path: { points: [[0.16, 0.3], [0.5, 0.72], [0.84, 0.3]], duration: 2.6, mode: 'pingpong', closed: false },
+    colorFrom: '#fcd34dff', colorTo: '#dc262600', colorEase: 'power2.out', scaleFrom: 1.1, scaleTo: 0 }),
 ];
