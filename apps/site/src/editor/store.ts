@@ -173,6 +173,8 @@ interface EditorState {
   setStructural(nodeId: string, key: string, value: string): void;
   connect(from: Edge['from'], to: Edge['to']): void;
   deleteNode(id: string): void;
+  /** mute/unmute a node — it stays in the graph but the sim ignores it */
+  toggleNodeDisabled(id: string): void;
   deleteEdge(id: string): void;
   select(id: string | null): void;
   rename(name: string): void;
@@ -322,12 +324,22 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     deleteNode(id) {
-      commit((_p, sys) => {
+      commit((p, sys) => {
         const g = sys.graph;
         g.nodes = g.nodes.filter((n) => n.id !== id);
         g.edges = g.edges.filter((e) => e.from.nodeId !== id && e.to.nodeId !== id);
+        if (p.disabledNodes) p.disabledNodes = p.disabledNodes.filter((x) => x !== id);
       });
       if (get().selectedNodeId === id) set({ selectedNodeId: null });
+    },
+
+    toggleNodeDisabled(id) {
+      commit((p) => {
+        const set0 = new Set(p.disabledNodes ?? []);
+        if (set0.has(id)) set0.delete(id);
+        else set0.add(id);
+        p.disabledNodes = [...set0];
+      });
     },
 
     deleteEdge(id) {

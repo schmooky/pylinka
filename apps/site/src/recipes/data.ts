@@ -4,6 +4,7 @@
  */
 import type { Literal, Node, PylinkaProject, System } from '@pylinka/graph';
 import type { EditorProject, EmitterPathData } from '../editor/types';
+import { MASK_BOLT, MASK_HEART, MASK_RING, MASK_STAR, MASK_WIN } from '../editor/maskShapes';
 
 export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'swirl' | 'drawn' | 'combo';
 
@@ -165,18 +166,7 @@ function fx(o: FxOpts): Recipe {
   return { slug: o.slug, title: o.title, group: o.group, oneLiner: o.oneLiner, tags: o.tags, project, ...(o.atlas ? { atlas: o.atlas } : {}) };
 }
 
-/** White-on-transparent SVG as a data URL — a hand-drawn emission mask. */
-function svgMask(inner: string, w = 240, h = 240): string {
-  return `data:image/svg+xml;utf8,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><g fill="#fff">${inner}</g></svg>`,
-  )}`;
-}
 
-const MASK_HEART = svgMask('<path d="M120 210 C 30 140 10 80 55 48 C 90 24 115 44 120 64 C 125 44 150 24 185 48 C 230 80 210 140 120 210 Z"/>');
-const MASK_STAR = svgMask('<polygon points="120,14 149,86 226,86 164,132 186,206 120,161 54,206 76,132 14,86 91,86"/>');
-const MASK_BOLT = svgMask('<polygon points="134,8 58,132 108,132 94,232 184,94 128,94"/>');
-const MASK_WIN = svgMask('<text x="120" y="152" font-family="Arial, Helvetica, sans-serif" font-size="88" font-weight="900" text-anchor="middle">WIN</text>');
-const MASK_RING = svgMask('<path d="M120 26 A94 94 0 1 0 120.1 26 Z M120 62 A58 58 0 1 1 119.9 62 Z" fill-rule="evenodd"/>');
 
 /** One emitter in a multi-emitter recipe. */
 type Layer = SysOpts & { name: string; atlas?: RecipeAtlas };

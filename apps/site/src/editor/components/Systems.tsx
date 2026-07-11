@@ -12,7 +12,17 @@ export function Systems() {
   const toggleSystem = useEditor((s) => s.toggleSystem);
   const setSubParent = useEditor((s) => s.setSubParent);
   const parentId = useEditor((s) => (s.project.subEmitters ?? {})[s.activeSystemId] ?? '');
+  const project = useEditor((s) => s.project);
   const [editing, setEditing] = useState<string | null>(null);
+
+  // feature badges: what each emitter carries beyond its graph
+  const badges = (sysId: string): { icon: string; label: string }[] => {
+    const out: { icon: string; label: string }[] = [];
+    if (project.systemTextures?.[sysId]) out.push({ icon: '🖼', label: 'textured sprite' });
+    if (project.systemMasks?.[sysId]) out.push({ icon: '🎭', label: 'drawn emission area' });
+    if ((project.systemPaths?.[sysId]?.points.length ?? 0) >= 2) out.push({ icon: '➰', label: 'trajectory spline' });
+    return out;
+  };
 
   const activeName = systems.find((s) => s.id === activeId)?.name ?? '';
   // valid parents = every other system (the store rejects cycles on commit)
@@ -42,6 +52,11 @@ export function Systems() {
                 {sys.name}
               </button>
             )}
+            {badges(sys.id).map((b) => (
+              <span key={b.icon} title={`${b.label} — see the Emitter/Assets tabs`} className="text-[10px] leading-none opacity-80">
+                {b.icon}
+              </span>
+            ))}
             {systems.length > 1 && (
               <button title="Remove emitter" onClick={() => removeSystem(sys.id)}
                 className="text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100">✕</button>

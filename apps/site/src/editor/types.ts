@@ -82,6 +82,8 @@ export interface EditorProject extends PylinkaProject {
   systemPaths?: Record<string, EmitterPathData | null>;
   /** comment frames + sticky notes on the graph canvases */
   annotations?: Annotations;
+  /** muted node ids — kept in the graph but excluded from the running sim */
+  disabledNodes?: string[];
 }
 
 /** Per-frame atlas dims from a uniform grid (matches the runtime's tools). */

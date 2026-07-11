@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { EmissionMaskData } from '../types';
+import { MASK_PRESETS } from '../maskShapes';
 
 /**
  * Paint-an-emission-area modal. White (opaque) pixels = spawn positions.
@@ -159,13 +160,37 @@ export function MaskEditor({ initial, onSave, onClose }: MaskEditorProps) {
           </button>
         </div>
 
+        <div className="mt-2 flex items-center gap-1.5">
+          <span className="mr-0.5 text-muted-foreground">presets</span>
+          {MASK_PRESETS.map((p) => (
+            <button
+              key={p.name}
+              title={`${p.name} — click to use (then paint or erase on top)`}
+              className="grid h-8 w-8 place-items-center rounded-md border border-border hover:border-foreground/40 hover:bg-accent"
+              onClick={() => {
+                const img = new Image();
+                img.onload = () => {
+                  const ctx = canvasRef.current!.getContext('2d')!;
+                  ctx.clearRect(0, 0, W, H);
+                  const k = Math.min(W / img.naturalWidth, H / img.naturalHeight) * 0.92;
+                  const dw = img.naturalWidth * k;
+                  const dh = img.naturalHeight * k;
+                  ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+                };
+                img.src = p.src;
+              }}>
+              <img src={p.src} alt={p.name} className="h-6 w-6 opacity-80" />
+            </button>
+          ))}
+        </div>
+
         <div className="mt-2 flex items-center gap-2">
           <label className="cursor-pointer rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-accent">
             Load image…
             <input type="file" accept="image/*" className="hidden"
               onChange={(e) => e.target.files?.[0] && stampImage(e.target.files[0])} />
           </label>
-          <span className="text-muted-foreground">uses the image's alpha (or brightness) as the area</span>
+          <span className="text-muted-foreground">alpha or brightness becomes the area — gray = fewer spawns</span>
         </div>
 
         <div className="mt-2 flex items-center justify-between gap-2">

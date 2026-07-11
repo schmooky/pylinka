@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { Literal, PortType } from '@pylinka/graph';
 import { getSchema, V1_CATALOG } from '@pylinka/graph';
@@ -17,6 +17,40 @@ const typeColor: Record<PortType, string> = {
   color: 'var(--t-vec4)',
   bool: 'var(--t-bool)',
 };
+
+/** Port label that scrubs its f32 value on horizontal drag (shift = fine). */
+function ScrubLabel({ label, dotColor, value, onChange }: {
+  label: string;
+  dotColor: string;
+  value: number;
+  onChange(v: number): void;
+}) {
+  const start = useRef<{ x: number; v: number } | null>(null);
+  return (
+    <span
+      className="nodrag flex cursor-ew-resize select-none items-center gap-1.5 text-muted-foreground hover:text-foreground"
+      title="Drag to scrub — hold Shift for fine steps"
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        start.current = { x: e.clientX, v: value };
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={(e) => {
+        if (!start.current) return;
+        const step = Math.max(0.01, Math.abs(start.current.v) / 150) * (e.shiftKey ? 0.1 : 1);
+        const next = start.current.v + (e.clientX - start.current.x) * step;
+        onChange(Math.round(next * 1000) / 1000);
+      }}
+      onPointerUp={(e) => {
+        start.current = null;
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      }}>
+      <span className="inline-block h-1 w-1 rounded-full" style={{ background: dotColor }} />
+      {label}
+      <span className="text-[8px] opacity-0 transition-opacity group-hover/row:opacity-60">↔</span>
+    </span>
+  );
+}
 
 function ValueEditor({ nodeId, portId, type, value }: { nodeId: string; portId: string; type: PortType; value: Literal | undefined }) {
   const setValue = useEditor((s) => s.setValue);
@@ -66,9 +100,12 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
   const edges = useEditor((s) => s.system().graph.edges);
   const params = useEditor((s) => s.project.params);
   const setStructural = useEditor((s) => s.setStructural);
+  const setValue = useEditor((s) => s.setValue);
   const deleteNode = useEditor((s) => s.deleteNode);
   const promoteValue = useEditor((s) => s.promoteValue);
   const unbindKnob = useEditor((s) => s.unbindKnob);
+  const toggleNodeDisabled = useEditor((s) => s.toggleNodeDisabled);
+  const muted = useEditor((s) => s.project.disabledNodes?.includes(nodeId) ?? false);
 
   const connected = useMemo(() => {
     const set = new Set<string>();
@@ -96,6 +133,8 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
         minHeight: bodyH,
         borderColor: selected ? tint : 'var(--color-border)',
         boxShadow: selected ? `0 0 0 1px ${tint}, 0 8px 24px -8px color-mix(in oklab, ${tint} 35%, transparent)` : undefined,
+        opacity: muted ? 0.45 : 1,
+        filter: muted ? 'grayscale(0.6)' : undefined,
       }}>
       <div className="flex items-center gap-2 rounded-t-lg px-2.5 py-1.5"
         style={{
@@ -103,8 +142,14 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
           background: `linear-gradient(90deg, color-mix(in oklab, ${tint} 22%, var(--color-card)), var(--color-card))`,
           borderBottom: `1px solid color-mix(in oklab, ${tint} 30%, var(--color-border))`,
         }}>
-        <span style={{ width: 7, height: 7, borderRadius: 9, background: tint, boxShadow: `0 0 6px ${tint}` }} />
-        <span className="truncate font-medium">{schema.label}</span>
+        <button
+          className="nodrag shrink-0 rounded-full"
+          style={{ width: 7, height: 7, background: muted ? 'color-mix(in oklab, var(--color-muted-foreground) 50%, transparent)' : tint, boxShadow: muted ? 'none' : `0 0 6px ${tint}` }}
+          title={muted ? 'Muted — click to include in the sim' : 'Active — click to mute (sim ignores it)'}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => toggleNodeDisabled(node.id)}
+        />
+        <span className="truncate font-medium">{schema.label}{muted ? ' (muted)' : ''}</span>
         <code className="ml-auto text-[9px] text-muted-foreground opacity-60">{node.id}</code>
         <button
           className="nodrag -mr-1 hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-black/20 hover:text-foreground group-hover/node:flex"
@@ -120,12 +165,23 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
           const boundId = node.knobBindings?.[p.id];
           const bound = boundId ? params.find((pp) => pp.id === boundId) : undefined;
           const isConnected = connected.has(p.id);
+          const scrubable = !isConnected && !bound && p.type === 'f32';
+          const cur = node.values?.[p.id];
           return (
             <div key={p.id} className="group/row flex items-center justify-between gap-1" style={{ height: ROW_H }}>
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <span className="inline-block h-1 w-1 rounded-full" style={{ background: typeColor[p.type] }} />
-                {p.id}
-              </span>
+              {scrubable ? (
+                <ScrubLabel
+                  label={p.id}
+                  dotColor={typeColor[p.type]}
+                  value={cur?.t === 'f32' ? cur.v : 0}
+                  onChange={(v) => setValue(node.id, p.id, { t: 'f32', v })}
+                />
+              ) : (
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <span className="inline-block h-1 w-1 rounded-full" style={{ background: typeColor[p.type] }} />
+                  {p.id}
+                </span>
+              )}
               {!isConnected && (bound ? (
                 <span className="nodrag flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px]"
                   style={{ background: 'color-mix(in oklab, #a78bfa 20%, transparent)', color: '#c4b5fd' }}

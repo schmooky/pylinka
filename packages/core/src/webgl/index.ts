@@ -54,10 +54,31 @@ function buildMaskTable(o: EmissionMaskOptions | undefined): MaskConfig | undefi
   ctx.drawImage(o.image as CanvasImageSource, 0, 0, w, h);
   const px = ctx.getImageData(0, 0, w, h).data;
 
+  // resolve the mask channel: 'auto' uses alpha when the image has any
+  // transparency, else luminance (so plain black/white textures just work)
+  let channel = o.channel ?? 'auto';
+  if (channel === 'auto') {
+    channel = 'luminance';
+    for (let i = 3; i < px.length; i += 4)
+      if (px[i]! < 250) {
+        channel = 'alpha';
+        break;
+      }
+  }
+  const weighted = o.weighted ?? true;
+
   const pts: number[] = [];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      if (px[(y * w + x) * 4 + 3]! > 127) {
+      const i = (y * w + x) * 4;
+      const v =
+        channel === 'alpha'
+          ? px[i + 3]!
+          : // luminance gated by alpha so transparent corners of B/W art stay empty
+            ((0.299 * px[i]! + 0.587 * px[i + 1]! + 0.114 * px[i + 2]!) * px[i + 3]!) / 255;
+      // weighted: gray = density (1..4 table entries); stencil: hard 50% cut
+      const n = weighted ? (v < 24 ? 0 : Math.max(1, Math.round((v / 255) * 4))) : v > 127 ? 1 : 0;
+      for (let k = 0; k < n; k++) {
         pts.push(((x + 0.5) / w - 0.5) * worldW + ox, ((y + 0.5) / h - 0.5) * worldH + oy);
       }
     }
@@ -145,13 +166,25 @@ export interface ParticlesOptions {
 }
 
 export interface EmissionMaskOptions {
-  /** mask image — alpha > 127 marks emitting texels */
+  /** mask image — see `channel` for which pixels emit */
   image: TexImageSource;
   /** world width the mask maps to (px); height defaults to the aspect ratio */
   width: number;
   height?: number;
   /** offset of the mask centre from the emitter (px, default [0, 0]) */
   offset?: [number, number];
+  /**
+   * Which channel is the mask. 'alpha': transparent = empty, opaque = emit.
+   * 'luminance': black = empty, white = emit (for opaque B/W textures).
+   * 'auto' (default): alpha when the image has transparency, else luminance.
+   */
+  channel?: 'alpha' | 'luminance' | 'auto';
+  /**
+   * Treat gray/semi-transparent texels as spawn DENSITY (default true):
+   * white/opaque areas emit up to 4× more often than faint ones. false = hard
+   * stencil at the 50% threshold.
+   */
+  weighted?: boolean;
 }
 
 export interface AtlasOptions {

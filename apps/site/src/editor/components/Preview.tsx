@@ -39,6 +39,22 @@ async function buildMask(proj: EditorProject, sys: System): Promise<EmissionMask
   return { image, width: m.width, offset: m.offset };
 }
 
+/** The project the SIM sees: muted nodes (and their edges) stripped out. */
+function effective(proj: EditorProject): EditorProject {
+  const off = new Set(proj.disabledNodes ?? []);
+  if (off.size === 0) return proj;
+  return {
+    ...proj,
+    systems: proj.systems.map((s) => ({
+      ...s,
+      graph: {
+        nodes: s.graph.nodes.filter((n) => !off.has(n.id)),
+        edges: s.graph.edges.filter((e) => !off.has(e.from.nodeId) && !off.has(e.to.nodeId)),
+      },
+    })),
+  };
+}
+
 export function Preview() {
   const project = useEditor((s) => s.project);
   const rev = useEditor((s) => s.rev);
@@ -107,7 +123,7 @@ export function Preview() {
       const parId = parentOf(sys.id);
       const subParent = parId ? byId.get(parId) : undefined;
       try {
-        const h = createParticles(canvas, proj, {
+        const h = createParticles(canvas, effective(proj), {
           systemName: sys.name,
           ...(atlas ? { atlas } : {}),
           ...(emissionMask ? { emissionMask } : {}),
@@ -217,7 +233,8 @@ export function Preview() {
   useEffect(() => {
     const handles = fxRef.current;
     if (!handles.length) return;
-    if (!handles.every((fx) => fx.apply(project))) void recreate();
+    const eff = effective(project);
+    if (!handles.every((fx) => fx.apply(eff))) void recreate();
   }, [rev]);
 
   const onMove = (e: React.PointerEvent) => {
