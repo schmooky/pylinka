@@ -34,6 +34,36 @@ export interface EmitterPathData {
   closed: boolean;
 }
 
+/** A named, colored comment frame around an area of a system's graph (à la UE Blueprints). */
+export interface CommentFrame {
+  id: string;
+  systemId: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  title: string;
+  color: string; // hex accent
+}
+
+/** A free-floating sticky note on a system's canvas (à la Miro). */
+export interface StickyNote {
+  id: string;
+  systemId: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+  color: string;
+}
+
+/** Graph annotations. Exported with the project (a consumer ignores them); strippable on export. */
+export interface Annotations {
+  frames: CommentFrame[];
+  notes: StickyNote[];
+}
+
 /**
  * The editor's project shape: a standard pylinka/v1 project plus editor-only
  * texture bindings. The core fields round-trip through any pylinka consumer;
@@ -50,6 +80,8 @@ export interface EditorProject extends PylinkaProject {
   systemMasks?: Record<string, EmissionMaskData | null>;
   /** emitter trajectory splines per system (systemId → path | null) */
   systemPaths?: Record<string, EmitterPathData | null>;
+  /** comment frames + sticky notes on the graph canvases */
+  annotations?: Annotations;
 }
 
 /** Per-frame atlas dims from a uniform grid (matches the runtime's tools). */

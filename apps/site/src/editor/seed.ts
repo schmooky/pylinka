@@ -1,8 +1,10 @@
 import type { PylinkaProject } from '@pylinka/graph';
+import { generateAnnotations } from './annotate';
+import type { EditorProject } from './types';
 
 /** Default project shown on first load — the coin-spark-trail. */
 export function seedProject(): PylinkaProject {
-  return {
+  const project: PylinkaProject = {
     format: 'pylinka/v1',
     version: 1,
     catalogVersion: 1,
@@ -55,15 +57,22 @@ export function seedProject(): PylinkaProject {
     editor: {
       viewport: { x: 0, y: 0, zoom: 1 },
       nodePositions: {
+        // grouped with breathing room so the Spawn/Forces/Look frames don't collide
         n1: { x: 0, y: 0 }, n2: { x: 320, y: 0 },
-        n3: { x: 0, y: 120 }, n4: { x: 320, y: 120 },
-        n5: { x: 0, y: 250 }, n6: { x: 320, y: 250 },
-        n7: { x: 0, y: 400 }, n8: { x: 320, y: 400 },
-        n9: { x: -300, y: 520 }, n10: { x: -300, y: 620 },
-        n11: { x: 0, y: 540 }, n12: { x: 320, y: 540 },
-        n13: { x: 0, y: 690 }, n14: { x: 320, y: 690 },
-        n15: { x: 0, y: 830 }, n16: { x: 320, y: 830 },
+        n3: { x: 0, y: 130 }, n4: { x: 320, y: 130 },
+        n5: { x: 0, y: 280 }, n6: { x: 320, y: 280 },
+        n7: { x: 0, y: 520 }, n8: { x: 320, y: 520 },
+        n9: { x: -300, y: 650 }, n10: { x: -300, y: 760 },
+        n11: { x: 0, y: 670 }, n12: { x: 320, y: 670 },
+        n13: { x: 0, y: 950 }, n14: { x: 320, y: 950 },
+        n15: { x: 0, y: 1100 }, n16: { x: 320, y: 1100 },
       },
     },
   };
+  (project as EditorProject).annotations = generateAnnotations(
+    project,
+    project.editor!.nodePositions!,
+    'Coin Spark Trail\n\nAn orbiting emitter leaves a cooling spark trail. Wind is knob-driven — try the sliders in the Knobs tab, or promote any ◆ value to a new knob.',
+  );
+  return project;
 }

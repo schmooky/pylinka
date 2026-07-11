@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import {
   Background,
   Controls,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   useEdgesState,
@@ -12,14 +13,16 @@ import {
   type Node as RFNode,
 } from '@xyflow/react';
 import { useEditor } from './store';
-import { toFlow } from './graphAdapter';
+import { toFlow, FRAME_PREFIX, NOTE_PREFIX } from './graphAdapter';
+import { nodesBBox } from './annotate';
 import { PylinkaNode } from './components/PylinkaNode';
+import { CommentNode, NoteNode } from './components/AnnotationNodes';
 import { Palette, DND_KIND } from './components/Palette';
 import { Preview } from './components/Preview';
 import { Systems } from './components/Systems';
 import { ProjectsMenu } from './components/ProjectsMenu';
 
-const nodeTypes = { pylinka: PylinkaNode };
+const nodeTypes = { pylinka: PylinkaNode, comment: CommentNode, note: NoteNode };
 
 export function App() {
   return (
@@ -41,6 +44,12 @@ function EditorApp() {
   const rename = useEditor((s) => s.rename);
   const importProject = useEditor((s) => s.importProject);
   const snapshot = useEditor((s) => s.snapshot);
+  const addFrame = useEditor((s) => s.addFrame);
+  const addNote = useEditor((s) => s.addNote);
+  const updateFrame = useEditor((s) => s.updateFrame);
+  const updateNote = useEditor((s) => s.updateNote);
+  const removeFrame = useEditor((s) => s.removeFrame);
+  const removeNote = useEditor((s) => s.removeNote);
 
   const exportJson = () => {
     const proj = snapshot();
@@ -111,8 +120,32 @@ function EditorApp() {
       n: g.nodes.map((n) => [n.id, n.kind]),
       e: g.edges.map((e) => [e.id, e.from.nodeId, e.from.portId, e.to.nodeId, e.to.portId]),
       p: project.params.map((p) => p.id),
+      a: [
+        ...(project.annotations?.frames ?? []).map((f) => f.id),
+        ...(project.annotations?.notes ?? []).map((n) => n.id),
+      ],
     });
   }, [project, activeSystemId]);
+
+  // annotation toolbar: frame wraps the current selection (or drops at the view centre)
+  const paneCenter = () => {
+    const r = document.querySelector('.react-flow')?.getBoundingClientRect();
+    return r ? screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) : { x: 0, y: 0 };
+  };
+  const onAddFrame = () => {
+    const sel = rfNodes.filter((n) => n.selected && !n.id.includes(':')).map((n) => n.id);
+    const g = (project.systems.find((s) => s.id === activeSystemId) ?? project.systems[0]!).graph;
+    const box = sel.length ? nodesBBox(sel, g, useEditor.getState().positions) : undefined;
+    if (box) addFrame(box);
+    else {
+      const c = paneCenter();
+      addFrame({ x: c.x - 210, y: c.y - 130, w: 420, h: 260 });
+    }
+  };
+  const onAddNote = () => {
+    const c = paneCenter();
+    addNote({ x: c.x - 110, y: c.y - 75 });
+  };
 
   useEffect(() => {
     const f = toFlow(project, useEditor.getState().positions, useEditor.getState().selectedNodeId, activeSystemId);
@@ -159,8 +192,18 @@ function EditorApp() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
-            onNodeDragStop={(_e, n) => moveNode(n.id, n.position.x, n.position.y)}
-            onNodesDelete={(ns) => ns.forEach((n) => deleteNode(n.id))}
+            onNodeDragStop={(_e, n) => {
+              if (n.id.startsWith(FRAME_PREFIX)) updateFrame(n.id.slice(FRAME_PREFIX.length), { x: n.position.x, y: n.position.y });
+              else if (n.id.startsWith(NOTE_PREFIX)) updateNote(n.id.slice(NOTE_PREFIX.length), { x: n.position.x, y: n.position.y });
+              else moveNode(n.id, n.position.x, n.position.y);
+            }}
+            onNodesDelete={(ns) =>
+              ns.forEach((n) => {
+                if (n.id.startsWith(FRAME_PREFIX)) removeFrame(n.id.slice(FRAME_PREFIX.length));
+                else if (n.id.startsWith(NOTE_PREFIX)) removeNote(n.id.slice(NOTE_PREFIX.length));
+                else deleteNode(n.id);
+              })
+            }
             onEdgesDelete={(es) => es.forEach((e) => deleteEdge(e.id))}
             onNodeClick={(_e, n) => select(n.id)}
             onPaneClick={() => select(null)}
@@ -172,6 +215,20 @@ function EditorApp() {
           >
             <Background gap={22} color="color-mix(in oklab, var(--color-border) 70%, transparent)" />
             <Controls showInteractive={false} />
+            <Panel position="top-right" className="flex gap-1.5 text-xs">
+              <button
+                onClick={onAddFrame}
+                title="Add a comment frame — select nodes first to wrap them"
+                className="rounded-md border border-border bg-card px-2.5 py-1.5 text-muted-foreground shadow hover:bg-accent hover:text-foreground">
+                ⬚ Frame
+              </button>
+              <button
+                onClick={onAddNote}
+                title="Add a sticky note"
+                className="rounded-md border border-border bg-card px-2.5 py-1.5 text-muted-foreground shadow hover:bg-accent hover:text-foreground">
+                🗒 Note
+              </button>
+            </Panel>
           </ReactFlow>
           </div>
         </div>

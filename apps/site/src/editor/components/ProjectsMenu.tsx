@@ -82,6 +82,19 @@ export function ProjectsMenu() {
     setOpen(false);
   };
 
+  // export stripped of comment frames / sticky notes (the header Export keeps them)
+  const exportWithoutNotes = () => {
+    const p = snapshot();
+    delete p.annotations;
+    const blob = new Blob([JSON.stringify(p, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${(p.name || 'effect').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.pylinka.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setOpen(false);
+  };
+
   const copyJson = async () => {
     try {
       await navigator.clipboard.writeText(JSON.stringify(snapshot(), null, 2));
@@ -139,6 +152,9 @@ export function ProjectsMenu() {
             <input type="file" accept=".json,application/json" className="hidden"
               onChange={(e) => e.target.files?.[0] && onImportFile(e.target.files[0])} />
           </label>
+          <button className={item} onClick={exportWithoutNotes} title="Export the project with comment frames and sticky notes stripped">
+            Export file (no notes)
+          </button>
           <button className={item} onClick={copyJson}>Copy JSON to clipboard</button>
           <div className="my-1 border-t border-border" />
           <button className={item} onClick={() => { reset(); setOpen(false); }}>Reset to example</button>

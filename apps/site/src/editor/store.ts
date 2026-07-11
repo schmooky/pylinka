@@ -4,7 +4,8 @@ import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { seedProject } from './seed';
 import { autoLayout } from './layout';
 import { RECIPES, type RecipeAtlas } from '../recipes/data';
-import type { EditorProject, EditorTexture, EmissionMaskData, EmitterPathData } from './types';
+import type { CommentFrame, EditorProject, EditorTexture, EmissionMaskData, EmitterPathData, StickyNote } from './types';
+import { generateAnnotations } from './annotate';
 
 const KEY = 'pylinka.editor.project';
 type XY = { x: number; y: number };
@@ -27,11 +28,13 @@ function forkRecipe(slug: string): EditorProject | undefined {
   const project = normalize(structuredClone(recipe.project) as EditorProject);
   project.id = crypto.randomUUID();
   project.name = recipe.title;
-  // lay out every system (each has globally-unique node ids, so positions merge)
+  // lay out every system (each has globally-unique node ids, so positions merge);
+  // stretch rows vertically so the generated comment frames have title room
   const nodePositions = project.systems.reduce<Record<string, { x: number; y: number }>>(
     (acc, s) => Object.assign(acc, autoLayout(s.graph)),
     {},
   );
+  for (const p of Object.values(nodePositions)) p.y *= 1.5;
   project.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions };
 
   // seed editor textures from the recipe's atlas descriptors (per-system, or the
@@ -62,6 +65,10 @@ function forkRecipe(slug: string): EditorProject | undefined {
     project.systemTextures = systemTextures;
   }
   if (recipe.subEmitters) project.subEmitters = { ...recipe.subEmitters };
+  // self-documenting recipes: Spawn/Forces/Look frames + a one-liner sticky note
+  if (!project.annotations) {
+    project.annotations = generateAnnotations(project, nodePositions, `${recipe.title}\n\n${recipe.oneLiner}`);
+  }
   return project;
 }
 
@@ -195,6 +202,13 @@ interface EditorState {
   setMask(mask: EmissionMaskData | null): void;
   /** set/clear the emitter trajectory of the ACTIVE system (preview reads it live) */
   setPath(path: EmitterPathData | null): void;
+  // graph annotations (comment frames + sticky notes, active system)
+  addFrame(rect?: { x: number; y: number; w: number; h: number }): void;
+  updateFrame(id: string, patch: Partial<Omit<CommentFrame, 'id' | 'systemId'>>): void;
+  removeFrame(id: string): void;
+  addNote(at?: { x: number; y: number }): void;
+  updateNote(id: string, patch: Partial<Omit<StickyNote, 'id' | 'systemId'>>): void;
+  removeNote(id: string): void;
   reset(): void;
   newProject(): void;
   importProject(obj: unknown): void;
@@ -363,6 +377,10 @@ export const useEditor = create<EditorState>((set, get) => {
         if (project.systemTextures) delete project.systemTextures[id];
         if (project.systemMasks) delete project.systemMasks[id];
         if (project.systemPaths) delete project.systemPaths[id];
+        if (project.annotations) {
+          project.annotations.frames = project.annotations.frames.filter((f) => f.systemId !== id);
+          project.annotations.notes = project.annotations.notes.filter((n) => n.systemId !== id);
+        }
         if (project.subEmitters) {
           delete project.subEmitters[id]; // as a child
           for (const [c, par] of Object.entries(project.subEmitters))
@@ -529,6 +547,64 @@ export const useEditor = create<EditorState>((set, get) => {
       // the preview reads paths live from the project each frame — no re-create
       commit((p, sys) => {
         p.systemPaths = { ...(p.systemPaths ?? {}), [sys.id]: path };
+      });
+    },
+
+    addFrame(rect) {
+      commit((p, sys) => {
+        const ann = (p.annotations = p.annotations ?? { frames: [], notes: [] });
+        ann.frames.push({
+          id: crypto.randomUUID(),
+          systemId: sys.id,
+          x: rect?.x ?? 0,
+          y: rect?.y ?? 0,
+          w: rect?.w ?? 420,
+          h: rect?.h ?? 260,
+          title: 'Comment',
+          color: '#a78bfa',
+        });
+      });
+    },
+
+    updateFrame(id, patch) {
+      commit((p) => {
+        const f = p.annotations?.frames.find((x) => x.id === id);
+        if (f) Object.assign(f, patch);
+      });
+    },
+
+    removeFrame(id) {
+      commit((p) => {
+        if (p.annotations) p.annotations.frames = p.annotations.frames.filter((x) => x.id !== id);
+      });
+    },
+
+    addNote(at) {
+      commit((p, sys) => {
+        const ann = (p.annotations = p.annotations ?? { frames: [], notes: [] });
+        ann.notes.push({
+          id: crypto.randomUUID(),
+          systemId: sys.id,
+          x: at?.x ?? 0,
+          y: at?.y ?? 0,
+          w: 220,
+          h: 150,
+          text: 'Double-click to edit…',
+          color: '#fbbf24',
+        });
+      });
+    },
+
+    updateNote(id, patch) {
+      commit((p) => {
+        const n = p.annotations?.notes.find((x) => x.id === id);
+        if (n) Object.assign(n, patch);
+      });
+    },
+
+    removeNote(id) {
+      commit((p) => {
+        if (p.annotations) p.annotations.notes = p.annotations.notes.filter((x) => x.id !== id);
       });
     },
 
