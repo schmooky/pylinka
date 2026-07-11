@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
+  "changelog": ["@changesets/changelog-github", { "repo": "schmooky/pylinka" }],
+  "commit": false,
+  "fixed": [],
+  "linked": [["@pylinka/graph", "@pylinka/compiler", "@pylinka/format", "@pylinka/core"]],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": ["@pylinka/site", "@pylinka/atlas-extract", "@pylinka/gen-previews"]
+}

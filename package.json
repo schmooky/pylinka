@@ -4,6 +4,11 @@
   "version": "0.0.0",
   "description": "GPU-driven, node-based particle system for PixiJS. WebGPU first, WebGL2 fallback, built for slot games on real phones.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schmooky/pylinka.git"
+  },
+  "homepage": "https://pylinka.schmooky.dev",
   "type": "module",
   "engines": {
     "node": ">=22",
@@ -21,9 +26,16 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "changeset": "changeset",
+    "changeset:status": "changeset status",
+    "version-packages": "changeset version && pnpm install --lockfile-only",
+    "release": "pnpm build && changeset publish",
+    "snapshot": "pnpm build && changeset version --snapshot \"${SNAPSHOT_TAG:-snapshot}\" && changeset publish --tag \"${SNAPSHOT_TAG:-snapshot}\" --no-git-tag"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^0.5.0",
+    "@changesets/cli": "^2.27.10",
     "@eslint/js": "^9.17.0",
     "@types/node": "^22.10.0",
     "eslint": "^9.17.0",

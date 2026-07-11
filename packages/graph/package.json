@@ -1,8 +1,32 @@
 {
   "name": "@pylinka/graph",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Pylinka shared kernel: graph types, node catalog, validation, hashing, slot assignment. Zero runtime deps.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schmooky/pylinka.git",
+    "directory": "packages/graph"
+  },
+  "homepage": "https://pylinka.schmooky.dev",
+  "bugs": "https://github.com/schmooky/pylinka/issues",
+  "keywords": [
+    "particles",
+    "particle-system",
+    "gpu",
+    "pixijs",
+    "pixi",
+    "webgl2",
+    "webgpu",
+    "vfx",
+    "game",
+    "slot",
+    "node-editor",
+    "dataflow",
+    "graph",
+    "node-catalog",
+    "validation"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -14,7 +38,10 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

@@ -1,8 +1,34 @@
 {
   "name": "@pylinka/compiler",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Pylinka compiler: SystemBundle → backend-neutral IR → GPU program codegen (WGSL). Zero runtime deps.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schmooky/pylinka.git",
+    "directory": "packages/compiler"
+  },
+  "homepage": "https://pylinka.schmooky.dev",
+  "bugs": "https://github.com/schmooky/pylinka/issues",
+  "keywords": [
+    "particles",
+    "particle-system",
+    "gpu",
+    "pixijs",
+    "pixi",
+    "webgl2",
+    "webgpu",
+    "vfx",
+    "game",
+    "slot",
+    "node-editor",
+    "dataflow",
+    "compiler",
+    "codegen",
+    "wgsl",
+    "glsl",
+    "shader"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -14,7 +40,10 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

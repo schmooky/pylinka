@@ -1,8 +1,32 @@
 {
   "name": "@pylinka/core",
-  "version": "0.0.0",
-  "description": "Pylinka runtime. CPU scheduling, knob bus, and (WIP) WebGPU simulation/render backends.",
+  "version": "0.1.0",
+  "description": "Pylinka runtime: WebGL2 transform-feedback particle engine (createParticles), CPU scheduler, knob bus with live-uniform updates, and a pixi.js v8 render pipe. WebGPU compute backend planned.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schmooky/pylinka.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://pylinka.schmooky.dev",
+  "bugs": "https://github.com/schmooky/pylinka/issues",
+  "keywords": [
+    "particles",
+    "particle-system",
+    "gpu",
+    "pixijs",
+    "pixi",
+    "webgl2",
+    "webgpu",
+    "vfx",
+    "game",
+    "slot",
+    "node-editor",
+    "dataflow",
+    "runtime",
+    "transform-feedback",
+    "renderer"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -22,7 +46,10 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
@@ -39,7 +66,9 @@
     "pixi.js": "^8"
   },
   "peerDependenciesMeta": {
-    "pixi.js": { "optional": true }
+    "pixi.js": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

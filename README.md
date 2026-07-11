@@ -10,6 +10,16 @@
 The complete, normative specification lives in [`REQUIREMENTS.md`](./REQUIREMENTS.md) — that file is
 the single source of truth. This README is only a pointer.
 
+## Install
+
+```bash
+npm i @pylinka/core        # runtime — createParticles(canvas, project)
+npm i @pylinka/format      # load/save/migrate editor-exported projects
+```
+
+Design an effect in the [editor](https://pylinka.schmooky.dev/editor), export the project JSON,
+and play it back with `createParticles` — see [`packages/core`](./packages/core/README.md).
+
 ## Packages
 
 | Package | Description | Status |
