@@ -107,7 +107,7 @@ function nextParamId(p: EditorProject): string {
 
 /** A valid, unique knob name derived from `base` ('scale_from', 'scale_from2', …). */
 function uniqueParamName(p: EditorProject, base: string): string {
-  let name = base.replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^(\d)/, '_$1') || 'knob';
+  const name = base.replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^(\d)/, '_$1') || 'knob';
   const taken = new Set(p.params.map((pd) => pd.name));
   if (!taken.has(name)) return name;
   let n = 2;

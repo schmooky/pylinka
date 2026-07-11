@@ -1,7 +1,6 @@
 import { useMemo, useRef } from 'react';
 import { createPathDriver } from '@pylinka/core';
 import { useEditor } from '../store';
-import type { EmitterPathData } from '../types';
 
 /**
  * SVG overlay on the preview canvas that draws the ACTIVE system's emitter
