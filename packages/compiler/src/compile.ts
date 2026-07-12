@@ -15,9 +15,11 @@ import type {
 } from '@pylinka/graph';
 import { getSchema, hashGraph, resolveKind, validateGraph } from '@pylinka/graph';
 import { buildSlots, NODE_CODEGEN, NodeCtx, valueSlotExpr, type SlotResolution } from './codegen.js';
+import { easeFnGlsl, GLSL_DISCARD_FS, glslStepShader } from './glsl.js';
 import { naturalCompare, resolveEvalTimes } from './topo.js';
+import { wgslBodyToGlsl } from './translate.js';
 import { CompileError, V1_BINDINGS, type CompiledSystem } from './types.js';
-import { easeFn, emitKernel, preamble, updateKernel } from './wgsl.js';
+import { EASE_BODIES, easeFn, emitKernel, preamble, updateKernel } from './wgsl.js';
 
 const INIT_OUTPUT_ORDER = [
   'output.spawnPosition',
@@ -27,9 +29,6 @@ const INIT_OUTPUT_ORDER = [
 ];
 
 export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Backend): CompiledSystem {
-  if (target === 'webgl2') {
-    throw new Error('NotImplemented: the webgl2 backend arrives in M2');
-  }
   const graph = bundle.system.graph;
 
   // 1. validate — errors block compilation
@@ -51,7 +50,6 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
   // 3. init kernel
   const initFlags = { safeDiv: false, safeNormalize: false };
   const initBody = ctx.buildInit(resolution.initValue, resolution.initOutputs, initFlags);
-  const emitSrc = preamble(slots.layout.slotCount, initFlags) + '\n' + emitKernel(initBody);
 
   // 4. update kernel
   const updateFlags = { safeDiv: false, safeNormalize: false };
@@ -65,12 +63,33 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
       `v1 supports one ease per system; found: ${[...eases].join(', ')}. See docs/QUESTIONS.md.`,
     );
   }
-  const easeSrc = eases.size === 1 ? '\n' + easeFn([...eases][0]!) : '';
-  const updateSrc =
-    preamble(slots.layout.slotCount, updateFlags) +
-    easeSrc +
-    '\n' +
-    updateKernel(body, postIntegrate, { setVelocity });
+  const ease = eases.size === 1 ? [...eases][0]! : undefined;
+
+  let emitSrc: string;
+  let updateSrc: string;
+  if (target === 'webgpu') {
+    emitSrc = preamble(slots.layout.slotCount, initFlags) + '\n' + emitKernel(initBody);
+    updateSrc =
+      preamble(slots.layout.slotCount, updateFlags) +
+      (ease !== undefined ? '\n' + easeFn(ease) : '') +
+      '\n' +
+      updateKernel(body, postIntegrate, { setVelocity });
+  } else {
+    // webgl2: ONE fused TF step shader (see glsl.ts header for the mapping)
+    emitSrc = glslStepShader({
+      slots: slots.layout.slotCount,
+      helpers: {
+        safeDiv: initFlags.safeDiv || updateFlags.safeDiv,
+        safeNormalize: initFlags.safeNormalize || updateFlags.safeNormalize,
+      },
+      ...(ease !== undefined ? { easeSrc: easeFnGlsl(EASE_BODIES[ease]!) } : {}),
+      initBody: wgslBodyToGlsl(initBody, ctx.tempTypes),
+      updateBody: wgslBodyToGlsl(body, ctx.tempTypes),
+      postIntegrate: wgslBodyToGlsl(postIntegrate, ctx.tempTypes),
+      setVelocity,
+    });
+    updateSrc = GLSL_DISCARD_FS;
+  }
 
   // 5. textures (tex.* nodes → asset bindings)
   const textures: { assetId: string; binding: number }[] = [];
@@ -99,6 +118,8 @@ class CompileCtx {
   private readonly nodeById = new Map<string, Node>();
   private readonly edgeInto = new Map<string, Edge>(); // "nodeId portId" → edge
   private readonly paramName = new Map<string, string>();
+  /** every generated temp/output-temp name → port type (webgl2 let-typing) */
+  readonly tempTypes = new Map<string, string>();
 
   constructor(
     private readonly graph: Graph,
@@ -165,8 +186,12 @@ class CompileCtx {
 
     out.push(this.comment(node, ctx));
     for (const line of ctx.lines) out.push(line);
+    for (const [name, type] of ctx.tempTypes) this.tempTypes.set(name, type);
     for (const portId of Object.keys(emit.outputs)) {
-      out.push(`  let ${this.outputTemp(id, portId)} = ${emit.outputs[portId]};`);
+      const temp = this.outputTemp(id, portId);
+      const port = schema.outputs.find((o) => o.id === portId);
+      if (port !== undefined) this.tempTypes.set(temp, port.type);
+      out.push(`  let ${temp} = ${emit.outputs[portId]};`);
     }
   }
 

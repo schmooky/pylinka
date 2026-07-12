@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { V1_CATALOG } from '@pylinka/graph';
-import { CompileError, compile } from '../src/index.js';
+import { CompileError, compile, WEBGL2_LAYOUT, wgslBodyToGlsl, wgslExprToGlsl } from '../src/index.js';
 import { coinTrailBundle } from './fixtures/coin-spark-trail.js';
 
 describe('compile — coin-spark-trail golden (§14)', () => {
@@ -89,7 +89,81 @@ describe('compile — determinism & errors', () => {
     }
   });
 
-  it('rejects the webgl2 backend in M1', () => {
-    expect(() => compile(coinTrailBundle, V1_CATALOG, 'webgl2')).toThrow(/NotImplemented/);
+});
+
+describe('compile — webgl2 target (fused TF step shader, §13.12)', () => {
+  const compiled = compile(coinTrailBundle, V1_CATALOG, 'webgl2');
+
+  it('step vertex shader matches the golden', async () => {
+    await expect(compiled.emitSrc).toMatchFileSnapshot('./golden/coin-spark-trail.step.glsl');
+  });
+
+  it('fragment stage matches the golden', async () => {
+    await expect(compiled.updateSrc).toMatchFileSnapshot('./golden/coin-spark-trail.step-fs.glsl');
+  });
+
+  it('reports its backend and shares the slot layout with webgpu', () => {
+    const gpu = compile(coinTrailBundle, V1_CATALOG, 'webgpu');
+    expect(compiled.backend).toBe('webgl2');
+    expect(compiled.uniforms).toEqual(gpu.uniforms);
+    expect(compiled.graphHash).toBe(gpu.graphHash);
+  });
+
+  it('translates the generated bodies (typed lets, vecNf, ease)', () => {
+    const s = compiled.emitSrc;
+    expect(s).toContain('float t_n3 = mix(V[4].x, V[3].x, srand(seed, 0u));');
+    expect(s).toContain('vec2 t_n5 = mix(V[6].xy, V[5].xy, vec2(srand(seed, 1u), srand(seed, 2u)));');
+    expect(s).toContain('vec2 o_spawnLocal = t_n1;');
+    expect(s).toContain('uint o_texIndex = 0u;');
+    expect(s).toContain('vec2 t_n11 = vec2(cos(t_n10), sin(t_n10)) * t_n9;');
+    expect(s).toContain('float easeSel(float t) { float u = 1.0 - t; return 1.0 - u * u * u; }');
+    expect(s).toContain('uniform vec4 V[10];');
+    expect(s).not.toMatch(/\blet\b/);
+    expect(s).not.toMatch(/\bvec[24]f\(/);
+  });
+
+  it('is byte-deterministic across runs', () => {
+    const again = compile(coinTrailBundle, V1_CATALOG, 'webgl2');
+    expect(again.emitSrc).toBe(compiled.emitSrc);
+  });
+
+  it('exports the interleaved TF layout the runtime binds', () => {
+    expect(WEBGL2_LAYOUT.strideBytes).toBe(56);
+    const total = WEBGL2_LAYOUT.attribs.reduce((n, a) => n + a.size * 4, 0);
+    expect(total).toBe(WEBGL2_LAYOUT.strideBytes);
+    expect(WEBGL2_LAYOUT.varyings).toEqual([
+      'o_pos', 'o_vel', 'o_age', 'o_life', 'o_seed', 'o_flags', 'o_color', 'o_size', 'o_rot',
+    ]);
+  });
+});
+
+describe('wgsl → glsl translation', () => {
+  it('rewrites select() into a ternary, innermost-first', () => {
+    expect(wgslExprToGlsl('select(1.0, clamp(1.0 - x, 0.0, 1.0), r > 0.0)')).toBe(
+      '((r > 0.0) ? (clamp(1.0 - x, 0.0, 1.0)) : (1.0))',
+    );
+    expect(wgslExprToGlsl('select(a, select(b, c, k), m)')).toBe(
+      '((m) ? (((k) ? (c) : (b))) : (a))',
+    );
+  });
+
+  it('rewrites vector comparisons inside any()', () => {
+    expect(wgslExprToGlsl('if (any(p.pos < t_min) || any(p.pos > t_max)) { kill = true; }')).toBe(
+      'if (any(lessThan(p.pos, t_min)) || any(greaterThan(p.pos, t_max))) { kill = true; }',
+    );
+  });
+
+  it('renames constructors and casts', () => {
+    expect(wgslExprToGlsl('vec2f(f32(i), f32(U.spawnCount)) * vec4f(1.0).xy')).toBe(
+      'vec2(float(i), float(U.spawnCount)) * vec4(1.0).xy',
+    );
+  });
+
+  it('types untyped lets from the temp map and typed lets from the annotation', () => {
+    const types = new Map([['t_n1', 'vec2']]);
+    expect(wgslBodyToGlsl('  let t_n1 = a + b;\n  let o_x: f32 = t_n1.x;', types)).toBe(
+      '  vec2 t_n1 = a + b;\n  float o_x = t_n1.x;',
+    );
+    expect(() => wgslBodyToGlsl('  let mystery = 1.0;', new Map())).toThrow(/no recorded type/);
   });
 });

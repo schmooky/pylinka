@@ -1,10 +1,11 @@
 /**
  * BackendProvider (REQUIREMENTS.md §7.2). The backend follows the host renderer:
- * a WebGPU renderer shares its device; a WebGL renderer uses the WebGL2
- * transform-feedback backend in the same GL context (M2). Device is left opaque
- * here — it is handed to the SimBackend factory.
+ * a WebGPU renderer shares its device; a WebGL renderer runs the compiled
+ * WebGL2 transform-feedback backend in the same GL context (so scene
+ * interleaving works). Device is left opaque here — it is handed to the
+ * SimBackend factory.
  */
-import { RendererType, type Renderer, type WebGPURenderer } from 'pixi.js';
+import { RendererType, type Renderer, type WebGLRenderer, type WebGPURenderer } from 'pixi.js';
 
 export interface ResolvedBackend {
   kind: 'webgpu' | 'webgl2';
@@ -17,6 +18,6 @@ export function resolveBackend(renderer: Renderer): ResolvedBackend {
     const device: unknown = (renderer as WebGPURenderer).gpu.device;
     return { kind: 'webgpu', device };
   }
-  // WebGL host → WebGL2 TF backend in the same GL context (M2).
-  return { kind: 'webgl2', device: undefined };
+  // WebGL host → compiled WebGL2 TF backend in the same GL context.
+  return { kind: 'webgl2', device: (renderer as WebGLRenderer).gl };
 }

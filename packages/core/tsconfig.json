@@ -3,7 +3,7 @@
   "compilerOptions": {
     "noEmit": true,
     "lib": ["ES2022", "DOM"],
-    "types": ["node"]
+    "types": ["node", "@webgpu/types"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

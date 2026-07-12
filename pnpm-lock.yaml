@@ -81,6 +81,9 @@ importers:
       astro:
         specifier: ^5.1.0
         version: 5.18.2(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(rollup@4.62.2)(typescript@5.9.3)(yaml@2.9.0)
+      pixi.js:
+        specifier: ^8.19.0
+        version: 8.19.0
       tailwindcss:
         specifier: ^4.0.0
         version: 4.3.2
@@ -103,6 +106,9 @@ importers:
         specifier: workspace:*
         version: link:../graph
     devDependencies:
+      '@webgpu/types':
+        specifier: ^0.1.71
+        version: 0.1.71
       pixi.js:
         specifier: ^8
         version: 8.19.0

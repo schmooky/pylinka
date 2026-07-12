@@ -27,7 +27,7 @@ and play it back with `createParticles` — see [`packages/core`](./packages/cor
 | [`@pylinka/graph`](./packages/graph) | Shared kernel: graph types, node catalog, validation, hashing, slot assignment. Zero deps. | ✅ shipped |
 | [`@pylinka/compiler`](./packages/compiler) | SystemBundle → IR → GPU program codegen (WGSL; GLSL ES 3.00 is M2). Zero deps. Golden byte-locked. | ✅ shipped |
 | [`@pylinka/format`](./packages/format) | Serialize / parse / migrate the `pylinka` project format. | ✅ shipped |
-| [`@pylinka/core`](./packages/core) | Runtime. **`@pylinka/core/webgl` — working WebGL2 transform-feedback engine** (`createParticles`, textured atlas sequences); CPU scheduler/knobs/timing; pixi-v8 render pipe (`/pixi`). Peer `pixi.js@^8` (optional). | ✅ WebGL2 runs · WebGPU compute backend = M2 (needs the spike) |
+| [`@pylinka/core`](./packages/core) | Runtime. **Compiled backends** — `/gpu` (`createCompiledParticles`, auto), `/webgpu` (compute kernels), `/webgl2` (fused TF step shader); **pixi-v8 integration** — `/pixi` (`createPylinka`, render pipe, device/context sharing); `/webgl` interpreted engine (masks, atlas sequences, sub-emitters); CPU scheduler/knobs/timing. Peer `pixi.js@^8` (optional). | ✅ WebGPU compute + compiled WebGL2 + pixi pipe all run |
 | [`apps/site`](./apps/site) | Docs + **`/editor`** (React Flow node editor with live preview) + **`/recipes`** (44-effect webm gallery). | ✅ shipped |
 | [`tools/atlas-extract`](./tools/atlas-extract) · [`tools/gen-previews`](./tools/gen-previews) | Extract sprite sequences from a Spine atlas · record recipe webm/poster previews. | ✅ shipped |
 

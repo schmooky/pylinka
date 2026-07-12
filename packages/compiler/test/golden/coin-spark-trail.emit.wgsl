@@ -20,7 +20,7 @@ struct SystemUniforms {
 @group(0) @binding(1) var<uniform> V: array<vec4f, 10>;
 @group(0) @binding(2) var<storage, read_write> hot: array<ParticleHot>;
 @group(0) @binding(3) var<storage, read_write> rnd: array<ParticleRnd>;
-@group(0) @binding(4) var<storage, read_write> meta: array<ParticleMeta>;
+@group(0) @binding(4) var<storage, read_write> pmeta: array<ParticleMeta>;
 @group(0) @binding(5) var<storage, read_write> cnt: Counters;
 @group(0) @binding(6) var<storage, read_write> freeList: array<u32>;
 
@@ -64,8 +64,8 @@ fn emit(@builtin(global_invocation_id) gid: vec3u) {
   hot[slot].vel = o_initVel;
   hot[slot].life = max(o_initLife, 1e-4);
   hot[slot].age = U.dt * (1.0 - f);
-  meta[slot].seed = seed;
-  meta[slot].flags = 1u | (o_texIndex << 8u);
+  pmeta[slot].seed = seed;
+  pmeta[slot].flags = 1u | (o_texIndex << 8u);
   rnd[slot] = ParticleRnd(0xffffffffu, 1.0, 0.0);
   atomicAdd(&cnt.aliveCount, 1u);
 }

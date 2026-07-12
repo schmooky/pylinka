@@ -481,7 +481,8 @@ export function assignSlots(graph: Graph, params: ParamDef[]): UniformLayout;  /
 export function compile(
   bundle: SystemBundle,
   catalog: NodeCatalog,
-  target: Backend,                       // M1 implements 'webgpu' only; 'webgl2' throws NotImplemented
+  target: Backend,                       // 'webgpu' → §13.5/§13.6 WGSL kernels; 'webgl2' → the §13.12 fused
+                                         // TF step shader (emitSrc = step VS, updateSrc = discard FS)
 ): CompiledSystem;                       // throws CompileError carrying Diagnostic[] on invalid input
 
 export interface CompiledSystem {
@@ -695,7 +696,7 @@ Compute bind group — **group 0, fixed for every system** (this IS `BindingLayo
 | 1 | `V: array<vec4f, SLOTS>` | uniform (value table) |
 | 2 | `hot: array<ParticleHot>` | storage, read_write |
 | 3 | `rnd: array<ParticleRnd>` | storage, read_write |
-| 4 | `meta: array<ParticleMeta>` | storage, read_write |
+| 4 | `pmeta: array<ParticleMeta>` | storage, read_write |   <!-- named pmeta: `meta` is a reserved WGSL keyword (QUESTIONS 2026-07-12) -->
 | 5 | `cnt: Counters` | storage, read_write |
 | 6 | `freeList: array<u32>` | storage, read_write |
 
@@ -765,8 +766,8 @@ fn emit(@builtin(global_invocation_id) gid: vec3u) {
   hot[slot].vel  = o_initVel;
   hot[slot].life = max(o_initLife, 1e-4);
   hot[slot].age  = U.dt * (1.0 - f);               // earlier-in-frame spawns are older
-  meta[slot].seed  = seed;
-  meta[slot].flags = 1u | (o_texIndex << 8u);
+  pmeta[slot].seed  = seed;
+  pmeta[slot].flags = 1u | (o_texIndex << 8u);
   rnd[slot] = ParticleRnd(0xffffffffu, 1.0, 0.0);  // update pass runs the same frame and overwrites
   atomicAdd(&cnt.aliveCount, 1u);
 }
@@ -783,9 +784,9 @@ const RUNAWAY: f32 = 1e7;                          // px magnitude bound (NaN-fr
 fn update(@builtin(global_invocation_id) gid: vec3u) {
   let slot = gid.x;
   if (slot >= U.capacity) { return; }
-  if ((meta[slot].flags & 1u) == 0u) { return; }
+  if ((pmeta[slot].flags & 1u) == 0u) { return; }
   var p = hot[slot];
-  let seed = meta[slot].seed;
+  let seed = pmeta[slot].seed;
   let ageN = clamp(p.age / p.life, 0.0, 1.0);      // life ≥ 1e-4 guaranteed at emit
   var force   = vec2f(0.0);
   var dragK   = 0.0;
@@ -805,7 +806,7 @@ fn update(@builtin(global_invocation_id) gid: vec3u) {
   p.age += U.dt;                                   // 4. age
   let runaway = any(abs(p.pos) > vec2f(RUNAWAY));  // 5. NaN-free runaway check
   if (p.age >= p.life || kill || runaway) {        // 6. death (end-of-life kill is AUTOMATIC)
-    meta[slot].flags = meta[slot].flags & ~1u;
+    pmeta[slot].flags = pmeta[slot].flags & ~1u;
     let idx = atomicAdd(&cnt.freeTop, 1);
     freeList[u32(idx)] = slot;
     atomicSub(&cnt.aliveCount, 1u);
@@ -856,7 +857,7 @@ Vertex buffers (instance step mode, straight from the sim buffers):
 |---|---|---|---|
 | 0 | hot | 24 | `@location(0) pos: float32x2 @ 0` |
 | 1 | rnd | 12 | `@location(1) color: unorm8x4 @ 0`, `@location(2) size: float32 @ 4`, `@location(3) rot: float32 @ 8` |
-| 2 | meta | 8 | `@location(4) flags: uint32 @ 4` |
+| 2 | pmeta | 8 | `@location(4) flags: uint32 @ 4` |
 
 ```wgsl
 struct RenderUniforms {
@@ -952,9 +953,9 @@ fn safeNormalize(v: vec2f) -> vec2f {
 
 Zero allocations in steps 1–7. Timestamp queries (when `'timestamp-query'` available) wrap the update dispatch → `stats.gpuMs`.
 
-### 13.12 IR neutrality rules (keeps the M2 WebGL2 backend possible)
+### 13.12 IR neutrality rules (the WebGL2 backend — DELIVERED)
 
-Node codegen must never assume: atomics, storage buffers, compute stages, `pack4x8unorm`, workgroups — those live in per-backend **scaffolds**. Node codegen may only emit arithmetic, ctx helpers, texture sampling via ctx (M2), and reads of scaffold-provided variables (`ageN`, `p.pos`, `p.vel`, seed-based rands). WebGL2 mapping (M2): value table → `uniform vec4 V[SLOTS]`; particle state → TF varyings; spawning via **cursor-window** (no atomics: a slot self-respawns when dead AND its index ∈ `[spawnCursor, spawnCursor+spawnCount) mod N`; alive slots in the window simply don't respawn — effective drop-new, an accepted approximation on the fallback tier).
+Node codegen must never assume: atomics, storage buffers, compute stages, `pack4x8unorm`, workgroups — those live in per-backend **scaffolds**. Node codegen may only emit arithmetic, ctx helpers, texture sampling via ctx (M2), and reads of scaffold-provided variables (`ageN`, `p.pos`, `p.vel`, seed-based rands). WebGL2 mapping (**delivered**, `compile(bundle, catalog, 'webgl2')`): the emit and update kernels fuse into ONE transform-feedback step vertex shader over every slot (generated bodies translated WGSL→GLSL by the compiler, byte-locked golden `coin-spark-trail.step.glsl`); value table → `uniform vec4 V[SLOTS]`; particle state → one interleaved 56-byte record (`WEBGL2_LAYOUT`: hot + seed/flags uints + color/size/rot); spawning via **cursor-window** (no atomics: a slot self-respawns when dead AND its index ∈ `[u_spawnCursor, u_spawnCursor+spawnCount) mod N`; alive slots in the window simply don't respawn — effective drop-new, an accepted approximation on the fallback tier; a spawned slot also takes its first update pass the NEXT frame, one dt later than WebGPU). CompiledSystem field mapping: `emitSrc` = the fused step vertex shader, `updateSrc` = the rasterizer-discard fragment stage.
 
 ### 13.13 Multi-system & device sharing
 

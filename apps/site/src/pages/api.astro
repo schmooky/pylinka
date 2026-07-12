@@ -4,7 +4,7 @@ import DocsLayout from '../layouts/DocsLayout.astro';
 
 <DocsLayout
   title="API reference — @pylinka/core runtime"
-  description="The @pylinka/core runtime API for PixiJS particles: createPylinka, ParticleSystemView, KnobBus, device-loss handling, and the WebGL2 createParticles engine."
+  description="The @pylinka/core runtime API for PixiJS particles: createPylinka on a pixi stage, compiled WebGPU/WebGL2 backends via createCompiledParticles, KnobBus, and the interpreted WebGL2 engine."
   active="api"
 >
   <h1>API</h1>
@@ -14,23 +14,46 @@ import DocsLayout from '../layouts/DocsLayout.astro';
     allocate nothing.
   </p>
 
-  <h2>createPylinka()</h2>
-  <p>Create a project-level runtime from a project document.</p>
-  <pre><code>function createPylinka(
-  project: PylinkaProject,
-  opts: CreateOptions,
-): Promise&lt;PylinkaRuntime&gt;</code></pre>
+  <h2>Backends</h2>
+  <p>
+    Every graph compiles to real GPU code via <code>@pylinka/compiler</code> — WGSL compute
+    kernels on WebGPU, a fused transform-feedback step shader on WebGL2. Inline values and knobs
+    live in a vec4 uniform table, so <strong>value edits and knob moves never recompile</strong>;
+    only structural edits rebuild pipelines (and reset the pool).
+  </p>
+  <table>
+    <thead><tr><th>Entry</th><th>What runs</th></tr></thead>
+    <tbody>
+      <tr><td><code>@pylinka/core/pixi</code></td><td>pixi v8 scene integration — backend follows the host renderer (§7.2)</td></tr>
+      <tr><td><code>@pylinka/core/gpu</code></td><td><code>createCompiledParticles</code> — best available compiled backend on a bare canvas</td></tr>
+      <tr><td><code>@pylinka/core/webgpu</code></td><td>compiled WebGPU compute backend (async create)</td></tr>
+      <tr><td><code>@pylinka/core/webgl2</code></td><td>compiled WebGL2 transform-feedback backend (sync create)</td></tr>
+      <tr><td><code>@pylinka/core/webgl</code></td><td>interpreted WebGL2 engine — extras: emission masks, animated atlases, sub-emitters</td></tr>
+    </tbody>
+  </table>
+
+  <h2>createPylinka() — pixi v8</h2>
+  <p>Run a whole project inside a pixi stage; each system becomes a renderable view.</p>
+  <pre><code>import &#123; registerPylinka, createPylinka &#125; from '@pylinka/core/pixi';
+
+registerPylinka();                              // once, before app init
+const app = new Application();
+await app.init(&#123; preference: 'webgpu' &#125;);       // or 'webgl' — backend follows
+const fx = await createPylinka(project, &#123; renderer: app.renderer &#125;);
+
+app.stage.addChild(fx.systems['sparks'].view);  // a STATIC layer (see Core concepts)
+app.ticker.add((t) =&gt; fx.update(t.deltaMS / 1000));
+fx.params.set('windPower', 40);                 // live — zero recompile</code></pre>
 
   <h3>CreateOptions</h3>
   <table>
     <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
     <tbody>
-      <tr><td><code>renderer</code></td><td>pixi Renderer</td><td>backend + device/context derived from it</td></tr>
-      <tr><td><code>device</code></td><td>GPUDevice</td><td>explicit device (headless); excludes <code>renderer</code></td></tr>
-      <tr><td><code>resolveTexture</code></td><td>(asset) ⇒ Texture?</td><td>override texture resolution</td></tr>
+      <tr><td><code>renderer</code></td><td>pixi Renderer</td><td>required; backend + device/context derive from it — WebGPU shares the device, WebGL shares the GL context</td></tr>
       <tr><td><code>fixedStep</code></td><td>number</td><td>seconds; enables deterministic fixed-step mode</td></tr>
       <tr><td><code>maxDt</code></td><td>number</td><td>dt clamp, default 0.05</td></tr>
-      <tr><td><code>onDeviceLost</code> / <code>onDeviceRestored</code></td><td>() ⇒ void</td><td>device-loss hooks</td></tr>
+      <tr><td><code>seed</code></td><td>number</td><td>deterministic base seed (capture mode)</td></tr>
+      <tr><td><code>onDeviceLost</code></td><td>() ⇒ void</td><td>WebGPU device-loss hook</td></tr>
     </tbody>
   </table>
 
@@ -47,18 +70,19 @@ import DocsLayout from '../layouts/DocsLayout.astro';
   <pre><code>interface ParticleSystemView &#123;
   readonly view: Container;
   readonly params: KnobBus;
-  update(dtSeconds: number): void;          // no-op if driven via the runtime
+  update(dtSeconds: number): void;
   setEmitterPosition(x: number, y: number): void;
-  follow(target: Container): void;
+  follow(target: Container): void;          // samples getGlobalPosition() each update
   unfollow(): void;
   spawnBurst(count: number): void;
-  restart(): void;                          // pool + scheduler reset (+ prewarm)
+  restart(): void;                          // pool + scheduler reset
+  apply(project: PylinkaProject): boolean;  // live edit — zero recompile for value edits
   readonly stats: &#123; aliveCount: number; overflowCount: number; gpuMs: number | null &#125;;
   destroy(): void;
 &#125;</code></pre>
   <p>
-    <code>stats</code> fields are plain numbers refreshed asynchronously — reading them never
-    triggers a GPU readback.
+    <code>stats</code> fields are plain numbers refreshed on a 30-frame cadence — reading them
+    never triggers a GPU readback.
   </p>
 
   <h2>KnobBus</h2>
@@ -74,10 +98,30 @@ import DocsLayout from '../layouts/DocsLayout.astro';
   opts: CreateOptions,
 ): Promise&lt;ParticleSystemView&gt;</code></pre>
 
+  <h2>Compiled backends on a bare canvas</h2>
+  <p>No pixi? Drive a canvas directly — same handle on either backend:</p>
+  <pre><code>import &#123; createCompiledParticles &#125; from '@pylinka/core/gpu';
+
+const fx = await createCompiledParticles(canvas, project); // webgpu, else webgl2
+fx.setEmitter(x, y);
+requestAnimationFrame(function tick() &#123;
+  fx.update(1 / 60);
+  requestAnimationFrame(tick);
+&#125;);
+fx.setKnob('windPower', 40);   // value-table write — never recompiles
+fx.apply(editedProject);       // structural edits rebuild pipelines + reset the pool</code></pre>
+  <p>
+    Options: <code>backend</code> (<code>'auto' | 'webgpu' | 'webgl2'</code>),
+    <code>systemName</code>, <code>zoom</code>, <code>sizeScale</code>, <code>seed</code>,
+    <code>atlas</code> (uniform grid; the cell is picked by <code>output.initTexIndex</code>),
+    <code>onRecompile</code>. Emission masks, animated atlas sequences and sub-emitters are
+    interpreted-engine extras (<code>@pylinka/core/webgl</code>).
+  </p>
+
   <h2>Device loss</h2>
   <p>
-    WebGPU device loss is routine on mobile. Pylinka re-acquires the device, rebuilds pipelines from
-    retained compiled sources (no graph recompile), resets pools, and fires
-    <code>onDeviceRestored</code> so you can re-trigger ambient effects.
+    WebGPU device loss is routine on mobile. v1 surfaces it via
+    <code>onDeviceLost</code>; automatic device re-acquisition and pipeline rebuild is on the
+    hardening roadmap.
   </p>
 </DocsLayout>

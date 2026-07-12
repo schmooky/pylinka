@@ -138,6 +138,8 @@ export class NodeCtx implements CodegenCtx {
   readonly lines: string[] = [];
   readonly stableUsed: number[] = [];
   readonly frameUsed: number[] = [];
+  /** temp name → port type, so the webgl2 translator can type `let` lines */
+  readonly tempTypes = new Map<string, PortType>();
   private tmpN = 0;
   readonly consts = { PI, DT: 'U.dt', TIME: 'U.time', AGE_N: 'ageN' };
 
@@ -171,8 +173,10 @@ export class NodeCtx implements CodegenCtx {
   line(stmt: string): void {
     this.lines.push('  ' + stmt);
   }
-  temp(_type: PortType): string {
-    return `x_${this.nodeId}_${this.tmpN++}`;
+  temp(type: PortType): string {
+    const name = `x_${this.nodeId}_${this.tmpN++}`;
+    this.tempTypes.set(name, type);
+    return name;
   }
   safeDiv(a: Expr, b: Expr): Expr {
     this.flags.safeDiv = true;

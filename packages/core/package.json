@@ -1,7 +1,7 @@
 {
   "name": "@pylinka/core",
   "version": "0.1.0",
-  "description": "Pylinka runtime: WebGL2 transform-feedback particle engine (createParticles), CPU scheduler, knob bus with live-uniform updates, and a pixi.js v8 render pipe. WebGPU compute backend planned.",
+  "description": "Pylinka runtime: WebGPU compute + compiled WebGL2 transform-feedback backends running the graph as generated GPU code, an interpreted WebGL2 engine, CPU scheduler, knob bus with live-uniform (zero-recompile) updates, and a pixi.js v8 render pipe.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -41,6 +41,18 @@
     "./webgl": {
       "types": "./dist/webgl/index.d.ts",
       "import": "./dist/webgl/index.js"
+    },
+    "./webgpu": {
+      "types": "./dist/webgpu/index.d.ts",
+      "import": "./dist/webgpu/index.js"
+    },
+    "./webgl2": {
+      "types": "./dist/webgl2/index.d.ts",
+      "import": "./dist/webgl2/index.js"
+    },
+    "./gpu": {
+      "types": "./dist/gpu/index.d.ts",
+      "import": "./dist/gpu/index.js"
     }
   },
   "main": "./dist/index.js",
@@ -56,10 +68,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@pylinka/graph": "workspace:*",
-    "@pylinka/compiler": "workspace:*"
+    "@pylinka/compiler": "workspace:*",
+    "@pylinka/graph": "workspace:*"
   },
   "devDependencies": {
+    "@webgpu/types": "^0.1.71",
     "pixi.js": "^8"
   },
   "peerDependencies": {

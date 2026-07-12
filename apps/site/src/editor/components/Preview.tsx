@@ -5,6 +5,7 @@ import {
   type EmissionMaskOptions,
   type ParticlesHandle,
 } from '@pylinka/core/webgl';
+import { createCompiledParticles, type CompiledParticlesHandle } from '@pylinka/core/gpu';
 import { createPathDriver, type PathDriver } from '@pylinka/core';
 import type { System } from '@pylinka/graph';
 import { useEditor } from '../store';
@@ -55,12 +56,28 @@ function effective(proj: EditorProject): EditorProject {
   };
 }
 
+/** Both engines expose the same driving surface — this is the slice we use. */
+type AnyHandle = ParticlesHandle | CompiledParticlesHandle;
+
+type BackendChoice = 'webgl' | 'webgpu' | 'webgl2';
+const BACKEND_KEY = 'pylinka.editor.backend';
+const BACKEND_LABEL: Record<BackendChoice, string> = {
+  webgl: 'WebGL · interpreted',
+  webgpu: 'WebGPU · compiled',
+  webgl2: 'WebGL2 · compiled',
+};
+
+function initialBackend(): BackendChoice {
+  const v = typeof localStorage !== 'undefined' ? localStorage.getItem(BACKEND_KEY) : null;
+  return v === 'webgpu' || v === 'webgl2' ? v : 'webgl';
+}
+
 export function Preview() {
   const project = useEditor((s) => s.project);
   const rev = useEditor((s) => s.rev);
   const texRev = useEditor((s) => s.texRev);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const fxRef = useRef<ParticlesHandle[]>([]);
+  const fxRef = useRef<AnyHandle[]>([]);
   const fxSysRef = useRef<string[]>([]);
   const driversRef = useRef<Map<string, { key: string; drv: PathDriver }>>(new Map());
   const projRef = useRef(project);
@@ -71,6 +88,16 @@ export function Preview() {
   orbitRef.current = orbit;
   const mouseRef = useRef<[number, number] | null>(null);
   const [hud, setHud] = useState('');
+  const [backend, setBackend] = useState<BackendChoice>(initialBackend);
+  const backendRef = useRef(backend);
+  backendRef.current = backend;
+  const [recompiled, setRecompiled] = useState('');
+  const recompTimer = useRef<number>(0);
+  const flashRecompile = (info: { ms: number; reason: string }) => {
+    setRecompiled(`recompiled (${info.reason}) in ${info.ms.toFixed(1)} ms`);
+    window.clearTimeout(recompTimer.current);
+    recompTimer.current = window.setTimeout(() => setRecompiled(''), 1800);
+  };
   const [knobs, setKnobs] = useState<Record<string, number>>({});
   const knobsRef = useRef(knobs);
   knobsRef.current = knobs;
@@ -108,8 +135,9 @@ export function Preview() {
     for (const s of enabled) if (!placed.has(s.id)) ordered.push(s); // cycle fallback
 
     const byId = new Map<string, ParticlesHandle>();
-    const handles: ParticlesHandle[] = [];
+    const handles: AnyHandle[] = [];
     const sysIds: string[] = [];
+    const chosen = backendRef.current;
     for (let i = 0; i < ordered.length; i++) {
       const sys = ordered[i]!;
       let atlas: AtlasOptions | undefined;
@@ -123,15 +151,28 @@ export function Preview() {
       const parId = parentOf(sys.id);
       const subParent = parId ? byId.get(parId) : undefined;
       try {
-        const h = createParticles(canvas, effective(proj), {
-          systemName: sys.name,
-          ...(atlas ? { atlas } : {}),
-          ...(emissionMask ? { emissionMask } : {}),
-          ...(subParent ? { subParent } : {}),
-        });
+        let h: AnyHandle;
+        if (chosen === 'webgl') {
+          const wh = createParticles(canvas, effective(proj), {
+            systemName: sys.name,
+            ...(atlas ? { atlas } : {}),
+            ...(emissionMask ? { emissionMask } : {}),
+            ...(subParent ? { subParent } : {}),
+          });
+          byId.set(sys.id, wh);
+          h = wh;
+        } else {
+          // compiled path: the whole graph runs as generated GPU code. Masks,
+          // animated atlases and sub-emitter wiring are interpreted-only extras.
+          h = await createCompiledParticles(canvas, effective(proj), {
+            systemName: sys.name,
+            backend: chosen,
+            ...(atlas ? { atlas: { image: atlas.image, cols: atlas.cols, rows: atlas.rows } } : {}),
+            onRecompile: flashRecompile,
+          });
+        }
         h.autoClear = i === 0;
         for (const [n, v] of Object.entries(knobsRef.current)) h.setKnob(n, v);
-        byId.set(sys.id, h);
         handles.push(h);
         sysIds.push(sys.id);
       } catch (e) {
@@ -142,8 +183,12 @@ export function Preview() {
     fxSysRef.current = sysIds;
   };
 
-  // init once: size canvas, seed knobs, start the loop, create the handles
+  // init: size canvas, seed knobs, start the loop, create the handles.
+  // Re-runs when the backend changes — the <canvas> is keyed by backend so a
+  // FRESH element comes up (a canvas can only ever hold one context type:
+  // webgl2 and webgpu can't share an element).
   useEffect(() => {
+    localStorage.setItem(BACKEND_KEY, backend);
     const canvas = canvasRef.current!;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const size = () => {
@@ -156,8 +201,10 @@ export function Preview() {
 
     const init: Record<string, number> = {};
     for (const p of projRef.current.params) if (p.default.t === 'f32') init[p.name] = p.default.v;
-    setKnobs(init);
-    knobsRef.current = init;
+    const seeded = Object.keys(knobsRef.current).length > 0 ? knobsRef.current : init;
+    setKnobs(seeded);
+    knobsRef.current = seeded;
+    setHud('');
     void recreate();
 
     let raf = 0;
@@ -220,7 +267,7 @@ export function Preview() {
       for (const h of fxRef.current) h.destroy();
       fxRef.current = [];
     };
-  }, []);
+  }, [backend]);
 
   // texture/system set changed → full re-create (atlas + system count are construction-time inputs)
   const firstTex = useRef(true);
@@ -229,12 +276,22 @@ export function Preview() {
     void recreate();
   }, [texRev]);
 
-  // graph/value change → live re-apply to each handle (or re-create on capacity change)
+
+  // graph/value change → live re-apply to each handle (or re-create on capacity
+  // change / after a failed create, so an invalid edit can be edited back out)
   useEffect(() => {
     const handles = fxRef.current;
-    if (!handles.length) return;
+    if (!handles.length) {
+      if (project.systems.some((s) => s.enabled)) void recreate();
+      return;
+    }
     const eff = effective(project);
-    if (!handles.every((fx) => fx.apply(eff))) void recreate();
+    try {
+      if (!handles.every((fx) => fx.apply(eff))) void recreate();
+    } catch (e) {
+      setHud(String(e));
+      void recreate();
+    }
   }, [rev]);
 
   const onMove = (e: React.PointerEvent) => {
@@ -246,23 +303,42 @@ export function Preview() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border px-3 py-2 text-xs">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-xs">
         <span className="font-medium">Preview</span>
-        <span className="font-mono text-muted-foreground">{hud}</span>
+        <select
+          value={backend}
+          onChange={(e) => setBackend(e.target.value as BackendChoice)}
+          className="rounded-md border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground"
+          title="Simulation backend — compiled backends run the graph as generated GPU code"
+        >
+          {(Object.keys(BACKEND_LABEL) as BackendChoice[]).map((k) => (
+            <option key={k} value={k}>{BACKEND_LABEL[k]}</option>
+          ))}
+        </select>
+        <span className="min-w-0 flex-1 truncate text-right font-mono text-muted-foreground">{hud}</span>
       </div>
       <div className="relative min-h-[340px] flex-1 bg-black">
-        <canvas ref={canvasRef} className="block h-full w-full" onPointerMove={onMove} onPointerLeave={() => (mouseRef.current = null)} />
+        <canvas key={backend} ref={canvasRef} className="block h-full w-full" onPointerMove={onMove} onPointerLeave={() => (mouseRef.current = null)} />
         <PathOverlay editing={pathEdit} />
         {pathEdit && (
           <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[10px] text-[#c4b5fd]">
             drawing path — click to add · drag to move · double-click to delete
           </div>
         )}
+        {recompiled !== '' && (
+          <div className="pointer-events-none absolute right-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[10px] text-amber-300">
+            {recompiled}
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-3 border-b border-border px-3 py-2 text-xs">
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={orbit} onChange={(e) => setOrbit(e.target.checked)} /> orbit</label>
         <button className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={() => fxRef.current.forEach((h) => h.spawnBurst(400))}>Burst</button>
-        <span className="text-muted-foreground">move mouse over canvas</span>
+        <span className="text-muted-foreground">
+          {backend === 'webgl'
+            ? 'move mouse over canvas'
+            : 'compiled graph · masks/atlas-anim/sub-emitters are interpreted-only'}
+        </span>
       </div>
       <div className="flex border-b border-border text-xs">
         {(['knobs', 'emitter', 'assets'] as const).map((k) => (

@@ -7,20 +7,37 @@ Design an effect in the [node editor](https://pylinka.schmooky.dev/editor) (or s
 60+ recipes), export the project JSON, and play it back in your game:
 
 ```ts
-import { createParticles } from '@pylinka/core/webgl';
+import { createCompiledParticles } from '@pylinka/core/gpu';
 
-const fx = createParticles(canvas, project); // WebGL2 transform-feedback, GPU-simulated
+const fx = await createCompiledParticles(canvas, project); // WebGPU compute, else WebGL2 TF
 fx.setEmitter(x, y);
 app.ticker.add(() => fx.update(1 / 60)); // or your own rAF loop
 fx.setKnob('windPower', 40); // live uniform — no recompile
 ```
 
-- **`@pylinka/core/webgl`** — shipping WebGL2 transform-feedback engine: GPU simulation +
-  rendering, textured atlas sequences, emission masks, spline trajectories, vector fields.
+Or run it inside a **pixi.js v8** stage — the backend follows the host renderer (a WebGPU
+renderer shares its device; a WebGL renderer shares its GL context):
+
+```ts
+import { registerPylinka, createPylinka } from '@pylinka/core/pixi';
+
+registerPylinka();
+const app = new Application();
+await app.init({ preference: 'webgpu' });
+const fx = await createPylinka(project, { renderer: app.renderer });
+app.stage.addChild(fx.systems['sparks'].view);
+app.ticker.add((t) => fx.update(t.deltaMS / 1000));
+```
+
+- **`@pylinka/core/gpu`** — `createCompiledParticles`: the graph as **generated GPU code**,
+  best available backend (`'auto' | 'webgpu' | 'webgl2'`).
+- **`@pylinka/core/webgpu`** — WebGPU compute backend: emit/update kernels + instanced draw.
+- **`@pylinka/core/webgl2`** — compiled WebGL2 transform-feedback backend (fused step shader).
+- **`@pylinka/core/pixi`** — pixi v8 integration: `createPylinka`, render pipe, `follow()`,
+  scene interleaving (peer dependency, optional).
+- **`@pylinka/core/webgl`** — interpreted WebGL2 engine with editor extras: textured atlas
+  sequences, emission masks, sub-emitters, spline trajectories.
 - **`@pylinka/core`** — CPU scheduler, knob bus, and timing shared by all backends.
-- **`@pylinka/core/pixi`** — render pipe for **pixi.js v8** scenes (peer dependency, optional).
-- **WebGPU compute backend** — planned; the WGSL codegen already exists in
-  [`@pylinka/compiler`](https://www.npmjs.com/package/@pylinka/compiler).
 
 ```bash
 npm i @pylinka/core

@@ -29,7 +29,7 @@ struct SystemUniforms {
 @group(0) @binding(1) var<uniform> V: array<vec4f, ${slots}>;
 @group(0) @binding(2) var<storage, read_write> hot: array<ParticleHot>;
 @group(0) @binding(3) var<storage, read_write> rnd: array<ParticleRnd>;
-@group(0) @binding(4) var<storage, read_write> meta: array<ParticleMeta>;
+@group(0) @binding(4) var<storage, read_write> pmeta: array<ParticleMeta>;
 @group(0) @binding(5) var<storage, read_write> cnt: Counters;
 @group(0) @binding(6) var<storage, read_write> freeList: array<u32>;
 
@@ -67,7 +67,7 @@ export function easeFn(ease: string): string {
   return `fn easeSel(t: f32) -> f32 { ${body} }`;
 }
 
-const EASE_BODIES: Record<string, string> = {
+export const EASE_BODIES: Record<string, string> = {
   linear: 'return t;',
   'power1.in': 'return t * t;',
   'power1.out': 'let u = 1.0 - t; return 1.0 - u * u;',
@@ -111,8 +111,8 @@ ${body}
   hot[slot].vel = o_initVel;
   hot[slot].life = max(o_initLife, 1e-4);
   hot[slot].age = U.dt * (1.0 - f);
-  meta[slot].seed = seed;
-  meta[slot].flags = 1u | (o_texIndex << 8u);
+  pmeta[slot].seed = seed;
+  pmeta[slot].flags = 1u | (o_texIndex << 8u);
   rnd[slot] = ParticleRnd(0xffffffffu, 1.0, 0.0);
   atomicAdd(&cnt.aliveCount, 1u);
 }`;
@@ -139,9 +139,9 @@ const RUNAWAY: f32 = 1e7;
 fn update(@builtin(global_invocation_id) gid: vec3u) {
   let slot = gid.x;
   if (slot >= U.capacity) { return; }
-  if ((meta[slot].flags & 1u) == 0u) { return; }
+  if ((pmeta[slot].flags & 1u) == 0u) { return; }
   var p = hot[slot];
-  let seed = meta[slot].seed;
+  let seed = pmeta[slot].seed;
   let ageN = clamp(p.age / p.life, 0.0, 1.0);
   var force = vec2f(0.0);
   var dragK = 0.0;
@@ -156,7 +156,7 @@ ${integrate}  p.pos += p.vel * U.dt;
 ${post}  p.age += U.dt;
   let runaway = any(abs(p.pos) > vec2f(RUNAWAY));
   if (p.age >= p.life || kill || runaway) {
-    meta[slot].flags = meta[slot].flags & ~1u;
+    pmeta[slot].flags = pmeta[slot].flags & ~1u;
     let idx = atomicAdd(&cnt.freeTop, 1);
     freeList[u32(idx)] = slot;
     atomicSub(&cnt.aliveCount, 1u);

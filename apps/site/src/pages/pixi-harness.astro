@@ -1,0 +1,107 @@
+---
+// pixi v8 integration harness (not linked from nav) — proves the §11.5 runtime:
+// registerPylinka() + createPylinka() on a REAL pixi stage, scene-interleaved
+// between two pixi layers, with follow() on a moving sprite and live knobs.
+// ?renderer=webgpu|webgl picks the host renderer (backend follows, §7.2).
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Pylinka pixi harness</title>
+  </head>
+  <body style="margin:0;background:#0a0a0a;overflow:hidden;color:#ddd;font:12px ui-monospace,monospace">
+    <div id="hud" style="position:fixed;left:8px;top:8px;z-index:10;background:#000a;padding:4px 8px;border-radius:6px">booting…</div>
+    <script>
+      import { Application, Graphics, Container } from 'pixi.js';
+      import { registerPylinka, createPylinka } from '@pylinka/core/pixi';
+      import { RECIPES } from '../recipes/data';
+
+      type HarnessState = {
+        runtime?: Awaited<ReturnType<typeof createPylinka>>;
+        app?: Application;
+        rendererType?: string;
+        error?: string;
+        frames: number;
+      };
+      const state: HarnessState = { frames: 0 };
+      (window as unknown as { __harness: HarnessState }).__harness = state;
+      const hud = document.getElementById('hud')!;
+
+      async function boot() {
+        const params = new URLSearchParams(location.search);
+        const preference = params.get('renderer') === 'webgl' ? 'webgl' : 'webgpu';
+        const recipe = RECIPES.find((r) => r.slug === (params.get('recipe') ?? 'coin-spark-trail'))!;
+
+        registerPylinka();
+        const app = new Application();
+        await app.init({
+          preference,
+          background: '#0a0a0a',
+          resizeTo: window,
+          antialias: false,
+        });
+        document.body.appendChild(app.canvas);
+        state.rendererType = app.renderer.name;
+        state.app = app;
+
+        // layer BELOW the particles: a grid of dim squares
+        const under = new Container();
+        const g1 = new Graphics();
+        for (let x = 0; x < 12; x++)
+          for (let y = 0; y < 8; y++)
+            g1.rect(40 + x * 90, 40 + y * 90, 36, 36).fill({ color: 0x1d3557 });
+        under.addChild(g1);
+        app.stage.addChild(under);
+
+        // THE PARTICLES — §11.5 runtime, view added between two pixi layers
+        const fx = await createPylinka(recipe.project, { renderer: app.renderer, seed: 1234 });
+        state.runtime = fx;
+        for (const name of Object.keys(fx.systems)) {
+          app.stage.addChild(fx.systems[name]!.view);
+        }
+
+        // layer ABOVE the particles: an orbiting "coin" the emitter follows
+        const coin = new Graphics().circle(0, 0, 14).fill({ color: 0xffc300 });
+        app.stage.addChild(coin);
+
+        const sys = Object.values(fx.systems)[0]!;
+        sys.follow(coin);
+
+        let t = 0;
+        const step = (dt: number) => {
+          t += dt;
+          coin.position.set(
+            window.innerWidth / 2 + Math.cos(t * 1.6) * window.innerWidth * 0.3,
+            window.innerHeight / 2 + Math.sin(t * 2.3) * window.innerHeight * 0.25,
+          );
+          fx.update(dt);
+          state.frames++;
+          if (state.frames % 30 === 0) {
+            hud.textContent =
+              `${app.renderer.name} · ${recipe.slug} · frame ${state.frames} · ` +
+              `alive ${sys.stats.aliveCount} · overflow ${sys.stats.overflowCount}`;
+          }
+        };
+        app.ticker.add((ticker) => step(ticker.deltaMS / 1000));
+        // headless/hidden-page driver: run n frames synchronously (rAF is
+        // suspended on hidden pages, e.g. capture tools)
+        (window as unknown as { __step?: (n: number) => void }).__step = (n: number) => {
+          for (let i = 0; i < n; i++) {
+            step(1 / 60);
+            app.render();
+          }
+        };
+      }
+
+      boot().catch((e) => {
+        state.error = String(e);
+        hud.textContent = 'ERROR: ' + String(e);
+        console.error(e);
+      });
+    </script>
+  </body>
+</html>

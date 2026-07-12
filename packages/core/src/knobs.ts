@@ -23,6 +23,13 @@ export class KnobStore implements KnobBus {
       else if (d.t === 'vec2') {
         a[0] = d.v[0];
         a[1] = d.v[1];
+      } else if (d.t === 'color') {
+        // '#rrggbbaa' (always 8 lowercase hex digits — §11.1 Literal)
+        const n = parseInt(d.v.slice(1), 16) >>> 0;
+        a[0] = ((n >>> 24) & 0xff) / 255;
+        a[1] = ((n >>> 16) & 0xff) / 255;
+        a[2] = ((n >>> 8) & 0xff) / 255;
+        a[3] = (n & 0xff) / 255;
       }
       this.values.set(p.name, a);
     }
