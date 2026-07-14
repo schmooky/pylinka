@@ -1,5 +1,11 @@
 # @pylinka/graph
 
+## 0.3.0
+
+### Minor Changes
+
+- [#3](https://github.com/schmooky/pylinka/pull/3) [`3aa652f`](https://github.com/schmooky/pylinka/commit/3aa652f00439fe7e77ee68c0b08b193434135c5b) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Support multiple eases per system. The compiler now emits one ease function per distinct ease key (`easeFnName`: `sine.out` → `easeSel_sine_out`) and each over-life node calls its own via `CodegenCtx.ease(key)`, instead of inlining a single `easeSel` and throwing `one ease per system`. This fixes every recipe that mixes eases (e.g. color `sine.out` + scale `linear`) — all swirl/vortex recipes now compile on the WebGPU path. Adds `ease()` to the `CodegenCtx` interface.
+
 ## 0.2.0
 
 ### Minor Changes
