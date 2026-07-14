@@ -36,6 +36,9 @@ const META_STRIDE = 8;
 const COUNTERS_SIZE = 12;
 const STATS_INTERVAL = 30; // frames between counter readbacks (§13.11 step 7)
 
+/** handle → sim, so a sub-emitter child can reach its parent's GPU buffers. */
+const simOf = new WeakMap<CompiledParticlesHandle, WebGPUSystemSim>();
+
 /** Pick the system a handle drives (same rule as the interpreted backend). */
 export function pickSystem(project: PylinkaProject, systemName?: string): System | undefined {
   return (
@@ -55,6 +58,8 @@ export interface WebGPUSimOptions {
   anim?: AtlasAnim;
   /** emission-mask point table (overrides the analytic spawn shape) */
   mask?: MaskTable;
+  /** sub-emitter parent: this child spawns on the parent's particle deaths */
+  subParent?: { hot: GPUBuffer; meta: GPUBuffer; capacity: number };
   /** share a project-wide knob store (KnobBus fan-out); defaults to its own */
   knobs?: KnobStore;
   seed?: number;
@@ -116,9 +121,20 @@ export class WebGPUSystemSim {
   private rDirty = true;
   private readbackInflight = false;
   private destroyed = false;
+  private readonly _capacity: number;
+  private subPipe: GPUComputePipeline | null = null;
+  private subBind: GPUBindGroup | null = null;
+  private prevAlive: GPUBuffer | null = null;
 
   get capacity(): number {
-    return this.system.capacity;
+    return this._capacity;
+  }
+  /** Parent buffers a sub-emitter child binds (read-only). */
+  get hotBuffer(): GPUBuffer {
+    return this.hot;
+  }
+  get metaBuffer(): GPUBuffer {
+    return this.meta;
   }
 
   constructor(device: GPUDevice, system: System, params: ParamDef[], opts: WebGPUSimOptions) {
@@ -142,7 +158,10 @@ export class WebGPUSystemSim {
       opts.seed,
     );
 
-    const cap = system.capacity;
+    // a sub-emitter mirrors its parent slot-for-slot, so it shares the parent's
+    // capacity (the subEmit kernel indexes parent slots 1:1).
+    const cap = opts.subParent ? opts.subParent.capacity : system.capacity;
+    this._capacity = cap;
     const mk = (size: number, usage: GPUBufferUsageFlags) => device.createBuffer({ size, usage });
     const simUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST;
     this.hot = mk(cap * HOT_STRIDE, simUsage);
@@ -182,6 +201,8 @@ export class WebGPUSystemSim {
     });
     ({ emit: this.emitPipe, update: this.updatePipe } = this.buildComputePipelines());
     this.computeBind = this.buildComputeBind();
+
+    if (opts.subParent) this.buildSubEmit(opts.subParent);
 
     this.renderLayout = device.createBindGroupLayout({
       entries: [
@@ -228,6 +249,51 @@ export class WebGPUSystemSim {
       compute: { module: this.device.createShaderModule({ code: this.compiled.updateSrc }), entryPoint: 'update' },
     });
     return { emit, update };
+  }
+
+  /** Build the sub-emitter emit path: a pool of parent-death-triggered spawns.
+   *  Bindings 0-6 (own sim) + 8/9 (parent hot/meta, read-only) + 10 (prevAlive). */
+  private buildSubEmit(parent: { hot: GPUBuffer; meta: GPUBuffer }): void {
+    const d = this.device;
+    this.prevAlive = d.createBuffer({
+      size: this.capacity * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    d.queue.writeBuffer(this.prevAlive, 0, new Uint32Array(this.capacity));
+    const st = GPUShaderStage.COMPUTE;
+    const layout = d.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: st, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: st, buffer: { type: 'uniform' } },
+        { binding: 2, visibility: st, buffer: { type: 'storage' } },
+        { binding: 3, visibility: st, buffer: { type: 'storage' } },
+        { binding: 4, visibility: st, buffer: { type: 'storage' } },
+        { binding: 5, visibility: st, buffer: { type: 'storage' } },
+        { binding: 6, visibility: st, buffer: { type: 'storage' } },
+        { binding: 8, visibility: st, buffer: { type: 'read-only-storage' } },
+        { binding: 9, visibility: st, buffer: { type: 'read-only-storage' } },
+        { binding: 10, visibility: st, buffer: { type: 'storage' } },
+      ],
+    });
+    this.subPipe = d.createComputePipeline({
+      layout: d.createPipelineLayout({ bindGroupLayouts: [layout] }),
+      compute: { module: d.createShaderModule({ code: this.compiled.subSrc }), entryPoint: 'subEmit' },
+    });
+    this.subBind = d.createBindGroup({
+      layout,
+      entries: [
+        { binding: 0, resource: { buffer: this.uBuf } },
+        { binding: 1, resource: { buffer: this.vBuf } },
+        { binding: 2, resource: { buffer: this.hot } },
+        { binding: 3, resource: { buffer: this.rnd } },
+        { binding: 4, resource: { buffer: this.meta } },
+        { binding: 5, resource: { buffer: this.counters } },
+        { binding: 6, resource: { buffer: this.freeList } },
+        { binding: 8, resource: { buffer: parent.hot } },
+        { binding: 9, resource: { buffer: parent.meta } },
+        { binding: 10, resource: { buffer: this.prevAlive } },
+      ],
+    });
   }
 
   private buildComputeBind(): GPUBindGroup {
@@ -340,11 +406,17 @@ export class WebGPUSystemSim {
   /** §13.11 step 5: emit dispatch (if any) then update dispatch. */
   encodeCompute(encoder: GPUCommandEncoder): void {
     const pass = encoder.beginComputePass();
-    pass.setBindGroup(0, this.computeBind);
-    if (this.clock.spawnCount > 0) {
+    if (this.subPipe && this.subBind) {
+      // sub-emitter: spawn one child per parent death this frame (no clock emit)
+      pass.setBindGroup(0, this.subBind);
+      pass.setPipeline(this.subPipe);
+      pass.dispatchWorkgroups(Math.ceil(this.capacity / 64));
+    } else if (this.clock.spawnCount > 0) {
+      pass.setBindGroup(0, this.computeBind);
       pass.setPipeline(this.emitPipe);
       pass.dispatchWorkgroups(Math.ceil(this.clock.spawnCount / 64));
     }
+    pass.setBindGroup(0, this.computeBind);
     pass.setPipeline(this.updatePipe);
     pass.dispatchWorkgroups(Math.ceil(this.capacity / 256));
     pass.end();
@@ -475,6 +547,7 @@ export class WebGPUSystemSim {
     for (const b of [this.hot, this.rnd, this.meta, this.counters, this.freeList, this.uBuf, this.vBuf, this.rBuf, this.readback, this.maskBuf]) {
       b.destroy();
     }
+    this.prevAlive?.destroy();
     this.texture.destroy();
   }
 }
@@ -561,12 +634,17 @@ export async function createParticles(
   const uploadable = await toUploadable(opts.atlas);
   const sprite = resolveSprite(uploadable);
   const mask = buildMaskTable(opts.emissionMask);
+  const parentSim = opts.subParent ? simOf.get(opts.subParent) : undefined;
+  if (opts.subParent && !parentSim) throw new Error('subParent is not a live WebGPU compiled handle.');
 
   const sim = new WebGPUSystemSim(device, system, project.params, {
     format,
     sprite,
     anim: resolveAnim(uploadable),
     ...(mask ? { mask } : {}),
+    ...(parentSim
+      ? { subParent: { hot: parentSim.hotBuffer, meta: parentSim.metaBuffer, capacity: parentSim.capacity } }
+      : {}),
     ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
     startX: (canvas.width * zoom) / 2,
     startY: (canvas.height * zoom) / 2,
@@ -626,9 +704,11 @@ export async function createParticles(
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      simOf.delete(handle);
       sim.destroy();
       releaseContext(canvas, shared);
     },
   };
+  simOf.set(handle, sim);
   return handle;
 }

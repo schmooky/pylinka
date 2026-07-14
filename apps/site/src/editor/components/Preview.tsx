@@ -134,7 +134,7 @@ export function Preview() {
     }
     for (const s of enabled) if (!placed.has(s.id)) ordered.push(s); // cycle fallback
 
-    const byId = new Map<string, ParticlesHandle>();
+    const byId = new Map<string, AnyHandle>();
     const handles: AnyHandle[] = [];
     const sysIds: string[] = [];
     const chosen = backendRef.current;
@@ -157,15 +157,14 @@ export function Preview() {
             systemName: sys.name,
             ...(atlas ? { atlas } : {}),
             ...(emissionMask ? { emissionMask } : {}),
-            ...(subParent ? { subParent } : {}),
+            ...(subParent ? { subParent: subParent as ParticlesHandle } : {}),
           });
           byId.set(sys.id, wh);
           h = wh;
         } else {
-          // compiled path: the whole graph runs as generated GPU code.
-          // Animated atlases and emission masks are supported; sub-emitter
-          // wiring is still an interpreted-only extra.
-          h = await createCompiledParticles(canvas, effective(proj), {
+          // compiled path: the whole graph runs as generated GPU code —
+          // animated atlases, emission masks, and sub-emitters all supported.
+          const ch = await createCompiledParticles(canvas, effective(proj), {
             systemName: sys.name,
             backend: chosen,
             ...(atlas
@@ -184,8 +183,11 @@ export function Preview() {
                 }
               : {}),
             ...(emissionMask ? { emissionMask } : {}),
+            ...(subParent ? { subParent: subParent as CompiledParticlesHandle } : {}),
             onRecompile: flashRecompile,
           });
+          byId.set(sys.id, ch);
+          h = ch;
         }
         h.autoClear = i === 0;
         for (const [n, v] of Object.entries(knobsRef.current)) h.setKnob(n, v);
@@ -353,7 +355,7 @@ export function Preview() {
         <span className="text-muted-foreground">
           {backend === 'webgl'
             ? 'move mouse over canvas'
-            : 'compiled graph · sub-emitters are interpreted-only'}
+            : 'compiled graph · full GPU pipeline'}
         </span>
       </div>
       <div className="flex border-b border-border text-xs">

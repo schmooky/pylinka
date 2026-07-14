@@ -61,6 +61,13 @@ export interface CompiledParticlesOptions {
   atlas?: CompiledAtlasOptions;
   /** Painted emission area; particles spawn inside it instead of the analytic shape. */
   emissionMask?: CompiledMaskOptions;
+  /**
+   * Sub-emitter parent handle: this system becomes a child that spawns one
+   * particle on each of the parent's particle deaths (at the death position),
+   * running its own graph. The parent must be a live compiled handle on the
+   * same backend/canvas. The child mirrors the parent's capacity.
+   */
+  subParent?: CompiledParticlesHandle;
   /** Called after any pipeline rebuild with the time it took. */
   onRecompile?: (info: { ms: number; reason: 'structural' | 'blend' }) => void;
 }

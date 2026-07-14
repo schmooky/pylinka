@@ -135,6 +135,54 @@ ${body}
 }`;
 }
 
+/**
+ * Sub-emitter emit kernel: a child system spawns one particle on each PARENT
+ * particle death, at the parent's position, running the child's own init body.
+ * Detection is transition-based and needs no parent cooperation — the child
+ * keeps a shadow of each parent slot's alive bit (`prevAlive`, binding 10) and
+ * fires when a slot goes alive→dead. Parent hot/meta are read-only (8/9). The
+ * child spawns into its own free-list pool, so its normal update kernel is
+ * reused unchanged; its clock-driven `emit` is simply not dispatched.
+ * Requires the child capacity to equal the parent capacity (1:1 slot index).
+ */
+export function subEmitKernel(body: string): string {
+  return `
+@group(0) @binding(8) var<storage, read> pHot: array<ParticleHot>;
+@group(0) @binding(9) var<storage, read> pMeta: array<ParticleMeta>;
+@group(0) @binding(10) var<storage, read_write> prevAlive: array<u32>;
+
+@compute @workgroup_size(64)
+fn subEmit(@builtin(global_invocation_id) gid: vec3u) {
+  let i = gid.x;
+  if (i >= U.capacity) { return; }
+  let aliveNow = pMeta[i].flags & 1u;
+  let wasAlive = prevAlive[i];
+  prevAlive[i] = aliveNow;
+  if (wasAlive != 1u || aliveNow != 0u) { return; }
+
+  let top = atomicSub(&cnt.freeTop, 1);
+  if (top <= 0) {
+    atomicAdd(&cnt.freeTop, 1);
+    atomicAdd(&cnt.overflowCount, 1u);
+    return;
+  }
+  let slot = freeList[u32(top - 1)];
+  let spawnOrigin = pHot[i].pos;
+  let seed = hash2(U.baseSeed, hash2(slot, U.frame));
+
+${body}
+
+  hot[slot].pos = spawnOrigin + o_spawnLocal;
+  hot[slot].vel = o_initVel;
+  hot[slot].life = max(o_initLife, 1e-4);
+  hot[slot].age = 0.0;
+  pmeta[slot].seed = seed;
+  pmeta[slot].flags = 1u | (o_texIndex << 8u);
+  rnd[slot] = ParticleRnd(0xffffffffu, 1.0, 0.0);
+  atomicAdd(&cnt.aliveCount, 1u);
+}`;
+}
+
 export interface UpdateOptions {
   /** setVelocity graphs omit the force/drag integration lines (§13.6). */
   setVelocity: boolean;

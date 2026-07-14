@@ -36,6 +36,9 @@ const STRIDE = WEBGL2_LAYOUT.strideBytes;
 const FLOATS = STRIDE / 4;
 const FLAGS_WORD = 7; // uint offset 28 / 4
 
+/** handle → sim, so a sub-emitter child can reach its parent's state buffers. */
+const simOf = new WeakMap<CompiledParticlesHandle, WebGL2CompiledSim>();
+
 function compileShader(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
   const sh = gl.createShader(type)!;
   gl.shaderSource(sh, src);
@@ -71,6 +74,8 @@ export interface WebGL2SimOptions {
   anim?: AtlasAnim;
   /** emission-mask point table (overrides the analytic spawn shape) */
   mask?: MaskTable;
+  /** sub-emitter parent sim: this child spawns on the parent's particle deaths */
+  subParent?: WebGL2CompiledSim;
   /** share a project-wide knob store (KnobBus fan-out); defaults to its own */
   knobs?: KnobStore;
   seed?: number;
@@ -92,6 +97,11 @@ export class WebGL2CompiledSim {
   private valueTable: ValueTable;
   private spawnCursor = 0;
   private cur = 0;
+  private readonly _capacity: number;
+  private readonly subParent: WebGL2CompiledSim | null = null;
+  private subProg: WebGLProgram | null = null;
+  private subVAOs: WebGLVertexArrayObject[][] = [];
+  private uSub = new Map<string, WebGLUniformLocation | null>();
 
   private stepProg: WebGLProgram;
   private readonly renderProg: WebGLProgram;
@@ -118,7 +128,14 @@ export class WebGL2CompiledSim {
   private readbackWords: Uint32Array;
 
   get capacity(): number {
-    return this.system.capacity;
+    return this._capacity;
+  }
+  /** Live ping-pong index + state buffers, so a sub-emitter child can bind them. */
+  get curIndex(): number {
+    return this.cur;
+  }
+  bufferAt(i: number): WebGLBuffer {
+    return this.bufs[i]!;
   }
 
   constructor(gl: WebGL2RenderingContext, system: System, params: ParamDef[], opts: WebGL2SimOptions) {
@@ -138,7 +155,10 @@ export class WebGL2CompiledSim {
       opts.seed,
     );
 
-    const cap = system.capacity;
+    // a sub-emitter mirrors its parent slot-for-slot → shares its capacity
+    this.subParent = opts.subParent ?? null;
+    const cap = this.subParent ? this.subParent.capacity : system.capacity;
+    this._capacity = cap;
     this.readbackWords = new Uint32Array(cap * FLOATS);
     const zero = new Float32Array(cap * FLOATS);
     this.bufs = [this.makeBuffer(zero), this.makeBuffer(zero)];
@@ -159,10 +179,59 @@ export class WebGL2CompiledSim {
     ];
     this.tf = gl.createTransformFeedback()!;
 
+    if (this.subParent) this.buildSubStep();
+
     const sprite = opts.sprite ?? softDisc();
     this.anim = opts.anim ?? STATIC_ANIM;
     this.tex = this.uploadSprite(sprite);
     if (opts.mask && opts.mask.count > 0) this.uploadMask(opts.mask);
+  }
+
+  /** Sub-emitter program + VAOs: child state[childCur] + parent cur/prev state
+   *  ([childCur][parentCur]), so death is read from the parent's ping-pong. */
+  private buildSubStep(): void {
+    const gl = this.gl;
+    const p = this.subParent!;
+    // updateSrc is the rasterizer-discard fragment stage for this target
+    this.subProg = link(gl, this.compiled.subSrc, this.compiled.updateSrc, WEBGL2_LAYOUT.varyings);
+    for (const n of [
+      'U.emitterPos', 'U.prevEmitterPos', 'U.emitterVel', 'U.dt', 'U.time',
+      'U.frame', 'U.spawnCount', 'U.capacity', 'U.baseSeed', 'V[0]',
+    ]) this.uSub.set(n, gl.getUniformLocation(this.subProg, n));
+    this.subVAOs = [0, 1].map((childCur) =>
+      [0, 1].map((parentCur) =>
+        this.makeSubVAO(this.bufs[childCur]!, p.bufferAt(parentCur), p.bufferAt(1 - parentCur)),
+      ),
+    );
+  }
+
+  /** VAO for the sub-step: own state + parent current (pos, flags) + parent prev (flags). */
+  private makeSubVAO(child: WebGLBuffer, pCur: WebGLBuffer, pPrev: WebGLBuffer): WebGLVertexArrayObject {
+    const gl = this.gl;
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, child);
+    for (const a of WEBGL2_LAYOUT.attribs) {
+      const loc = gl.getAttribLocation(this.subProg!, a.name);
+      if (loc < 0) continue;
+      gl.enableVertexAttribArray(loc);
+      if (a.type === 'uint') gl.vertexAttribIPointer(loc, a.size, gl.UNSIGNED_INT, STRIDE, a.offsetBytes);
+      else gl.vertexAttribPointer(loc, a.size, gl.FLOAT, false, STRIDE, a.offsetBytes);
+    }
+    const bind = (buf: WebGLBuffer, name: string, size: number, off: number, uint: boolean) => {
+      const loc = gl.getAttribLocation(this.subProg!, name);
+      if (loc < 0) return;
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.enableVertexAttribArray(loc);
+      if (uint) gl.vertexAttribIPointer(loc, size, gl.UNSIGNED_INT, STRIDE, off);
+      else gl.vertexAttribPointer(loc, size, gl.FLOAT, false, STRIDE, off);
+    };
+    bind(pCur, 'i_pPos', 2, 0, false); // parent pos (offset 0)
+    bind(pCur, 'i_pFlags', 1, 28, true); // parent flags now (offset 28)
+    bind(pPrev, 'i_pFlagsPrev', 1, 28, true); // parent flags prev
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    gl.bindVertexArray(null);
+    return vao;
   }
 
   /** RG32F row-major point table (2048 wide), sampled with texelFetch. */
@@ -293,6 +362,11 @@ export class WebGL2CompiledSim {
     c.tick(dt);
     this.valueTable.refreshKnobs(this.knobs);
 
+    if (this.subProg && this.subParent) {
+      this.subStep(dt);
+      return;
+    }
+
     const u = this.uStep;
     gl.useProgram(this.stepProg);
     gl.uniform2f(u.get('U.emitterPos')!, c.ex, c.ey);
@@ -332,6 +406,43 @@ export class WebGL2CompiledSim {
 
     this.cur = dst;
     this.spawnCursor = (this.spawnCursor + c.spawnCount) % this.capacity;
+    c.endFrame(dt);
+  }
+
+  /** Sub-emitter TF step: spawn on parent deaths (read from the parent's
+   *  current + previous state), then run the child's own update. The parent
+   *  is stepped earlier this frame, so its `curIndex` is the fresh buffer. */
+  private subStep(dt: number): void {
+    const gl = this.gl;
+    const c = this.clock;
+    const u = this.uSub;
+    gl.useProgram(this.subProg!);
+    gl.uniform2f(u.get('U.emitterPos')!, c.ex, c.ey);
+    gl.uniform2f(u.get('U.prevEmitterPos')!, c.px, c.py);
+    gl.uniform2f(u.get('U.emitterVel')!, c.velX(dt), c.velY(dt));
+    gl.uniform1f(u.get('U.dt')!, dt);
+    gl.uniform1f(u.get('U.time')!, c.time);
+    gl.uniform1ui(u.get('U.frame')!, c.frame);
+    gl.uniform1ui(u.get('U.spawnCount')!, 0);
+    gl.uniform1ui(u.get('U.capacity')!, this.capacity);
+    gl.uniform1ui(u.get('U.baseSeed')!, c.baseSeed);
+    gl.uniform4fv(u.get('V[0]')!, this.valueTable.data);
+
+    const dst = 1 - this.cur;
+    gl.bindVertexArray(this.subVAOs[this.cur]![this.subParent!.curIndex]!);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, this.tf);
+    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.bufs[dst]!);
+    gl.enable(gl.RASTERIZER_DISCARD);
+    gl.beginTransformFeedback(gl.POINTS);
+    gl.drawArrays(gl.POINTS, 0, this.capacity);
+    gl.endTransformFeedback();
+    gl.disable(gl.RASTERIZER_DISCARD);
+    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null);
+    gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, null);
+    gl.bindVertexArray(null);
+
+    this.cur = dst;
     c.endFrame(dt);
   }
 
@@ -435,6 +546,8 @@ export class WebGL2CompiledSim {
     gl.deleteTransformFeedback(this.tf);
     gl.deleteTexture(this.tex);
     if (this.maskTex) gl.deleteTexture(this.maskTex);
+    if (this.subProg) gl.deleteProgram(this.subProg);
+    for (const row of this.subVAOs) for (const v of row) gl.deleteVertexArray(v);
   }
 }
 
@@ -461,11 +574,14 @@ export function createParticles(
   const sizeScale = opts.sizeScale ?? 1;
   const maxDt = opts.maxDt ?? 0.05;
   const maskTable = buildMaskTable(opts.emissionMask);
+  const parentSim = opts.subParent ? simOf.get(opts.subParent) : undefined;
+  if (opts.subParent && !parentSim) throw new Error('subParent is not a live WebGL2 compiled handle.');
 
   const sim = new WebGL2CompiledSim(gl, system, project.params, {
     sprite: resolveSprite(opts.atlas),
     anim: resolveAnim(opts.atlas),
     ...(maskTable ? { mask: maskTable } : {}),
+    ...(parentSim ? { subParent: parentSim } : {}),
     ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
     startX: (canvas.width * zoom) / 2,
     startY: (canvas.height * zoom) / 2,
@@ -513,8 +629,10 @@ export function createParticles(
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      simOf.delete(handle);
       sim.destroy();
     },
   };
+  simOf.set(handle, sim);
   return handle;
 }
