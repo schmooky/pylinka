@@ -44,7 +44,7 @@ describe('compile — node coverage', () => {
     expect(c.updateSrc).toContain('dragK +=');
     expect(c.updateSrc).toContain('outSize =');
     expect(c.updateSrc).toContain('kill = kill ||');
-    expect(c.updateSrc).toContain('fn easeSel(t: f32) -> f32 { return 1.0 - cos(t * 1.5707963267948966); }');
+    expect(c.updateSrc).toContain('fn easeSel_sine_in(t: f32) -> f32 { return 1.0 - cos(t * 1.5707963267948966); }');
   });
 
   it('setVelocity omits the force/drag integration lines', () => {
@@ -103,28 +103,31 @@ describe('compile — node coverage', () => {
     expect(c.updateSrc).toContain('force +=');
   });
 
-  it('multiple distinct eases are rejected in v1', () => {
-    expect(() =>
-      compile(
-        bundle({
-          nodes: [
-            { id: 'n1', kind: 'shape.point', values: { offset: { t: 'vec2', v: [0, 0] } } },
-            { id: 'n2', kind: 'output.spawnPosition' },
-            { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } },
-            { id: 'n4', kind: 'gen.colorOverLife', structural: { ease: 'power2.out' }, values: { from: { t: 'color', v: '#ffffffff' }, to: { t: 'color', v: '#00000000' } } },
-            { id: 'n5', kind: 'output.writeColor' },
-            { id: 'n6', kind: 'gen.scaleOverLife', structural: { ease: 'sine.in' }, values: { from: { t: 'f32', v: 1 }, to: { t: 'f32', v: 0 } } },
-            { id: 'n7', kind: 'output.writeScale' },
-          ],
-          edges: [
-            { id: 'e1', from: { nodeId: 'n1', portId: 'pos' }, to: { nodeId: 'n2', portId: 'pos' } },
-            { id: 'e2', from: { nodeId: 'n4', portId: 'out' }, to: { nodeId: 'n5', portId: 'color' } },
-            { id: 'e3', from: { nodeId: 'n6', portId: 'out' }, to: { nodeId: 'n7', portId: 'scale' } },
-          ],
-        }),
-        V1_CATALOG,
-        'webgpu',
-      ),
-    ).toThrow(/one ease per system/);
+  it('mixes distinct eases per node (color sine.out + scale power2.out)', () => {
+    const c = compile(
+      bundle({
+        nodes: [
+          { id: 'n1', kind: 'shape.point', values: { offset: { t: 'vec2', v: [0, 0] } } },
+          { id: 'n2', kind: 'output.spawnPosition' },
+          { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } },
+          { id: 'n4', kind: 'gen.colorOverLife', structural: { ease: 'power2.out' }, values: { from: { t: 'color', v: '#ffffffff' }, to: { t: 'color', v: '#00000000' } } },
+          { id: 'n5', kind: 'output.writeColor' },
+          { id: 'n6', kind: 'gen.scaleOverLife', structural: { ease: 'sine.in' }, values: { from: { t: 'f32', v: 1 }, to: { t: 'f32', v: 0 } } },
+          { id: 'n7', kind: 'output.writeScale' },
+        ],
+        edges: [
+          { id: 'e1', from: { nodeId: 'n1', portId: 'pos' }, to: { nodeId: 'n2', portId: 'pos' } },
+          { id: 'e2', from: { nodeId: 'n4', portId: 'out' }, to: { nodeId: 'n5', portId: 'color' } },
+          { id: 'e3', from: { nodeId: 'n6', portId: 'out' }, to: { nodeId: 'n7', portId: 'scale' } },
+        ],
+      }),
+      V1_CATALOG,
+      'webgpu',
+    );
+    // both ease functions are emitted and each node calls its own
+    expect(c.updateSrc).toContain('fn easeSel_power2_out(t: f32) -> f32');
+    expect(c.updateSrc).toContain('fn easeSel_sine_in(t: f32) -> f32');
+    expect(c.updateSrc).toContain('easeSel_power2_out(ageN)');
+    expect(c.updateSrc).toContain('easeSel_sine_in(ageN)');
   });
 });

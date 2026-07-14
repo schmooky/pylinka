@@ -53,17 +53,17 @@ export const WEBGL2_LAYOUT: Webgl2Layout = {
   spawnCursorUniform: 'u_spawnCursor',
 };
 
-/** The §13.9 ease function as GLSL (same single-ease-per-system inlining). */
-export function easeFnGlsl(easeBodyWgsl: string): string {
+/** The §13.9 ease function as GLSL, named per distinct ease key. */
+export function easeFnGlsl(name: string, easeBodyWgsl: string): string {
   // ease bodies only ever declare `let u` (an f32) — see wgsl.ts EASE_BODIES
-  return `float easeSel(float t) { ${easeBodyWgsl.replace(/\blet\s+/g, 'float ')} }`;
+  return `float ${name}(float t) { ${easeBodyWgsl.replace(/\blet\s+/g, 'float ')} }`;
 }
 
 export interface GlslStepOptions {
   slots: number;
   helpers: { safeDiv: boolean; safeNormalize: boolean };
-  /** easeSel source (from easeFnGlsl), when the graph uses one */
-  easeSrc?: string;
+  /** ease function sources (from easeFnGlsl), one per distinct ease the graph uses */
+  easeSrcs?: string[];
   /** generated bodies, already translated to GLSL */
   initBody: string;
   updateBody: string;
@@ -142,7 +142,7 @@ vec2 safeNormalize(vec2 v) {
   return (len < 1e-6) ? vec2(0.0) : v / len;
 }`);
   }
-  if (o.easeSrc !== undefined) parts.push(o.easeSrc);
+  if (o.easeSrcs !== undefined) for (const src of o.easeSrcs) parts.push(src);
 
   const integrate = o.setVelocity
     ? ''

@@ -16,6 +16,7 @@ import type {
   UniformLayout,
 } from '@pylinka/graph';
 import { liveNodeIds } from '@pylinka/graph';
+import { easeFnName } from './wgsl.js';
 
 const PI = '3.141592653589793';
 const TAU = '6.283185307179586';
@@ -138,6 +139,9 @@ export class NodeCtx implements CodegenCtx {
   readonly lines: string[] = [];
   readonly stableUsed: number[] = [];
   readonly frameUsed: number[] = [];
+  /** distinct ease keys this node references (§13.9) — the orchestrator emits
+   * one ease function per distinct key across the kernel. */
+  readonly usedEases = new Set<string>();
   /** temp name → port type, so the webgl2 translator can type `let` lines */
   readonly tempTypes = new Map<string, PortType>();
   private tmpN = 0;
@@ -169,6 +173,12 @@ export class NodeCtx implements CodegenCtx {
     const k = this.rng.frame();
     this.frameUsed.push(k);
     return `frand(seed, U.frame, ${k}u)`;
+  }
+  /** Register an ease (default 'linear') and return its function name. */
+  ease(key: string | undefined): Expr {
+    const k = key ?? 'linear';
+    this.usedEases.add(k);
+    return easeFnName(k);
   }
   line(stmt: string): void {
     this.lines.push('  ' + stmt);
@@ -215,9 +225,12 @@ export const NODE_CODEGEN: Record<string, NodeCodegen> = {
   'gen.randomVec2': (ctx, i) =>
     one(`mix(${i.min}, ${i.max}, vec2f(${ctx.stableRandom()}, ${ctx.stableRandom()}))`),
   'gen.frameRandom': (ctx) => one(ctx.frameRandom()),
-  'gen.curveOverLife': (ctx, i) => one(`mix(${i.from}, ${i.to}, easeSel(${ctx.consts.AGE_N}))`),
-  'gen.colorOverLife': (ctx, i) => one(`mix(${i.from}, ${i.to}, easeSel(${ctx.consts.AGE_N}))`),
-  'gen.scaleOverLife': (ctx, i) => one(`mix(${i.from}, ${i.to}, easeSel(${ctx.consts.AGE_N}))`),
+  'gen.curveOverLife': (ctx, i, s) =>
+    one(`mix(${i.from}, ${i.to}, ${ctx.ease(s.ease)}(${ctx.consts.AGE_N}))`),
+  'gen.colorOverLife': (ctx, i, s) =>
+    one(`mix(${i.from}, ${i.to}, ${ctx.ease(s.ease)}(${ctx.consts.AGE_N}))`),
+  'gen.scaleOverLife': (ctx, i, s) =>
+    one(`mix(${i.from}, ${i.to}, ${ctx.ease(s.ease)}(${ctx.consts.AGE_N}))`),
   'gen.noise': (ctx, i) =>
     one(
       `(fract(sin(dot(p.pos * ${i.scale}, vec2f(12.9898, 78.233)) + U.time * ${i.speed}) * 43758.5453) * 2.0 - 1.0)`,

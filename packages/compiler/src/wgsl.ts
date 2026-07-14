@@ -60,11 +60,16 @@ fn safeNormalize(v: vec2f) -> vec2f {
   return parts.join('\n');
 }
 
-/** The §13.9 ease function `easeSel`, inlined for exactly one `ease` choice. */
+/** WGSL/GLSL-safe function name for an ease key ('sine.out' → 'easeSel_sine_out'). */
+export function easeFnName(key: string): string {
+  return 'easeSel_' + key.replace(/\./g, '_');
+}
+
+/** The §13.9 ease function, inlined per distinct `ease` choice used by a system. */
 export function easeFn(ease: string): string {
   const body = EASE_BODIES[ease];
   if (body === undefined) throw new Error(`Unknown ease "${ease}"`);
-  return `fn easeSel(t: f32) -> f32 { ${body} }`;
+  return `fn ${easeFnName(ease)}(t: f32) -> f32 { ${body} }`;
 }
 
 export const EASE_BODIES: Record<string, string> = {

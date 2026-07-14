@@ -33,7 +33,7 @@ fn hash2(a: u32, b: u32) -> u32 { return pcg(a ^ pcg(b)); }
 fn rand01(h: u32) -> f32 { return f32(h) * 2.3283064365386963e-10; }
 fn srand(seed: u32, n: u32) -> f32 { return rand01(hash2(seed, n)); }
 fn frand(seed: u32, frame: u32, n: u32) -> f32 { return rand01(hash2(seed, hash2(frame, n))); }
-fn easeSel(t: f32) -> f32 { let u = 1.0 - t; return 1.0 - u * u * u; }
+fn easeSel_power2_out(t: f32) -> f32 { let u = 1.0 - t; return 1.0 - u * u * u; }
 
 const RUNAWAY: f32 = 1e7;
 
@@ -61,7 +61,7 @@ fn update(@builtin(global_invocation_id) gid: vec3u) {
   // n11 field.directional
   let t_n11 = vec2f(cos(t_n10), sin(t_n10)) * t_n9;
   // n13 gen.colorOverLife [ease=power2.out]
-  let t_n13 = mix(V[1], V[2], easeSel(ageN));
+  let t_n13 = mix(V[1], V[2], easeSel_power2_out(ageN));
   force += t_n7; // output.addForce (n8)
   force += t_n11; // output.addForce (n12)
   outColor = t_n13; // output.writeColor (n14)
