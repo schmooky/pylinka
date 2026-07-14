@@ -39,6 +39,22 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
+  apps/mobile-preview:
+    dependencies:
+      '@pylinka/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@pylinka/graph':
+        specifier: workspace:*
+        version: link:../../packages/graph
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vite:
+        specifier: ^6.4.3
+        version: 6.4.3(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0)
+
   apps/site:
     dependencies:
       '@astrojs/sitemap':
