@@ -15,11 +15,11 @@ import type {
 } from '@pylinka/graph';
 import { getSchema, hashGraph, resolveKind, validateGraph } from '@pylinka/graph';
 import { buildSlots, NODE_CODEGEN, NodeCtx, valueSlotExpr, type SlotResolution } from './codegen.js';
-import { easeFnGlsl, GLSL_DISCARD_FS, glslStepShader } from './glsl.js';
+import { easeFnGlsl, GLSL_DISCARD_FS, glslStepShader, glslSubStepShader } from './glsl.js';
 import { naturalCompare, resolveEvalTimes } from './topo.js';
 import { wgslBodyToGlsl } from './translate.js';
 import { CompileError, V1_BINDINGS, type CompiledSystem } from './types.js';
-import { EASE_BODIES, easeFn, easeFnName, emitKernel, preamble, updateKernel } from './wgsl.js';
+import { EASE_BODIES, easeFn, easeFnName, emitKernel, preamble, subEmitKernel, updateKernel } from './wgsl.js';
 
 const INIT_OUTPUT_ORDER = [
   'output.spawnPosition',
@@ -71,6 +71,7 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
 
   let emitSrc: string;
   let updateSrc: string;
+  let subSrc: string;
   if (target === 'webgpu') {
     emitSrc =
       preamble(slots.layout.slotCount, initFlags) +
@@ -82,11 +83,17 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
       easeDefsWgsl(updateEases) +
       '\n' +
       updateKernel(body, postIntegrate, { setVelocity });
+    // sub-emitter emit: init body only, into the child's own pool (§sub-emitters)
+    subSrc =
+      preamble(slots.layout.slotCount, initFlags) +
+      easeDefsWgsl(initEases) +
+      '\n' +
+      subEmitKernel(initBody);
   } else {
     // webgl2: ONE fused TF step shader (see glsl.ts header for the mapping), so
     // it needs every ease used by either the init or update body.
     const allEases = sorted(new Set([...initEases, ...updateEases]));
-    emitSrc = glslStepShader({
+    const glslOpts = {
       slots: slots.layout.slotCount,
       helpers: {
         safeDiv: initFlags.safeDiv || updateFlags.safeDiv,
@@ -99,8 +106,10 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
       updateBody: wgslBodyToGlsl(body, ctx.tempTypes),
       postIntegrate: wgslBodyToGlsl(postIntegrate, ctx.tempTypes),
       setVelocity,
-    });
+    };
+    emitSrc = glslStepShader(glslOpts);
     updateSrc = GLSL_DISCARD_FS;
+    subSrc = glslSubStepShader(glslOpts);
   }
 
   // 5. textures (tex.* nodes → asset bindings)
@@ -118,6 +127,7 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
     backend: target,
     emitSrc,
     updateSrc,
+    subSrc,
     uniforms: slots.layout,
     bindings: V1_BINDINGS,
     textures,

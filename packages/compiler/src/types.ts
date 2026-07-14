@@ -37,6 +37,13 @@ export interface CompiledSystem {
   /** full kernel source (scaffold + generated body) */
   emitSrc: string;
   updateSrc: string;
+  /**
+   * Sub-emitter source: for a child that spawns on parent deaths. WebGPU: a
+   * `subEmit` compute kernel (run instead of the clock emit; reads parent
+   * hot/meta at bindings 8/9 + a `prevAlive` shadow at 10). WebGL2: a fused
+   * sub-step that replaces the normal step (reads parent cur/prev state).
+   */
+  subSrc: string;
   uniforms: UniformLayout;
   bindings: BindingLayout;
   textures: { assetId: string; binding: number }[];
