@@ -1,5 +1,18 @@
 # @pylinka/core
 
+## 0.4.0
+
+### Minor Changes
+
+- [#7](https://github.com/schmooky/pylinka/pull/7) [`d8a4b06`](https://github.com/schmooky/pylinka/commit/d8a4b0626e5fc4cb4f736739e44ae38ff988067e) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Animated sprite atlases now play on the compiled WebGPU and WebGL2 backends. Previously the compiled render drew a single static atlas cell (frame 0, row 0), so every particle showed the same frame and colour — spinning coins didn't spin and per-particle "random colour" rows all collapsed to one. The render pipelines now receive `age`/`life`/`seed` and the atlas animation uniforms (fps, play, pick, grid, frame/pad), and compute the cell exactly like the interpreted backend: the column advances over life (loop by `age·fps`, or once-over-life) and the row is per-particle (or a fixed row for `per-spawn`). `CompiledAtlasOptions` gains `frameW`/`frameH`/`pad`/`fps`/`play`/`pick`/`row`. Masks and sub-emitters remain interpreted-only.
+
+- [#7](https://github.com/schmooky/pylinka/pull/7) [`d8a4b06`](https://github.com/schmooky/pylinka/commit/d8a4b0626e5fc4cb4f736739e44ae38ff988067e) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Emission masks now work on the compiled WebGPU and WebGL2 backends. A painted mask is rasterised into a point table of emitter-relative spawn offsets; the compiled emit kernel samples one per spawn instead of the graph's analytic shape (matching the interpreted backend). WebGPU binds the table as a read-only storage buffer (binding 7); WebGL2 samples an RG32F texture. `CompiledParticlesOptions` gains `emissionMask`. The compiler's emit/step scaffolds gained the mask sampling (emit WGSL binding + WebGL2 step uniforms); the update kernel is unchanged.
+
+### Patch Changes
+
+- Updated dependencies [[`d8a4b06`](https://github.com/schmooky/pylinka/commit/d8a4b0626e5fc4cb4f736739e44ae38ff988067e)]:
+  - @pylinka/compiler@0.4.0
+
 ## 0.3.1
 
 ### Patch Changes

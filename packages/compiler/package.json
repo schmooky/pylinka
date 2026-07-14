@@ -1,6 +1,6 @@
 {
   "name": "@pylinka/compiler",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Pylinka compiler: SystemBundle → backend-neutral IR → GPU program codegen (WGSL). Zero runtime deps.",
   "license": "MIT",
   "repository": {
