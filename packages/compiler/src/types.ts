@@ -15,6 +15,8 @@ export interface BindingLayout {
   meta: number;
   counters: number;
   freeList: number;
+  /** emission-mask point table (emit kernel only, WebGPU) */
+  maskTable: number;
 }
 
 export const V1_BINDINGS: BindingLayout = {
@@ -26,6 +28,7 @@ export const V1_BINDINGS: BindingLayout = {
   meta: 4,
   counters: 5,
   freeList: 6,
+  maskTable: 7,
 };
 
 export interface CompiledSystem {

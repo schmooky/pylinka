@@ -7,6 +7,7 @@
  */
 import type { PylinkaProject } from '@pylinka/graph';
 import type { CompiledAtlasOptions } from './sprite.js';
+import type { CompiledMaskOptions } from './mask.js';
 
 export interface CompiledStats {
   aliveCount: number;
@@ -58,6 +59,8 @@ export interface CompiledParticlesOptions {
   seed?: number;
   /** Sprite / uniform-grid atlas; cell picked by `output.initTexIndex` (§13.8). */
   atlas?: CompiledAtlasOptions;
+  /** Painted emission area; particles spawn inside it instead of the analytic shape. */
+  emissionMask?: CompiledMaskOptions;
   /** Called after any pipeline rebuild with the time it took. */
   onRecompile?: (info: { ms: number; reason: 'structural' | 'blend' }) => void;
 }
