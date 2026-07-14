@@ -162,9 +162,9 @@ export function Preview() {
           byId.set(sys.id, wh);
           h = wh;
         } else {
-          // compiled path: the whole graph runs as generated GPU code. Masks
-          // and sub-emitter wiring are still interpreted-only extras; animated
-          // atlases (frame-over-life + per-particle row) are now supported.
+          // compiled path: the whole graph runs as generated GPU code.
+          // Animated atlases and emission masks are supported; sub-emitter
+          // wiring is still an interpreted-only extra.
           h = await createCompiledParticles(canvas, effective(proj), {
             systemName: sys.name,
             backend: chosen,
@@ -183,6 +183,7 @@ export function Preview() {
                   },
                 }
               : {}),
+            ...(emissionMask ? { emissionMask } : {}),
             onRecompile: flashRecompile,
           });
         }
@@ -352,7 +353,7 @@ export function Preview() {
         <span className="text-muted-foreground">
           {backend === 'webgl'
             ? 'move mouse over canvas'
-            : 'compiled graph · masks/sub-emitters are interpreted-only'}
+            : 'compiled graph · sub-emitters are interpreted-only'}
         </span>
       </div>
       <div className="flex border-b border-border text-xs">

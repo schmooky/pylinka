@@ -92,9 +92,15 @@ export const EASE_BODIES: Record<string, string> = {
 
 export const EASE_KEYS = Object.keys(EASE_BODIES);
 
-/** Emit kernel scaffold (§13.5). `body` is the generated init body (indented). */
+/** Emit kernel scaffold (§13.5). `body` is the generated init body (indented).
+ *  An emission mask (binding 7) overrides the analytic spawn offset when set:
+ *  maskTbl[0].x holds the point count, points follow at indices 1..N. A dummy
+ *  1-element buffer (count 0) means "no mask". Declared only here so the update
+ *  kernel is unaffected; the shared bind-group layout carries the entry. */
 export function emitKernel(body: string): string {
   return `
+@group(0) @binding(7) var<storage, read> maskTbl: array<vec2f>;
+
 @compute @workgroup_size(64)
 fn emit(@builtin(global_invocation_id) gid: vec3u) {
   let i = gid.x;
@@ -112,7 +118,13 @@ fn emit(@builtin(global_invocation_id) gid: vec3u) {
 
 ${body}
 
-  hot[slot].pos = spawnOrigin + o_spawnLocal;
+  var spawnLocal = o_spawnLocal;
+  let maskN = u32(maskTbl[0].x);
+  if (maskN > 0u) {
+    let mi = 1u + min(u32(rand01(hash2(seed, 4919u)) * f32(maskN)), maskN - 1u);
+    spawnLocal = maskTbl[mi];
+  }
+  hot[slot].pos = spawnOrigin + spawnLocal;
   hot[slot].vel = o_initVel;
   hot[slot].life = max(o_initLife, 1e-4);
   hot[slot].age = U.dt * (1.0 - f);
