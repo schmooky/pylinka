@@ -5,72 +5,15 @@
  */
 import './style.css';
 import { createCompiledParticles, type CompiledParticlesHandle } from '@pylinka/core/gpu';
-import { RECIPES, type Recipe } from '../../site/src/recipes/data';
+import { PRESETS, type Preset } from './presets';
 
-// ── recipe → runtime plumbing (a slim mirror of the editor's Preview) ────────
+// ── preset → runtime plumbing ────────────────────────────────────────────────
 
 type Backend = 'webgpu' | 'webgl2';
-type Atlas = NonNullable<Recipe['atlas']>;
-type MaskDef = { src: string; width: number; offset?: [number, number] };
-type ProjectWithExtras = Recipe['project'] & { systemMasks?: Record<string, MaskDef> };
 
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((res, rej) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => res(img);
-    img.onerror = () => rej(new Error(`image failed: ${src}`));
-    img.src = src;
-  });
-}
-
-function atlasFor(recipe: Recipe, sysId: string): Atlas | undefined {
-  if (recipe.systemAtlases?.[sysId]) return recipe.systemAtlases[sysId];
-  if (recipe.atlas && sysId === recipe.project.systems[0]?.id) return recipe.atlas;
-  return undefined;
-}
-
-async function buildAtlasOpts(a: Atlas) {
-  const image = await loadImage(a.url);
-  return {
-    image,
-    cols: a.cols,
-    rows: a.rows,
-    frameW: a.frameW,
-    frameH: a.frameH,
-    pad: a.pad,
-    fps: a.fps,
-    play: a.play,
-    pick: a.pick,
-  };
-}
-
-async function buildMaskOpts(m: MaskDef) {
-  const image = await loadImage(m.src);
-  return { image, width: m.width, ...(m.offset ? { offset: m.offset } : {}) };
-}
-
-/** Enabled systems, parents before children (so a sub-emitter finds its parent). */
-function orderedSystems(recipe: Recipe): typeof recipe.project.systems {
-  const systems = recipe.project.systems.filter((s) => s.enabled !== false);
-  const ids = new Set(systems.map((s) => s.id));
-  const links = recipe.subEmitters ?? {};
-  const parentOf = (id: string) => (links[id] && ids.has(links[id]) ? links[id] : undefined);
-  const out: typeof systems = [];
-  const placed = new Set<string>();
-  let guard = systems.length + 1;
-  while (out.length < systems.length && guard-- > 0) {
-    for (const s of systems) {
-      if (placed.has(s.id)) continue;
-      const p = parentOf(s.id);
-      if (!p || placed.has(p)) {
-        out.push(s);
-        placed.add(s.id);
-      }
-    }
-  }
-  for (const s of systems) if (!placed.has(s.id)) out.push(s);
-  return out;
+/** Enabled systems for a preset (curated presets have no sub-emitter ordering). */
+function orderedSystems(preset: Preset): Preset['project']['systems'] {
+  return preset.project.systems.filter((s) => s.enabled !== false);
 }
 
 // ── app state ────────────────────────────────────────────────────────────────
@@ -109,37 +52,25 @@ function flash(msg: string, isErr = false): void {
 
 async function mount(next: number): Promise<void> {
   const gen = ++generation;
-  index = (next + RECIPES.length) % RECIPES.length;
-  const recipe = RECIPES[index]!;
+  index = (next + PRESETS.length) % PRESETS.length;
+  const preset = PRESETS[index]!;
 
   for (const h of handles) h.destroy();
   handles = [];
   sizeCanvas();
 
-  const systems = orderedSystems(recipe);
-  const proj = recipe.project as ProjectWithExtras;
-  const byId = new Map<string, CompiledParticlesHandle>();
+  const systems = orderedSystems(preset);
   const built: CompiledParticlesHandle[] = [];
 
   for (let i = 0; i < systems.length; i++) {
     const sys = systems[i]!;
-    const a = atlasFor(recipe, sys.id);
-    const m = proj.systemMasks?.[sys.id];
-    const parentId = (recipe.subEmitters ?? {})[sys.id];
-    const parent = parentId ? byId.get(parentId) : undefined;
     try {
-      const atlas = a ? await buildAtlasOpts(a) : undefined;
-      const emissionMask = m ? await buildMaskOpts(m) : undefined;
       if (gen !== generation) return; // superseded by a newer tap
-      const h = await createCompiledParticles(canvas, recipe.project, {
+      const h = await createCompiledParticles(canvas, preset.project, {
         systemName: sys.name,
         backend,
-        ...(atlas ? { atlas } : {}),
-        ...(emissionMask ? { emissionMask } : {}),
-        ...(parent ? { subParent: parent } : {}),
       });
       h.autoClear = i === 0; // first clears, the rest composite
-      byId.set(sys.id, h);
       built.push(h);
     } catch (err) {
       flash(String((err as Error).message ?? err), true);
@@ -152,10 +83,10 @@ async function mount(next: number): Promise<void> {
   handles = built;
   loadedAt = performance.now();
 
-  presetName.textContent = recipe.title;
+  presetName.textContent = preset.title;
   presetSub.innerHTML =
-    `<span class="idx">${index + 1} / ${RECIPES.length}</span> · ${recipe.group}` +
-    ` · ${recipe.tags.slice(0, 3).join(' ')}`;
+    `<span class="idx">${index + 1} / ${PRESETS.length}</span> · ${preset.group}` +
+    ` · ${preset.tags.slice(0, 3).join(' ')}`;
 }
 
 // ── frame loop + metrics ─────────────────────────────────────────────────────
@@ -171,8 +102,8 @@ function metricsRow(k: string, v: string, cls = ''): string {
 }
 
 function renderHud(fpsInst: number): void {
-  const recipe = RECIPES[index];
-  if (!recipe) return;
+  const preset = PRESETS[index];
+  if (!preset) return;
   const sorted = [...win].sort((a, b) => a - b);
   const avg = win.reduce((s, x) => s + x, 0) / (win.length || 1);
   const min = sorted[0] ?? 0;
@@ -188,12 +119,9 @@ function renderHud(fpsInst: number): void {
     overflow += s.overflowCount;
     if (s.gpuMs != null) gpuMs = (gpuMs ?? 0) + s.gpuMs;
   }
-  const systems = recipe.project.systems.filter((s) => s.enabled !== false);
+  const systems = preset.project.systems.filter((s) => s.enabled !== false);
   const capacity = systems.reduce((s, sys) => s + sys.capacity, 0);
   const blends = [...new Set(systems.map((s) => s.blendMode))].join(',');
-  const hasAtlas = !!(recipe.atlas || recipe.systemAtlases);
-  const hasMask = !!(recipe.project as ProjectWithExtras).systemMasks;
-  const hasSub = !!recipe.subEmitters;
   const fillPct = capacity ? Math.round((alive / capacity) * 100) : 0;
   const fpsCls = fpsInst >= 55 ? 'good' : fpsInst >= 30 ? 'warn' : 'warn';
   const uptime = ((performance.now() - loadedAt) / 1000).toFixed(1);
@@ -217,7 +145,7 @@ function renderHud(fpsInst: number): void {
     metricsRow('draws', `${handles.length}`) +
     `<div class="sec">preset</div>` +
     metricsRow('systems', `${systems.length} · ${blends}`) +
-    metricsRow('features', [hasAtlas && 'atlas', hasMask && 'mask', hasSub && 'sub'].filter(Boolean).join(' ') || '—');
+    metricsRow('group', preset.group);
 }
 
 function loop(now: number): void {
