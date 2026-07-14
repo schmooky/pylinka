@@ -5,6 +5,16 @@
  * sprite.
  */
 
+/**
+ * Base sprite edge in world units: a particle whose `output.writeScale` is 1.0
+ * (or a system with no scaleOverLife, whose size defaults to 1) draws as an
+ * 8px quad. Matches the interpreted WebGL runtime, which bakes `× 8` into its
+ * size uniforms (webgl/params.ts) — without it the compiled backends draw
+ * every particle 8× smaller. `rnd.size` stays a normalized scale; the base
+ * pixel size is a rendering concern applied via the render size-scale uniform.
+ */
+export const BASE_SPRITE_PX = 8;
+
 export interface SpriteSource {
   image: TexImageSource;
   width: number;
