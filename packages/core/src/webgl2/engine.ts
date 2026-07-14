@@ -11,7 +11,16 @@
 import { compile, WEBGL2_LAYOUT, type CompiledSystem } from '@pylinka/compiler';
 import { hashGraph, V1_CATALOG, type ParamDef, type PylinkaProject, type System } from '@pylinka/graph';
 import { SystemClock } from '../compiled/emitter.js';
-import { BASE_SPRITE_PX, resolveSprite, softDisc, type SpriteSource } from '../compiled/sprite.js';
+import {
+  BASE_SPRITE_PX,
+  resolveAnim,
+  resolveSprite,
+  softDisc,
+  STATIC_ANIM,
+  type AtlasAnim,
+  type SpriteSource,
+} from '../compiled/sprite.js';
+import { buildMaskTable, MASK_TEX_WIDTH, type MaskTable } from '../compiled/mask.js';
 import { ValueTable } from '../compiled/staging.js';
 import type {
   CompiledParticlesHandle,
@@ -58,6 +67,10 @@ function link(
 
 export interface WebGL2SimOptions {
   sprite?: SpriteSource;
+  /** atlas animation config (column advance + row pick); defaults to static */
+  anim?: AtlasAnim;
+  /** emission-mask point table (overrides the analytic spawn shape) */
+  mask?: MaskTable;
   /** share a project-wide knob store (KnobBus fan-out); defaults to its own */
   knobs?: KnobStore;
   seed?: number;
@@ -90,8 +103,17 @@ export class WebGL2CompiledSim {
   private uStep = new Map<string, WebGLUniformLocation | null>();
   private readonly uRender = new Map<string, WebGLUniformLocation | null>();
   private readonly tex: WebGLTexture;
+  private maskTex: WebGLTexture | null = null;
+  private maskCount = 0;
+  private maskW = 1;
   private spriteCols = 1;
   private spriteRows = 1;
+  private spriteFrameW = 64;
+  private spriteFrameH = 64;
+  private spriteAtlasW = 64;
+  private spriteAtlasH = 64;
+  private spritePad = 0;
+  private anim: AtlasAnim = STATIC_ANIM;
   /** scratch for the flags readback (aliveCount) */
   private readbackWords: Uint32Array;
 
@@ -124,7 +146,7 @@ export class WebGL2CompiledSim {
     this.stepProg = link(gl, this.compiled.emitSrc, this.compiled.updateSrc, WEBGL2_LAYOUT.varyings);
     this.renderProg = link(gl, COMPILED_RENDER_VS, COMPILED_RENDER_FS);
     this.cacheStepUniforms();
-    for (const n of ['u_scaleOffset', 'u_atlas', 'u_tex']) {
+    for (const n of ['u_scaleOffset', 'u_grid', 'u_anim', 'u_frame', 'u_tex']) {
       this.uRender.set(n, gl.getUniformLocation(this.renderProg, n));
     }
 
@@ -138,7 +160,29 @@ export class WebGL2CompiledSim {
     this.tf = gl.createTransformFeedback()!;
 
     const sprite = opts.sprite ?? softDisc();
+    this.anim = opts.anim ?? STATIC_ANIM;
     this.tex = this.uploadSprite(sprite);
+    if (opts.mask && opts.mask.count > 0) this.uploadMask(opts.mask);
+  }
+
+  /** RG32F row-major point table (2048 wide), sampled with texelFetch. */
+  private uploadMask(mask: MaskTable): void {
+    const gl = this.gl;
+    const w = Math.min(mask.count, MASK_TEX_WIDTH);
+    const h = Math.ceil(mask.count / MASK_TEX_WIDTH);
+    const data = new Float32Array(w * h * 2);
+    data.set(mask.points.subarray(0, mask.count * 2));
+    this.maskTex = gl.createTexture();
+    this.maskCount = mask.count;
+    this.maskW = w;
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, w, h, 0, gl.RG, gl.FLOAT, data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, null);
   }
 
   private cacheStepUniforms(): void {
@@ -147,7 +191,7 @@ export class WebGL2CompiledSim {
     const names = [
       'U.emitterPos', 'U.prevEmitterPos', 'U.emitterVel', 'U.dt', 'U.time',
       'U.frame', 'U.spawnCount', 'U.capacity', 'U.baseSeed', 'V[0]',
-      WEBGL2_LAYOUT.spawnCursorUniform,
+      WEBGL2_LAYOUT.spawnCursorUniform, 'u_maskTbl', 'u_maskCount', 'u_maskW',
     ];
     for (const n of names) this.uStep.set(n, gl.getUniformLocation(this.stepProg, n));
   }
@@ -156,6 +200,11 @@ export class WebGL2CompiledSim {
     const gl = this.gl;
     this.spriteCols = sprite.cols;
     this.spriteRows = sprite.rows;
+    this.spriteFrameW = sprite.frameW;
+    this.spriteFrameH = sprite.frameH;
+    this.spriteAtlasW = sprite.width;
+    this.spriteAtlasH = sprite.height;
+    this.spritePad = sprite.pad;
     const tex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
@@ -215,6 +264,9 @@ export class WebGL2CompiledSim {
     inst(3, 1, 48); // a_size
     inst(4, 1, 52); // a_rot
     inst(5, 1, 28, true); // a_flags
+    inst(6, 1, 16); // a_age
+    inst(7, 1, 20); // a_life
+    inst(8, 1, 24, true); // a_seed
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindVertexArray(null);
     return vao;
@@ -254,6 +306,14 @@ export class WebGL2CompiledSim {
     gl.uniform1ui(u.get('U.baseSeed')!, c.baseSeed);
     gl.uniform4fv(u.get('V[0]')!, this.valueTable.data);
     gl.uniform1ui(u.get(WEBGL2_LAYOUT.spawnCursorUniform)!, this.spawnCursor);
+    gl.uniform1f(u.get('u_maskCount')!, this.maskCount);
+    gl.uniform1f(u.get('u_maskW')!, this.maskW);
+    if (this.maskTex) {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+      gl.uniform1i(u.get('u_maskTbl')!, 1);
+      gl.activeTexture(gl.TEXTURE0);
+    }
 
     const dst = 1 - this.cur;
     gl.bindVertexArray(this.stepVAOs[this.cur]!);
@@ -280,7 +340,9 @@ export class WebGL2CompiledSim {
     const gl = this.gl;
     gl.useProgram(this.renderProg);
     gl.uniform4f(this.uRender.get('u_scaleOffset')!, sx, sy, ox, oy);
-    gl.uniform4f(this.uRender.get('u_atlas')!, this.spriteCols, this.spriteRows, sizeScale * BASE_SPRITE_PX, 0);
+    gl.uniform4f(this.uRender.get('u_grid')!, this.spriteCols, this.spriteRows, sizeScale * BASE_SPRITE_PX, this.spritePad);
+    gl.uniform4f(this.uRender.get('u_anim')!, this.anim.fps, this.anim.play, this.anim.pick, this.anim.row);
+    gl.uniform4f(this.uRender.get('u_frame')!, this.spriteFrameW, this.spriteFrameH, this.spriteAtlasW, this.spriteAtlasH);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
     gl.uniform1i(this.uRender.get('u_tex')!, 0);
@@ -372,6 +434,7 @@ export class WebGL2CompiledSim {
     for (const v of this.renderVAOs) gl.deleteVertexArray(v);
     gl.deleteTransformFeedback(this.tf);
     gl.deleteTexture(this.tex);
+    if (this.maskTex) gl.deleteTexture(this.maskTex);
   }
 }
 
@@ -397,9 +460,12 @@ export function createParticles(
   const zoom = opts.zoom ?? 1;
   const sizeScale = opts.sizeScale ?? 1;
   const maxDt = opts.maxDt ?? 0.05;
+  const maskTable = buildMaskTable(opts.emissionMask);
 
   const sim = new WebGL2CompiledSim(gl, system, project.params, {
     sprite: resolveSprite(opts.atlas),
+    anim: resolveAnim(opts.atlas),
+    ...(maskTable ? { mask: maskTable } : {}),
     ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
     startX: (canvas.width * zoom) / 2,
     startY: (canvas.height * zoom) / 2,

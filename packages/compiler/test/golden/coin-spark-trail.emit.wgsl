@@ -34,6 +34,8 @@ fn rand01(h: u32) -> f32 { return f32(h) * 2.3283064365386963e-10; }
 fn srand(seed: u32, n: u32) -> f32 { return rand01(hash2(seed, n)); }
 fn frand(seed: u32, frame: u32, n: u32) -> f32 { return rand01(hash2(seed, hash2(frame, n))); }
 
+@group(0) @binding(7) var<storage, read> maskTbl: array<vec2f>;
+
 @compute @workgroup_size(64)
 fn emit(@builtin(global_invocation_id) gid: vec3u) {
   let i = gid.x;
@@ -60,7 +62,13 @@ fn emit(@builtin(global_invocation_id) gid: vec3u) {
   let o_initVel: vec2f = t_n5;
   let o_texIndex: u32 = 0u;
 
-  hot[slot].pos = spawnOrigin + o_spawnLocal;
+  var spawnLocal = o_spawnLocal;
+  let maskN = u32(maskTbl[0].x);
+  if (maskN > 0u) {
+    let mi = 1u + min(u32(rand01(hash2(seed, 4919u)) * f32(maskN)), maskN - 1u);
+    spawnLocal = maskTbl[mi];
+  }
+  hot[slot].pos = spawnOrigin + spawnLocal;
   hot[slot].vel = o_initVel;
   hot[slot].life = max(o_initLife, 1e-4);
   hot[slot].age = U.dt * (1.0 - f);

@@ -33,7 +33,7 @@ describe('compile — coin-spark-trail golden (§14)', () => {
 
   it('carries the fixed v1 binding layout', () => {
     expect(compiled.bindings).toEqual({
-      group: 0, uniforms: 0, valueTable: 1, hot: 2, rnd: 3, meta: 4, counters: 5, freeList: 6,
+      group: 0, uniforms: 0, valueTable: 1, hot: 2, rnd: 3, meta: 4, counters: 5, freeList: 6, maskTable: 7,
     });
   });
 

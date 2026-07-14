@@ -9,7 +9,17 @@
 import { compile, type CompiledSystem } from '@pylinka/compiler';
 import { hashGraph, V1_CATALOG, type ParamDef, type PylinkaProject, type System } from '@pylinka/graph';
 import { SystemClock } from '../compiled/emitter.js';
-import { BASE_SPRITE_PX, resolveSprite, softDisc, type CompiledAtlasOptions, type SpriteSource } from '../compiled/sprite.js';
+import {
+  BASE_SPRITE_PX,
+  resolveAnim,
+  resolveSprite,
+  softDisc,
+  STATIC_ANIM,
+  type AtlasAnim,
+  type CompiledAtlasOptions,
+  type SpriteSource,
+} from '../compiled/sprite.js';
+import { buildMaskTable, maskBufferData, type MaskTable } from '../compiled/mask.js';
 import { ValueTable } from '../compiled/staging.js';
 import type {
   CompiledParticlesHandle,
@@ -41,6 +51,10 @@ export interface WebGPUSimOptions {
   /** sample count of the target pass (pixi antialias → 4); default 1 */
   multisample?: number;
   sprite?: SpriteSource;
+  /** atlas animation config (column advance + row pick); defaults to static */
+  anim?: AtlasAnim;
+  /** emission-mask point table (overrides the analytic spawn shape) */
+  mask?: MaskTable;
   /** share a project-wide knob store (KnobBus fan-out); defaults to its own */
   knobs?: KnobStore;
   seed?: number;
@@ -76,10 +90,17 @@ export class WebGPUSystemSim {
   private vBuf: GPUBuffer;
   private readonly rBuf: GPUBuffer;
   private readonly readback: GPUBuffer;
+  private readonly maskBuf: GPUBuffer;
   private readonly sampler: GPUSampler;
   private texture: GPUTexture;
   private spriteCols = 1;
   private spriteRows = 1;
+  private spriteFrameW = 64;
+  private spriteFrameH = 64;
+  private spriteAtlasW = 64;
+  private spriteAtlasH = 64;
+  private spritePad = 0;
+  private anim: AtlasAnim = STATIC_ANIM;
 
   private computeLayout: GPUBindGroupLayout;
   private computeBind: GPUBindGroup;
@@ -91,7 +112,7 @@ export class WebGPUSystemSim {
 
   private readonly uStage = new Float32Array(12);
   private readonly uStageU32: Uint32Array;
-  private readonly rStage = new Float32Array(8);
+  private readonly rStage = new Float32Array(16);
   private rDirty = true;
   private readbackInflight = false;
   private destroyed = false;
@@ -131,8 +152,12 @@ export class WebGPUSystemSim {
     this.freeList = mk(cap * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
     this.uBuf = mk(48, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
     this.vBuf = mk(this.valueTable.data.byteLength, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
-    this.rBuf = mk(32, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+    this.rBuf = mk(64, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
     this.readback = mk(COUNTERS_SIZE, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST);
+
+    const maskData = maskBufferData(opts.mask);
+    this.maskBuf = mk(maskData.byteLength, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    device.queue.writeBuffer(this.maskBuf, 0, maskData.buffer, maskData.byteOffset, maskData.byteLength);
 
     this.sampler = device.createSampler({
       minFilter: 'linear',
@@ -140,6 +165,7 @@ export class WebGPUSystemSim {
       addressModeU: 'clamp-to-edge',
       addressModeV: 'clamp-to-edge',
     });
+    this.anim = opts.anim ?? STATIC_ANIM;
     this.texture = this.uploadSprite(opts.sprite ?? softDisc());
 
     this.computeLayout = device.createBindGroupLayout({
@@ -151,6 +177,7 @@ export class WebGPUSystemSim {
         { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
         { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
         { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+        { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
       ],
     });
     ({ emit: this.emitPipe, update: this.updatePipe } = this.buildComputePipelines());
@@ -172,6 +199,11 @@ export class WebGPUSystemSim {
   private uploadSprite(sprite: SpriteSource): GPUTexture {
     this.spriteCols = sprite.cols;
     this.spriteRows = sprite.rows;
+    this.spriteFrameW = sprite.frameW;
+    this.spriteFrameH = sprite.frameH;
+    this.spriteAtlasW = sprite.width;
+    this.spriteAtlasH = sprite.height;
+    this.spritePad = sprite.pad;
     const tex = this.device.createTexture({
       size: [Math.max(1, sprite.width), Math.max(1, sprite.height)],
       format: 'rgba8unorm',
@@ -209,6 +241,7 @@ export class WebGPUSystemSim {
         { binding: 4, resource: { buffer: this.meta } },
         { binding: 5, resource: { buffer: this.counters } },
         { binding: 6, resource: { buffer: this.freeList } },
+        { binding: 7, resource: { buffer: this.maskBuf } },
       ],
     });
   }
@@ -224,7 +257,11 @@ export class WebGPUSystemSim {
           {
             arrayStride: HOT_STRIDE,
             stepMode: 'instance',
-            attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }],
+            attributes: [
+              { shaderLocation: 0, offset: 0, format: 'float32x2' }, // pos
+              { shaderLocation: 5, offset: 16, format: 'float32' }, // age
+              { shaderLocation: 6, offset: 20, format: 'float32' }, // life
+            ],
           },
           {
             arrayStride: RND_STRIDE,
@@ -238,7 +275,10 @@ export class WebGPUSystemSim {
           {
             arrayStride: META_STRIDE,
             stepMode: 'instance',
-            attributes: [{ shaderLocation: 4, offset: 4, format: 'uint32' }],
+            attributes: [
+              { shaderLocation: 7, offset: 0, format: 'uint32' }, // seed
+              { shaderLocation: 4, offset: 4, format: 'uint32' }, // flags
+            ],
           },
         ],
       },
@@ -316,16 +356,16 @@ export class WebGPUSystemSim {
     if (
       this.rDirty ||
       r[0] !== sx || r[1] !== sy || r[2] !== ox || r[3] !== oy ||
-      r[4] !== this.spriteCols || r[5] !== this.spriteRows || r[6] !== sizeScale * BASE_SPRITE_PX
+      r[6] !== sizeScale * BASE_SPRITE_PX
     ) {
-      r[0] = sx;
-      r[1] = sy;
-      r[2] = ox;
-      r[3] = oy;
-      r[4] = this.spriteCols;
-      r[5] = this.spriteRows;
-      r[6] = sizeScale * BASE_SPRITE_PX;
-      r[7] = 0;
+      // scaleOffset
+      r[0] = sx; r[1] = sy; r[2] = ox; r[3] = oy;
+      // grid: cols, rows, sizeScale, pad
+      r[4] = this.spriteCols; r[5] = this.spriteRows; r[6] = sizeScale * BASE_SPRITE_PX; r[7] = this.spritePad;
+      // anim: fps, play, pick, fixedRow
+      r[8] = this.anim.fps; r[9] = this.anim.play; r[10] = this.anim.pick; r[11] = this.anim.row;
+      // frame: frameW, frameH, atlasW, atlasH
+      r[12] = this.spriteFrameW; r[13] = this.spriteFrameH; r[14] = this.spriteAtlasW; r[15] = this.spriteAtlasH;
       this.device.queue.writeBuffer(this.rBuf, 0, r);
       this.rDirty = false;
     }
@@ -432,7 +472,7 @@ export class WebGPUSystemSim {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    for (const b of [this.hot, this.rnd, this.meta, this.counters, this.freeList, this.uBuf, this.vBuf, this.rBuf, this.readback]) {
+    for (const b of [this.hot, this.rnd, this.meta, this.counters, this.freeList, this.uBuf, this.vBuf, this.rBuf, this.readback, this.maskBuf]) {
       b.destroy();
     }
     this.texture.destroy();
@@ -518,11 +558,15 @@ export async function createParticles(
   const zoom = opts.zoom ?? 1;
   const sizeScale = opts.sizeScale ?? 1;
   const maxDt = opts.maxDt ?? 0.05;
-  const sprite = resolveSprite(await toUploadable(opts.atlas));
+  const uploadable = await toUploadable(opts.atlas);
+  const sprite = resolveSprite(uploadable);
+  const mask = buildMaskTable(opts.emissionMask);
 
   const sim = new WebGPUSystemSim(device, system, project.params, {
     format,
     sprite,
+    anim: resolveAnim(uploadable),
+    ...(mask ? { mask } : {}),
     ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
     startX: (canvas.width * zoom) / 2,
     startY: (canvas.height * zoom) / 2,

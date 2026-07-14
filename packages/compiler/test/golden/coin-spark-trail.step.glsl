@@ -20,6 +20,9 @@ struct SystemUniforms {
 uniform SystemUniforms U;
 uniform vec4 V[10];
 uniform uint u_spawnCursor; // cursor-window base, pre-wrapped to [0, capacity)
+uniform sampler2D u_maskTbl; // emission-mask point table (RG32F), emitter-relative px
+uniform float u_maskCount;   // 0 = no mask (use the analytic shape)
+uniform float u_maskW;       // mask table texture width
 
 in vec2 i_pos;
 in vec2 i_vel;
@@ -78,7 +81,13 @@ void main() {
   vec2 o_initVel = t_n5;
   uint o_texIndex = 0u;
 
-    o_pos = spawnOrigin + o_spawnLocal;
+    vec2 spawnLocal = o_spawnLocal;
+    if (u_maskCount > 0.5) {
+      int mi = int(min(rand01(hash2(seed, 4919u)) * u_maskCount, u_maskCount - 1.0));
+      int mw = int(u_maskW);
+      spawnLocal = texelFetch(u_maskTbl, ivec2(mi % mw, mi / mw), 0).rg;
+    }
+    o_pos = spawnOrigin + spawnLocal;
     o_vel = o_initVel;
     o_life = max(o_initLife, 1e-4);
     o_age = U.dt * (1.0 - f);
