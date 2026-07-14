@@ -11,7 +11,15 @@
 import { compile, WEBGL2_LAYOUT, type CompiledSystem } from '@pylinka/compiler';
 import { hashGraph, V1_CATALOG, type ParamDef, type PylinkaProject, type System } from '@pylinka/graph';
 import { SystemClock } from '../compiled/emitter.js';
-import { BASE_SPRITE_PX, resolveSprite, softDisc, type SpriteSource } from '../compiled/sprite.js';
+import {
+  BASE_SPRITE_PX,
+  resolveAnim,
+  resolveSprite,
+  softDisc,
+  STATIC_ANIM,
+  type AtlasAnim,
+  type SpriteSource,
+} from '../compiled/sprite.js';
 import { ValueTable } from '../compiled/staging.js';
 import type {
   CompiledParticlesHandle,
@@ -58,6 +66,8 @@ function link(
 
 export interface WebGL2SimOptions {
   sprite?: SpriteSource;
+  /** atlas animation config (column advance + row pick); defaults to static */
+  anim?: AtlasAnim;
   /** share a project-wide knob store (KnobBus fan-out); defaults to its own */
   knobs?: KnobStore;
   seed?: number;
@@ -92,6 +102,12 @@ export class WebGL2CompiledSim {
   private readonly tex: WebGLTexture;
   private spriteCols = 1;
   private spriteRows = 1;
+  private spriteFrameW = 64;
+  private spriteFrameH = 64;
+  private spriteAtlasW = 64;
+  private spriteAtlasH = 64;
+  private spritePad = 0;
+  private anim: AtlasAnim = STATIC_ANIM;
   /** scratch for the flags readback (aliveCount) */
   private readbackWords: Uint32Array;
 
@@ -124,7 +140,7 @@ export class WebGL2CompiledSim {
     this.stepProg = link(gl, this.compiled.emitSrc, this.compiled.updateSrc, WEBGL2_LAYOUT.varyings);
     this.renderProg = link(gl, COMPILED_RENDER_VS, COMPILED_RENDER_FS);
     this.cacheStepUniforms();
-    for (const n of ['u_scaleOffset', 'u_atlas', 'u_tex']) {
+    for (const n of ['u_scaleOffset', 'u_grid', 'u_anim', 'u_frame', 'u_tex']) {
       this.uRender.set(n, gl.getUniformLocation(this.renderProg, n));
     }
 
@@ -138,6 +154,7 @@ export class WebGL2CompiledSim {
     this.tf = gl.createTransformFeedback()!;
 
     const sprite = opts.sprite ?? softDisc();
+    this.anim = opts.anim ?? STATIC_ANIM;
     this.tex = this.uploadSprite(sprite);
   }
 
@@ -156,6 +173,11 @@ export class WebGL2CompiledSim {
     const gl = this.gl;
     this.spriteCols = sprite.cols;
     this.spriteRows = sprite.rows;
+    this.spriteFrameW = sprite.frameW;
+    this.spriteFrameH = sprite.frameH;
+    this.spriteAtlasW = sprite.width;
+    this.spriteAtlasH = sprite.height;
+    this.spritePad = sprite.pad;
     const tex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
@@ -215,6 +237,9 @@ export class WebGL2CompiledSim {
     inst(3, 1, 48); // a_size
     inst(4, 1, 52); // a_rot
     inst(5, 1, 28, true); // a_flags
+    inst(6, 1, 16); // a_age
+    inst(7, 1, 20); // a_life
+    inst(8, 1, 24, true); // a_seed
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindVertexArray(null);
     return vao;
@@ -280,7 +305,9 @@ export class WebGL2CompiledSim {
     const gl = this.gl;
     gl.useProgram(this.renderProg);
     gl.uniform4f(this.uRender.get('u_scaleOffset')!, sx, sy, ox, oy);
-    gl.uniform4f(this.uRender.get('u_atlas')!, this.spriteCols, this.spriteRows, sizeScale * BASE_SPRITE_PX, 0);
+    gl.uniform4f(this.uRender.get('u_grid')!, this.spriteCols, this.spriteRows, sizeScale * BASE_SPRITE_PX, this.spritePad);
+    gl.uniform4f(this.uRender.get('u_anim')!, this.anim.fps, this.anim.play, this.anim.pick, this.anim.row);
+    gl.uniform4f(this.uRender.get('u_frame')!, this.spriteFrameW, this.spriteFrameH, this.spriteAtlasW, this.spriteAtlasH);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
     gl.uniform1i(this.uRender.get('u_tex')!, 0);
@@ -400,6 +427,7 @@ export function createParticles(
 
   const sim = new WebGL2CompiledSim(gl, system, project.params, {
     sprite: resolveSprite(opts.atlas),
+    anim: resolveAnim(opts.atlas),
     ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
     startX: (canvas.width * zoom) / 2,
     startY: (canvas.height * zoom) / 2,

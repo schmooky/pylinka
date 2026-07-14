@@ -7,8 +7,10 @@
  */
 export const RENDER_WGSL = /* wgsl */ `
 struct RenderUniforms {
-  scaleOffset: vec4f,
-  atlas: vec4f,
+  scaleOffset: vec4f, // sx, sy, ox, oy
+  grid: vec4f,        // cols, rows, sizeScale, pad(px)
+  anim: vec4f,        // fps, play(0 once / 1 loop), pick(0 per-particle / 1 fixed), fixedRow
+  frame: vec4f,       // frameW, frameH, atlasW, atlasH (px)
 }
 @group(0) @binding(0) var<uniform> R: RenderUniforms;
 @group(0) @binding(1) var samp: sampler;
@@ -27,18 +29,27 @@ struct VSOut {
 @vertex
 fn vs(@builtin(vertex_index) vi: u32,
       @location(0) pos: vec2f, @location(1) color: vec4f,
-      @location(2) size: f32,  @location(3) rot: f32, @location(4) flags: u32) -> VSOut {
+      @location(2) size: f32,  @location(3) rot: f32, @location(4) flags: u32,
+      @location(5) age: f32,   @location(6) life: f32, @location(7) seed: u32) -> VSOut {
   let corner = CORNERS[vi];
-  let s = size * f32(flags & 1u) * R.atlas.z;
+  let s = size * f32(flags & 1u) * R.grid.z;
   let c = cos(rot); let sn = sin(rot);
   let local = vec2f(corner.x * c - corner.y * sn, corner.x * sn + corner.y * c) * s;
   let world = pos + local;
-  let texIndex = (flags >> 8u) & 0xffu;
-  let cols = u32(max(R.atlas.x, 1.0));
-  let cell = vec2f(f32(texIndex % cols), f32(texIndex / cols));
+
+  // atlas cell: column advances with life, row is per-particle (or fixed).
+  let cols = max(R.grid.x, 1.0);
+  let rows = max(R.grid.y, 1.0);
+  let tN = clamp(age / max(life, 1e-4), 0.0, 1.0);
+  let seedN = f32(seed & 0xffffu) / 65536.0;
+  let row = clamp(select(floor(seedN * rows), R.anim.w, R.anim.z > 0.5), 0.0, rows - 1.0);
+  let col = select(clamp(floor(tN * cols), 0.0, cols - 1.0),
+                   floor(age * R.anim.x) % cols, R.anim.y > 0.5);
+  let cellPx = vec2f(col, row) * (R.frame.xy + R.grid.w);
+
   var o: VSOut;
   o.clip = vec4f(world * R.scaleOffset.xy + R.scaleOffset.zw, 0.0, 1.0);
-  o.uv = (corner + 0.5 + cell) / max(R.atlas.xy, vec2f(1.0));
+  o.uv = (cellPx + (corner + 0.5) * R.frame.xy) / R.frame.zw;
   o.tint = color;
   return o;
 }
