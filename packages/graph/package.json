@@ -1,6 +1,6 @@
 {
   "name": "@pylinka/graph",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Pylinka shared kernel: graph types, node catalog, validation, hashing, slot assignment. Zero runtime deps.",
   "license": "MIT",
   "repository": {
