@@ -19,7 +19,7 @@ import { easeFnGlsl, GLSL_DISCARD_FS, glslStepShader } from './glsl.js';
 import { naturalCompare, resolveEvalTimes } from './topo.js';
 import { wgslBodyToGlsl } from './translate.js';
 import { CompileError, V1_BINDINGS, type CompiledSystem } from './types.js';
-import { EASE_BODIES, easeFn, emitKernel, preamble, updateKernel } from './wgsl.js';
+import { EASE_BODIES, easeFn, easeFnName, emitKernel, preamble, updateKernel } from './wgsl.js';
 
 const INIT_OUTPUT_ORDER = [
   'output.spawnPosition',
@@ -49,40 +49,52 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
 
   // 3. init kernel
   const initFlags = { safeDiv: false, safeNormalize: false };
-  const initBody = ctx.buildInit(resolution.initValue, resolution.initOutputs, initFlags);
+  const { body: initBody, eases: initEases } = ctx.buildInit(
+    resolution.initValue,
+    resolution.initOutputs,
+    initFlags,
+  );
 
   // 4. update kernel
   const updateFlags = { safeDiv: false, safeNormalize: false };
-  const { body, postIntegrate, setVelocity, eases } = ctx.buildUpdate(
+  const { body, postIntegrate, setVelocity, eases: updateEases } = ctx.buildUpdate(
     resolution.updateValue,
     resolution.updateOutputs,
     updateFlags,
   );
-  if (eases.size > 1) {
-    throw new Error(
-      `v1 supports one ease per system; found: ${[...eases].join(', ')}. See docs/QUESTIONS.md.`,
-    );
-  }
-  const ease = eases.size === 1 ? [...eases][0]! : undefined;
+
+  // ease functions: one WGSL/GLSL fn per distinct ease key, emitted into the
+  // kernel(s) that use it (sorted for deterministic output). A system may mix
+  // eases freely (e.g. color sine.out + scale linear) — each node calls its own.
+  const sorted = (s: Set<string>) => [...s].sort();
+  const easeDefsWgsl = (s: Set<string>) => sorted(s).map((e) => '\n' + easeFn(e)).join('');
 
   let emitSrc: string;
   let updateSrc: string;
   if (target === 'webgpu') {
-    emitSrc = preamble(slots.layout.slotCount, initFlags) + '\n' + emitKernel(initBody);
+    emitSrc =
+      preamble(slots.layout.slotCount, initFlags) +
+      easeDefsWgsl(initEases) +
+      '\n' +
+      emitKernel(initBody);
     updateSrc =
       preamble(slots.layout.slotCount, updateFlags) +
-      (ease !== undefined ? '\n' + easeFn(ease) : '') +
+      easeDefsWgsl(updateEases) +
       '\n' +
       updateKernel(body, postIntegrate, { setVelocity });
   } else {
-    // webgl2: ONE fused TF step shader (see glsl.ts header for the mapping)
+    // webgl2: ONE fused TF step shader (see glsl.ts header for the mapping), so
+    // it needs every ease used by either the init or update body.
+    const allEases = sorted(new Set([...initEases, ...updateEases]));
     emitSrc = glslStepShader({
       slots: slots.layout.slotCount,
       helpers: {
         safeDiv: initFlags.safeDiv || updateFlags.safeDiv,
         safeNormalize: initFlags.safeNormalize || updateFlags.safeNormalize,
       },
-      ...(ease !== undefined ? { easeSrc: easeFnGlsl(EASE_BODIES[ease]!) } : {}),
+      ...(allEases.length > 0
+        ? { easeSrcs: allEases.map((e) => easeFnGlsl(easeFnName(e), EASE_BODIES[e]!)) }
+        : {}),
       initBody: wgslBodyToGlsl(initBody, ctx.tempTypes),
       updateBody: wgslBodyToGlsl(body, ctx.tempTypes),
       postIntegrate: wgslBodyToGlsl(postIntegrate, ctx.tempTypes),
@@ -172,6 +184,7 @@ class CompileCtx {
     rng: { stable: () => number; frame: () => number },
     flags: { safeDiv: boolean; safeNormalize: boolean },
     out: string[],
+    eases: Set<string>,
   ): void {
     const node = this.nodeById.get(id)!;
     const schema = this.schemaOf(node);
@@ -183,6 +196,7 @@ class CompileCtx {
     const inputs: Record<string, string> = {};
     for (const port of schema.inputs) inputs[port.id] = this.inputExpr(id, port.id).expr;
     const emit = gen(ctx, inputs, node.structural ?? {});
+    for (const e of ctx.usedEases) eases.add(e);
 
     out.push(this.comment(node, ctx));
     for (const line of ctx.lines) out.push(line);
@@ -199,12 +213,13 @@ class CompileCtx {
     valueIds: string[],
     outputIds: string[],
     flags: { safeDiv: boolean; safeNormalize: boolean },
-  ): string {
+  ): { body: string; eases: Set<string> } {
     let stable = 0;
     let frame = 0;
     const rng = { stable: () => stable++, frame: () => frame++ };
     const out: string[] = [];
-    for (const id of valueIds) this.emitValueNode(id, rng, flags, out);
+    const eases = new Set<string>();
+    for (const id of valueIds) this.emitValueNode(id, rng, flags, out, eases);
 
     const byKind = new Map<string, Node>();
     for (const id of outputIds) {
@@ -231,7 +246,7 @@ class CompileCtx {
         : `  let o_texIndex: u32 = 0u;`,
     );
     void INIT_OUTPUT_ORDER;
-    return out.join('\n');
+    return { body: out.join('\n'), eases };
   }
 
   buildUpdate(
@@ -244,11 +259,7 @@ class CompileCtx {
     const rng = { stable: () => stable++, frame: () => frame++ };
     const out: string[] = [];
     const eases = new Set<string>();
-    for (const id of valueIds) {
-      this.emitValueNode(id, rng, flags, out);
-      const ease = this.nodeById.get(id)!.structural?.ease;
-      if (ease !== undefined) eases.add(ease);
-    }
+    for (const id of valueIds) this.emitValueNode(id, rng, flags, out, eases);
 
     // writes: non-alpha first, alpha last, writePosition into postIntegrate
     const post: string[] = [];

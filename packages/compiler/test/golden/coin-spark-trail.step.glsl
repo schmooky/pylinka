@@ -50,7 +50,7 @@ uint hash2(uint a, uint b) { return pcg(a ^ pcg(b)); }
 float rand01(uint h) { return float(h) * 2.3283064365386963e-10; }
 float srand(uint seed, uint n) { return rand01(hash2(seed, n)); }
 float frand(uint seed, uint frame, uint n) { return rand01(hash2(seed, hash2(frame, n))); }
-float easeSel(float t) { float u = 1.0 - t; return 1.0 - u * u * u; }
+float easeSel_power2_out(float t) { float u = 1.0 - t; return 1.0 - u * u * u; }
 
 const float RUNAWAY = 1e7;
 
@@ -117,7 +117,7 @@ void main() {
   // n11 field.directional
   vec2 t_n11 = vec2(cos(t_n10), sin(t_n10)) * t_n9;
   // n13 gen.colorOverLife [ease=power2.out]
-  vec4 t_n13 = mix(V[1], V[2], easeSel(ageN));
+  vec4 t_n13 = mix(V[1], V[2], easeSel_power2_out(ageN));
   force += t_n7; // output.addForce (n8)
   force += t_n11; // output.addForce (n12)
   outColor = t_n13; // output.writeColor (n14)

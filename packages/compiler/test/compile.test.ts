@@ -54,9 +54,9 @@ describe('compile — coin-spark-trail golden (§14)', () => {
     expect(s).toContain('let t_n11 = vec2f(cos(t_n10), sin(t_n10)) * t_n9;');
     expect(s).toContain('force += t_n7;');
     expect(s).toContain('force += t_n11;');
-    expect(s).toContain('let t_n13 = mix(V[1], V[2], easeSel(ageN));');
+    expect(s).toContain('let t_n13 = mix(V[1], V[2], easeSel_power2_out(ageN));');
     expect(s).toContain('outColor = t_n13;');
-    expect(s).toContain('fn easeSel(t: f32) -> f32 { let u = 1.0 - t; return 1.0 - u * u * u; }');
+    expect(s).toContain('fn easeSel_power2_out(t: f32) -> f32 { let u = 1.0 - t; return 1.0 - u * u * u; }');
   });
 
   it('bakes SLOTS as a literal and writes two writeBuffer-friendly uniform blocks', () => {
@@ -116,7 +116,7 @@ describe('compile — webgl2 target (fused TF step shader, §13.12)', () => {
     expect(s).toContain('vec2 o_spawnLocal = t_n1;');
     expect(s).toContain('uint o_texIndex = 0u;');
     expect(s).toContain('vec2 t_n11 = vec2(cos(t_n10), sin(t_n10)) * t_n9;');
-    expect(s).toContain('float easeSel(float t) { float u = 1.0 - t; return 1.0 - u * u * u; }');
+    expect(s).toContain('float easeSel_power2_out(float t) { float u = 1.0 - t; return 1.0 - u * u * u; }');
     expect(s).toContain('uniform vec4 V[10];');
     expect(s).not.toMatch(/\blet\b/);
     expect(s).not.toMatch(/\bvec[24]f\(/);
