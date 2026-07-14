@@ -6,6 +6,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@pylinka/site", "dev"],
       "port": 5212
+    },
+    {
+      "name": "mobile-preview",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@pylinka/mobile-preview", "dev", "--port", "5299"],
+      "port": 5299
     }
   ]
 }

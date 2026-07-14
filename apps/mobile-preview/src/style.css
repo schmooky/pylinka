@@ -1,0 +1,141 @@
+:root {
+  --bg: #05060a;
+  --fg: #e6edf3;
+  --dim: #7d8896;
+  --accent: #7cc4ff;
+  --good: #57d38c;
+  --warn: #f0b429;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+/* debug metrics — top, safe-area aware */
+.hud {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  left: max(8px, env(safe-area-inset-left));
+  pointer-events: none;
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+  color: var(--dim);
+  text-shadow: 0 1px 2px #000a;
+  max-width: 62vw;
+}
+.hud .row {
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+.hud .k {
+  color: var(--dim);
+  width: 76px;
+  flex: 0 0 auto;
+}
+.hud .v {
+  color: var(--fg);
+}
+.hud .v.good {
+  color: var(--good);
+}
+.hud .v.warn {
+  color: var(--warn);
+}
+.hud .v.accent {
+  color: var(--accent);
+}
+.hud .sec {
+  margin-top: 7px;
+  color: var(--accent);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  opacity: 0.75;
+}
+
+/* bottom preset bar — the tap target */
+.preset {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 16px 18px calc(16px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, #000c 0%, #0008 55%, transparent 100%);
+  text-align: center;
+  z-index: 5;
+}
+.preset-name {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.preset-sub {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--dim);
+}
+.preset-sub .idx {
+  color: var(--accent);
+}
+.preset::after {
+  content: "tap anywhere for next";
+  display: block;
+  margin-top: 8px;
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+  opacity: 0.6;
+}
+
+/* transient flash (preset switch / errors) */
+.flash {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #000b;
+  border: 1px solid #ffffff22;
+  font-size: 12px;
+  color: var(--fg);
+  opacity: 0;
+  transition: opacity 0.18s;
+  pointer-events: none;
+  z-index: 10;
+  max-width: 80vw;
+  text-align: center;
+}
+.flash.show {
+  opacity: 1;
+}
+.flash.err {
+  border-color: #ff6b6b66;
+  color: #ff9b9b;
+}
