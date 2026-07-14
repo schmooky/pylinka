@@ -11,7 +11,7 @@
 import { compile, WEBGL2_LAYOUT, type CompiledSystem } from '@pylinka/compiler';
 import { hashGraph, V1_CATALOG, type ParamDef, type PylinkaProject, type System } from '@pylinka/graph';
 import { SystemClock } from '../compiled/emitter.js';
-import { resolveSprite, softDisc, type SpriteSource } from '../compiled/sprite.js';
+import { BASE_SPRITE_PX, resolveSprite, softDisc, type SpriteSource } from '../compiled/sprite.js';
 import { ValueTable } from '../compiled/staging.js';
 import type {
   CompiledParticlesHandle,
@@ -280,7 +280,7 @@ export class WebGL2CompiledSim {
     const gl = this.gl;
     gl.useProgram(this.renderProg);
     gl.uniform4f(this.uRender.get('u_scaleOffset')!, sx, sy, ox, oy);
-    gl.uniform4f(this.uRender.get('u_atlas')!, this.spriteCols, this.spriteRows, sizeScale, 0);
+    gl.uniform4f(this.uRender.get('u_atlas')!, this.spriteCols, this.spriteRows, sizeScale * BASE_SPRITE_PX, 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
     gl.uniform1i(this.uRender.get('u_tex')!, 0);

@@ -9,7 +9,7 @@
 import { compile, type CompiledSystem } from '@pylinka/compiler';
 import { hashGraph, V1_CATALOG, type ParamDef, type PylinkaProject, type System } from '@pylinka/graph';
 import { SystemClock } from '../compiled/emitter.js';
-import { resolveSprite, softDisc, type CompiledAtlasOptions, type SpriteSource } from '../compiled/sprite.js';
+import { BASE_SPRITE_PX, resolveSprite, softDisc, type CompiledAtlasOptions, type SpriteSource } from '../compiled/sprite.js';
 import { ValueTable } from '../compiled/staging.js';
 import type {
   CompiledParticlesHandle,
@@ -316,7 +316,7 @@ export class WebGPUSystemSim {
     if (
       this.rDirty ||
       r[0] !== sx || r[1] !== sy || r[2] !== ox || r[3] !== oy ||
-      r[4] !== this.spriteCols || r[5] !== this.spriteRows || r[6] !== sizeScale
+      r[4] !== this.spriteCols || r[5] !== this.spriteRows || r[6] !== sizeScale * BASE_SPRITE_PX
     ) {
       r[0] = sx;
       r[1] = sy;
@@ -324,7 +324,7 @@ export class WebGPUSystemSim {
       r[3] = oy;
       r[4] = this.spriteCols;
       r[5] = this.spriteRows;
-      r[6] = sizeScale;
+      r[6] = sizeScale * BASE_SPRITE_PX;
       r[7] = 0;
       this.device.queue.writeBuffer(this.rBuf, 0, r);
       this.rDirty = false;
