@@ -193,6 +193,8 @@ export interface CodegenCtx {
   stableRandom(): Expr;
   /** [0,1), per frame; update-eval only (enforced) */
   frameRandom(): Expr;
+  /** register an ease (default 'linear') and return its function name (§13.9) */
+  ease(key: string | undefined): Expr;
   /** emit a statement (multi-line nodes) */
   line(stmt: string): void;
   /** fresh declared temp name */
