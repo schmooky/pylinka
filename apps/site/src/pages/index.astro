@@ -4,49 +4,42 @@ import DocsLayout from '../layouts/DocsLayout.astro';
 
 <DocsLayout
   title="Pylinka — GPU-driven, node-based particle system for PixiJS"
-  description="Pylinka is an open-source, node-based particle system for PixiJS. Wire a typed dataflow graph that compiles to GPU programs — everything live-tweakable. WebGPU first, WebGL2 fallback, built for slot games on real phones. MIT."
+  description="Pylinka is an open-source node-based particle system for PixiJS. Wire a typed dataflow graph, it compiles to GPU programs, and every number stays live-tweakable. WebGPU first, WebGL2 fallback, built for slot games on real phones. MIT."
   active="intro"
 >
   <h1>Pylinka</h1>
   <p class="!text-base !text-muted-foreground">
-    A GPU-driven, node-based particle system for <a href="https://pixijs.com">PixiJS</a>. Wire a
-    typed dataflow graph, and it compiles to GPU programs — particles live and update entirely on
-    the GPU. WebGPU first, WebGL2 fallback, built for slot games on real phones.
+    A node-based particle system for <a href="https://pixijs.com">PixiJS</a> that runs on the GPU.
+    You wire a typed graph, it compiles to WGSL or GLSL, and particle state stays in GPU memory for
+    as long as the effect plays. WebGPU first, WebGL2 everywhere else.
   </p>
 
-  <h2>Why Pylinka</h2>
-  <ul>
-    <li>
-      <strong>The GPU owns the particles.</strong> State lives in GPU buffers and never round-trips
-      to the CPU while running. Per frame, per system: one emit pass, one update pass, one instanced
-      draw.
-    </li>
-    <li>
-      <strong>Every number is live.</strong> Inline values are lowered to uniforms, so changing any
-      value updates the running effect on the next frame — no recompile. Promote any value to a
-      named knob your game drives at runtime.
-    </li>
-    <li>
-      <strong>A typed dataflow graph.</strong> Connect nodes like <code>shape.point</code>,
-      <code>field.gravity</code>, <code>gen.colorOverLife</code> and <code>output.writeColor</code>.
-      The graph compiles to a backend-neutral IR, then to WGSL or GLSL.
-    </li>
-    <li>
-      <strong>Backend follows the host.</strong> A PixiJS WebGL app gets the WebGL2 simulation in the
-      same GL context; a WebGPU app shares the device. Particles interleave correctly with your
-      scene — behind symbols, above the background.
-    </li>
-  </ul>
+  <h2>What you get</h2>
+  <p>
+    Particles never round-trip to the CPU while an effect is running. Each system costs one emit
+    pass, one update pass and one instanced draw per frame, whatever the particle count.
+  </p>
+  <p>
+    Every unconnected number in the graph becomes a GPU uniform, so dragging a value updates the
+    running effect on the next frame with no recompile. Give a value a name and your game can drive
+    it at runtime as a knob. Only structural edits, adding a node or swapping an ease, rebuild the
+    pipeline.
+  </p>
+  <p>
+    The backend follows the host. A PixiJS WebGL app gets the WebGL2 simulation inside the same GL
+    context, a WebGPU app shares the device, and either way the particles interleave correctly with
+    the rest of your scene: behind the symbols, above the background.
+  </p>
 
   <h2>A trail in a few lines</h2>
-  <p>Attach a particle system to a static VFX layer and let a moving target drive the emitter:</p>
+  <p>Attach the system to a static VFX layer and let a moving target drive the emitter:</p>
   <pre><code>import &#123; createPylinka &#125; from '@pylinka/core';
 import project from './coin-spark-trail.pylinka.json';
 
 const pylinka = await createPylinka(project, &#123; renderer &#125;);
 vfxLayer.addChild(pylinka.systems.sparks.view);
 
-// follow a flying coin — sparks hang and fade in world space
+// follow a flying coin: the sparks hang and fade in world space
 pylinka.systems.sparks.follow(coinSprite);
 
 // live knob, no recompile
@@ -54,16 +47,29 @@ pylinka.params.set('windPower', 40);
 
 app.ticker.add((t) =&gt; pylinka.update(t.deltaMS / 1000));</code></pre>
 
-  <h2>Scope</h2>
+  <h2>Things that push back</h2>
   <p>
-    Pylinka is 2D only — simulation state is <code>vec2</code>; there is no <code>vec3</code>. It is a
-    particle compiler, not a general GPGPU framework, and has no physics solver: analytic force
-    fields and simple bounds only. See <a href="/concepts">Core concepts</a> for the model, and the
-    <a href="/nodes">node reference</a> for what you can wire.
+    Particles can react to the world around them. <code>field.obstacle</code> is a body moving
+    through the field, with a soft push, a swirl and a drag term that produces a bow wave in front
+    and a wake behind. Bind its centre to a knob and a cursor or a flying sprite drives it live.
+    The <code>output.collide*</code> nodes give you floors, walls, boxes and discs with bounce and
+    friction.
+  </p>
+  <p>
+    Play with both on the <a href="/interactive">interaction lab</a> page, or read how they work in
+    <a href="/concepts">Core concepts</a>.
   </p>
 
-  <blockquote>
-    New here? Start with <a href="/getting-started">Getting started</a>, then skim
-    <a href="/concepts">Core concepts</a>.
-  </blockquote>
+  <h2>Scope</h2>
+  <p>
+    Pylinka is 2D. Simulation state is <code>vec2</code> and there is no <code>vec3</code>. It
+    compiles particle graphs and nothing else, so you get analytic force fields and simple solid
+    bounds rather than a real physics solver. For anything heavier, run your own solver and feed
+    Pylinka the positions.
+  </p>
+  <p>
+    Start with <a href="/getting-started">Getting started</a>, then skim
+    <a href="/concepts">Core concepts</a>. The <a href="/nodes">node reference</a> lists everything
+    you can wire.
+  </p>
 </DocsLayout>

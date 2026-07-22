@@ -1,24 +1,27 @@
 # @pylinka/format
 
-Project file format of [Pylinka](https://pylinka.schmooky.dev) — a GPU-driven, node-based
+The project file format of [Pylinka](https://pylinka.schmooky.dev), a GPU-driven node-based
 particle system for PixiJS.
 
-Everything you export from the [Pylinka editor](https://pylinka.schmooky.dev/editor) is a
-`pylinka` project document. This package is the one true way to read and write it:
+Anything you export from the [editor](https://pylinka.schmooky.dev/editor) is a `pylinka` project
+document, and this package is the supported way to read and write one.
 
-- **Parse** — validate + load a project JSON (clear errors, never throws on foreign keys).
-- **Serialize** — write projects with assets either **inline** (base64, single portable file) or
-  as **blob references**.
-- **Migrate** — versioned schema migrations so old project files keep loading in new runtimes.
+`parse` validates and loads a project JSON. It gives clear errors and never throws on keys it does
+not recognise, so a document written by a newer editor still opens in an older runtime.
+
+`serialize` writes a project back out with assets either inlined as base64, giving you one portable
+file, or kept as blob references.
+
+`migrate` runs versioned schema migrations, which is what keeps old project files loading after the
+format moves on.
 
 ```bash
 npm i @pylinka/format
 ```
 
-Typical flow: export a project from the editor, ship the JSON with your game, and hand it to
-`createParticles()` from
-[`@pylinka/core`](https://www.npmjs.com/package/@pylinka/core).
+The usual flow: export from the editor, ship the JSON with your game, hand it to
+`createParticles()` from [`@pylinka/core`](https://www.npmjs.com/package/@pylinka/core).
 
-Docs, node editor, and a 60+ effect recipe gallery: **https://pylinka.schmooky.dev**
+Docs, the node editor and 69 recorded effects: **https://pylinka.schmooky.dev**
 
 MIT © pylinka contributors

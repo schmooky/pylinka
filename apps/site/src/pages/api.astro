@@ -9,51 +9,51 @@ import DocsLayout from '../layouts/DocsLayout.astro';
 >
   <h1>API</h1>
   <p class="!text-base !text-muted-foreground">
-    The runtime surface from <code>@pylinka/core</code>. Hot-path methods
+    The runtime surface of <code>@pylinka/core</code>. The hot-path methods
     (<code>update</code>, <code>set</code>, <code>setEmitterPosition</code>, <code>spawnBurst</code>)
-    allocate nothing.
+    allocate nothing, so you can call them every frame without feeding the collector.
   </p>
 
   <h2>Backends</h2>
   <p>
-    Every graph compiles to real GPU code via <code>@pylinka/compiler</code> — WGSL compute
-    kernels on WebGPU, a fused transform-feedback step shader on WebGL2. Inline values and knobs
-    live in a vec4 uniform table, so <strong>value edits and knob moves never recompile</strong>;
-    only structural edits rebuild pipelines (and reset the pool).
+    Every graph compiles to GPU code through <code>@pylinka/compiler</code>: WGSL compute kernels
+    on WebGPU, one fused transform-feedback step shader on WebGL2. Inline values and knobs live in a
+    vec4 uniform table, so <strong>value edits and knob moves never recompile</strong>. Only
+    structural edits rebuild pipelines, and those reset the pool.
   </p>
   <table>
     <thead><tr><th>Entry</th><th>What runs</th></tr></thead>
     <tbody>
-      <tr><td><code>@pylinka/core/pixi</code></td><td>pixi v8 scene integration — backend follows the host renderer (§7.2)</td></tr>
-      <tr><td><code>@pylinka/core/gpu</code></td><td><code>createCompiledParticles</code> — best available compiled backend on a bare canvas</td></tr>
-      <tr><td><code>@pylinka/core/webgpu</code></td><td>compiled WebGPU compute backend (async create)</td></tr>
-      <tr><td><code>@pylinka/core/webgl2</code></td><td>compiled WebGL2 transform-feedback backend (sync create)</td></tr>
-      <tr><td><code>@pylinka/core/webgl</code></td><td>interpreted WebGL2 engine — extras: emission masks, animated atlases, sub-emitters</td></tr>
+      <tr><td><code>@pylinka/core/pixi</code></td><td>pixi v8 scene integration, backend follows the host renderer (§7.2)</td></tr>
+      <tr><td><code>@pylinka/core/gpu</code></td><td><code>createCompiledParticles</code>, best available compiled backend on a bare canvas</td></tr>
+      <tr><td><code>@pylinka/core/webgpu</code></td><td>compiled WebGPU compute backend, async create</td></tr>
+      <tr><td><code>@pylinka/core/webgl2</code></td><td>compiled WebGL2 transform-feedback backend, sync create</td></tr>
+      <tr><td><code>@pylinka/core/webgl</code></td><td>interpreted WebGL2 engine, and the only one carrying emission masks, animated atlases and sub-emitters</td></tr>
     </tbody>
   </table>
 
-  <h2>createPylinka() — pixi v8</h2>
+  <h2>createPylinka() on a pixi stage</h2>
   <p>Run a whole project inside a pixi stage; each system becomes a renderable view.</p>
   <pre><code>import &#123; registerPylinka, createPylinka &#125; from '@pylinka/core/pixi';
 
 registerPylinka();                              // once, before app init
 const app = new Application();
-await app.init(&#123; preference: 'webgpu' &#125;);       // or 'webgl' — backend follows
+await app.init(&#123; preference: 'webgpu' &#125;);       // or 'webgl', the backend follows
 const fx = await createPylinka(project, &#123; renderer: app.renderer &#125;);
 
 app.stage.addChild(fx.systems['sparks'].view);  // a STATIC layer (see Core concepts)
 app.ticker.add((t) =&gt; fx.update(t.deltaMS / 1000));
-fx.params.set('windPower', 40);                 // live — zero recompile</code></pre>
+fx.params.set('windPower', 40);                 // live, zero recompile</code></pre>
 
   <h3>CreateOptions</h3>
   <table>
     <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
     <tbody>
-      <tr><td><code>renderer</code></td><td>pixi Renderer</td><td>required; backend + device/context derive from it — WebGPU shares the device, WebGL shares the GL context</td></tr>
+      <tr><td><code>renderer</code></td><td>pixi Renderer</td><td>required. The backend and the device or context come from it: WebGPU shares the device, WebGL shares the GL context</td></tr>
       <tr><td><code>fixedStep</code></td><td>number</td><td>seconds; enables deterministic fixed-step mode</td></tr>
       <tr><td><code>maxDt</code></td><td>number</td><td>dt clamp, default 0.05</td></tr>
       <tr><td><code>seed</code></td><td>number</td><td>deterministic base seed (capture mode)</td></tr>
-      <tr><td><code>onDeviceLost</code></td><td>() ⇒ void</td><td>WebGPU device-loss hook</td></tr>
+      <tr><td><code>onDeviceLost</code></td><td><code>() =&gt; void</code></td><td>WebGPU device-loss hook</td></tr>
     </tbody>
   </table>
 
@@ -81,8 +81,8 @@ fx.params.set('windPower', 40);                 // live — zero recompile</code
   destroy(): void;
 &#125;</code></pre>
   <p>
-    <code>stats</code> fields are plain numbers refreshed on a 30-frame cadence — reading them
-    never triggers a GPU readback.
+    The <code>stats</code> fields are plain numbers refreshed every 30 frames. Reading them never
+    triggers a GPU readback, so a debug overlay costs nothing.
   </p>
 
   <h2>KnobBus</h2>
@@ -90,6 +90,13 @@ fx.params.set('windPower', 40);                 // live — zero recompile</code
   set(name: string, x: number, y?: number, z?: number, w?: number): void;  // O(1), alloc-free
   get(name: string): number;   // .x component
 &#125;</code></pre>
+  <p>
+    Pass a second component for a vec2 knob. That is how a cursor drives
+    <code>field.obstacle</code> or a <code>collide</code> node: write the pointer position into the
+    knob every frame and the bound ports follow, with no recompile and no graph edit.
+  </p>
+  <pre><code>fx.params.set('cursor', pointerX, pointerY);
+fx.params.set('cursorVel', smoothedVx, smoothedVy);   // feeds the obstacle's carry term</code></pre>
 
   <h2>Single-system helper</h2>
   <p>When you only need one system, skip the project wrapper:</p>
@@ -99,7 +106,7 @@ fx.params.set('windPower', 40);                 // live — zero recompile</code
 ): Promise&lt;ParticleSystemView&gt;</code></pre>
 
   <h2>Compiled backends on a bare canvas</h2>
-  <p>No pixi? Drive a canvas directly — same handle on either backend:</p>
+  <p>Without pixi, drive a canvas directly. The handle is the same on either backend:</p>
   <pre><code>import &#123; createCompiledParticles &#125; from '@pylinka/core/gpu';
 
 const fx = await createCompiledParticles(canvas, project); // webgpu, else webgl2
@@ -108,20 +115,22 @@ requestAnimationFrame(function tick() &#123;
   fx.update(1 / 60);
   requestAnimationFrame(tick);
 &#125;);
-fx.setKnob('windPower', 40);   // value-table write — never recompiles
-fx.apply(editedProject);       // structural edits rebuild pipelines + reset the pool</code></pre>
+fx.setKnob('windPower', 40);   // value-table write, never recompiles
+fx.apply(editedProject);       // structural edits rebuild pipelines and reset the pool</code></pre>
   <p>
     Options: <code>backend</code> (<code>'auto' | 'webgpu' | 'webgl2'</code>),
     <code>systemName</code>, <code>zoom</code>, <code>sizeScale</code>, <code>seed</code>,
     <code>atlas</code> (uniform grid; the cell is picked by <code>output.initTexIndex</code>),
-    <code>onRecompile</code>. Emission masks, animated atlas sequences and sub-emitters are
-    interpreted-engine extras (<code>@pylinka/core/webgl</code>).
+    <code>onRecompile</code>. Emission masks, animated atlas sequences and sub-emitters live only
+    on the interpreted engine, <code>@pylinka/core/webgl</code>.
   </p>
 
   <h2>Device loss</h2>
   <p>
-    WebGPU device loss is routine on mobile. v1 surfaces it via
-    <code>onDeviceLost</code>; automatic device re-acquisition and pipeline rebuild is on the
-    hardening roadmap.
+    WebGPU device loss is routine on mobile, and so is losing a WebGL context when a tab sits in
+    the background. Pylinka 1.0 surfaces the WebGPU case through <code>onDeviceLost</code> and
+    leaves recovery to you. Re-acquiring the device and rebuilding pipelines automatically is the
+    next piece of hardening work, and until it lands you should treat a lost device as a signal to
+    tear the effect down and build it again.
   </p>
 </DocsLayout>
