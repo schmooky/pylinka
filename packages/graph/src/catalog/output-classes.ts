@@ -37,6 +37,9 @@ export const ACCUMULATING_OUTPUTS: ReadonlySet<string> = new Set([
   'output.killIf',
   'output.killIfOutOfRect',
   'output.reflectInRect',
+  'output.collidePlane',
+  'output.collideRect',
+  'output.collideCircle',
 ]);
 
 /** Force-model outputs that accumulate into `force`/`dragK` (§13.6). */

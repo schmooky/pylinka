@@ -83,7 +83,9 @@ export function Preview() {
   const projRef = useRef(project);
   projRef.current = project;
 
-  const [orbit, setOrbit] = useState(true);
+  // off by default: a still emitter shows the graph you authored, not a motion
+  // the preview added. Mouse still overrides, and trajectory splines still run.
+  const [orbit, setOrbit] = useState(false);
   const orbitRef = useRef(orbit);
   orbitRef.current = orbit;
   const mouseRef = useRef<[number, number] | null>(null);

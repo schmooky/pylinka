@@ -292,6 +292,13 @@ class CompileCtx {
     return { body: out.join('\n'), postIntegrate: post.join('\n'), setVelocity, eases };
   }
 
+  /** Position-port wrapper for a node's `space` structural (world | emitter). */
+  private spaceOf(node: Node): (expr: string) => string {
+    return node.structural?.space === 'emitter'
+      ? (expr: string) => `(U.emitterPos + ${expr})`
+      : (expr: string) => expr;
+  }
+
   private emitUpdateWrite(node: Node, out: string[], post: string[]): void {
     const kind = resolveKind(this.catalog, node.kind);
     const tag = ` // ${node.kind} (${node.id})`;
@@ -334,6 +341,111 @@ class CompileCtx {
         const mx = inp('max');
         out.push(`  if (p.pos.x < ${mn}.x || p.pos.x > ${mx}.x) { p.vel.x = -p.vel.x; }${tag}`);
         out.push(`  if (p.pos.y < ${mn}.y || p.pos.y > ${mx}.y) { p.vel.y = -p.vel.y; }`);
+        break;
+      }
+      // ---- solid geometry: resolve penetration, then bounce -----------------
+      // These land in `post`, i.e. AFTER `p.pos += p.vel * dt`, so they see the
+      // step that actually crossed the surface. Each one first pushes the
+      // particle back onto the surface and only then reflects the normal
+      // component of velocity — reflecting alone (reflectInRect) lets a fast
+      // particle sit outside and flip sign every frame.
+      case 'output.collidePlane': {
+        const k = `k_${node.id}`;
+        const at = this.spaceOf(node);
+        post.push(`  {${tag}`);
+        post.push(`    let ${k}_n: vec2f = ${inp('normal')} / max(length(${inp('normal')}), 1e-6);`);
+        post.push(`    let ${k}_sd: f32 = dot(p.pos - ${at(inp('point'))}, ${k}_n);`);
+        post.push(`    if (${k}_sd < 0.0) {`);
+        post.push(`      p.pos = p.pos - ${k}_n * ${k}_sd;`);
+        post.push(`      let ${k}_vn: f32 = dot(p.vel, ${k}_n);`);
+        post.push(`      if (${k}_vn < 0.0) {`);
+        post.push(`        let ${k}_vt: vec2f = p.vel - ${k}_n * ${k}_vn;`);
+        post.push(
+          `        p.vel = ${k}_vt * (1.0 - ${inp('friction')}) - ${k}_n * (${k}_vn * ${inp('restitution')});`,
+        );
+        post.push(`      }`);
+        post.push(`    }`);
+        post.push(`  }`);
+        break;
+      }
+      case 'output.collideRect': {
+        const k = `k_${node.id}`;
+        const rest = inp('restitution');
+        const fric = inp('friction');
+        const at = this.spaceOf(node);
+        post.push(`  {${tag}`);
+        post.push(`    let ${k}_mn: vec2f = ${at(inp('min'))};`);
+        post.push(`    let ${k}_mx: vec2f = ${at(inp('max'))};`);
+        if ((node.structural?.mode ?? 'inside') === 'inside') {
+          // a box the particles are kept inside
+          for (const [axis, other] of [
+            ['x', 'y'],
+            ['y', 'x'],
+          ] as const) {
+            post.push(
+              `    if (p.pos.${axis} < ${k}_mn.${axis}) { p.pos.${axis} = ${k}_mn.${axis};` +
+                ` if (p.vel.${axis} < 0.0) { p.vel.${axis} = -p.vel.${axis} * ${rest};` +
+                ` p.vel.${other} = p.vel.${other} * (1.0 - ${fric}); } }`,
+            );
+            post.push(
+              `    if (p.pos.${axis} > ${k}_mx.${axis}) { p.pos.${axis} = ${k}_mx.${axis};` +
+                ` if (p.vel.${axis} > 0.0) { p.vel.${axis} = -p.vel.${axis} * ${rest};` +
+                ` p.vel.${other} = p.vel.${other} * (1.0 - ${fric}); } }`,
+            );
+          }
+        } else {
+          // a solid crate: eject along the axis of least penetration
+          post.push(
+            `    if (p.pos.x > ${k}_mn.x && p.pos.x < ${k}_mx.x && p.pos.y > ${k}_mn.y && p.pos.y < ${k}_mx.y) {`,
+          );
+          post.push(`      let ${k}_dl: f32 = p.pos.x - ${k}_mn.x;`);
+          post.push(`      let ${k}_dr: f32 = ${k}_mx.x - p.pos.x;`);
+          post.push(`      let ${k}_du: f32 = p.pos.y - ${k}_mn.y;`);
+          post.push(`      let ${k}_dd: f32 = ${k}_mx.y - p.pos.y;`);
+          post.push(
+            `      let ${k}_m: f32 = min(min(${k}_dl, ${k}_dr), min(${k}_du, ${k}_dd));`,
+          );
+          post.push(
+            `      if (${k}_m == ${k}_dl) { p.pos.x = ${k}_mn.x; p.vel.x = -abs(p.vel.x) * ${rest}; p.vel.y = p.vel.y * (1.0 - ${fric}); }`,
+          );
+          post.push(
+            `      else if (${k}_m == ${k}_dr) { p.pos.x = ${k}_mx.x; p.vel.x = abs(p.vel.x) * ${rest}; p.vel.y = p.vel.y * (1.0 - ${fric}); }`,
+          );
+          post.push(
+            `      else if (${k}_m == ${k}_du) { p.pos.y = ${k}_mn.y; p.vel.y = -abs(p.vel.y) * ${rest}; p.vel.x = p.vel.x * (1.0 - ${fric}); }`,
+          );
+          post.push(
+            `      else { p.pos.y = ${k}_mx.y; p.vel.y = abs(p.vel.y) * ${rest}; p.vel.x = p.vel.x * (1.0 - ${fric}); }`,
+          );
+          post.push(`    }`);
+        }
+        post.push(`  }`);
+        break;
+      }
+      case 'output.collideCircle': {
+        const k = `k_${node.id}`;
+        const inside = (node.structural?.mode ?? 'outside') === 'inside';
+        const centre = this.spaceOf(node)(inp('center'));
+        // relative velocity, so a MOVING disc kicks what it hits instead of
+        // letting particles tunnel through the advancing face
+        post.push(`  {${tag}`);
+        post.push(`    let ${k}_d: vec2f = p.pos - ${centre};`);
+        post.push(`    let ${k}_len: f32 = max(length(${k}_d), 1e-4);`);
+        post.push(
+          `    if (${k}_len ${inside ? '>' : '<'} ${inp('radius')}) {`,
+        );
+        post.push(`      let ${k}_n: vec2f = ${k}_d / ${k}_len;`);
+        post.push(`      p.pos = ${centre} + ${k}_n * ${inp('radius')};`);
+        post.push(`      let ${k}_rel: vec2f = p.vel - ${inp('velocity')};`);
+        post.push(`      let ${k}_vn: f32 = dot(${k}_rel, ${k}_n);`);
+        post.push(`      if (${k}_vn ${inside ? '>' : '<'} 0.0) {`);
+        post.push(`        let ${k}_vt: vec2f = ${k}_rel - ${k}_n * ${k}_vn;`);
+        post.push(
+          `        p.vel = ${inp('velocity')} + ${k}_vt * (1.0 - ${inp('friction')}) - ${k}_n * (${k}_vn * ${inp('restitution')});`,
+        );
+        post.push(`      }`);
+        post.push(`    }`);
+        post.push(`  }`);
         break;
       }
       default:

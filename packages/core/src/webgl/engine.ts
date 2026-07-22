@@ -10,8 +10,9 @@ import {
   STATE_FLOATS,
   TF_VARYINGS,
   UPDATE_FS,
-  UPDATE_VS,
-  UPDATE_VS_SUB,
+  updateVs,
+  updateVsSub,
+  type ForceFeatures,
 } from './shaders.js';
 import type { EngineParams } from './params.js';
 
@@ -98,6 +99,14 @@ export class WebGL2Engine {
   // scratch for the point-field uniform arrays (avoids per-frame allocation)
   private readonly pfA = new Float32Array(16);
   private readonly pfB = new Float32Array(8);
+  private readonly obA = new Float32Array(16);
+  private readonly obB = new Float32Array(16);
+  private readonly obSoft = new Float32Array(4);
+  private readonly obRel = new Float32Array(4);
+  private readonly colA = new Float32Array(16);
+  private readonly colB = new Float32Array(16);
+  private readonly colRel = new Float32Array(4);
+  private readonly feat: ForceFeatures;
 
   private readonly sizeScale: number;
   private readonly atlas: AtlasConfig | undefined;
@@ -107,11 +116,24 @@ export class WebGL2Engine {
   private readonly maskCount: number = 0;
 
   /** current ping-pong index (which buffer holds this-frame state). */
-  get curIndex(): number { return this.cur; }
-  bufferAt(i: number): WebGLBuffer { return this.bufs[i]!; }
-  get capacityValue(): number { return this.capacity; }
+  get curIndex(): number {
+    return this.cur;
+  }
+  bufferAt(i: number): WebGLBuffer {
+    return this.bufs[i]!;
+  }
+  get capacityValue(): number {
+    return this.capacity;
+  }
 
-  constructor(gl: WebGL2RenderingContext, params: EngineParams, sizeScale = 1, atlas?: AtlasConfig, sub?: SubSource, mask?: MaskConfig) {
+  constructor(
+    gl: WebGL2RenderingContext,
+    params: EngineParams,
+    sizeScale = 1,
+    atlas?: AtlasConfig,
+    sub?: SubSource,
+    mask?: MaskConfig,
+  ) {
     this.gl = gl;
     // a sub-emitter mirrors its parent 1:1, so it must share the parent's capacity
     this.capacity = sub ? sub.parent.capacityValue : params.capacity;
@@ -136,7 +158,16 @@ export class WebGL2Engine {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.bindTexture(gl.TEXTURE_2D, null);
     }
-    this.updateProg = link(gl, sub ? UPDATE_VS_SUB : UPDATE_VS, UPDATE_FS, TF_VARYINGS);
+    // Only link the interaction blocks the effect actually uses: an effect with
+    // no field.obstacle / output.collide* node links the exact same shader it
+    // did before those nodes existed.
+    this.feat = featuresOf(params);
+    this.updateProg = link(
+      gl,
+      sub ? updateVsSub(this.feat) : updateVs(this.feat),
+      UPDATE_FS,
+      TF_VARYINGS,
+    );
     this.renderProg = link(gl, RENDER_VS, RENDER_FS);
 
     if (atlas) {
@@ -167,7 +198,11 @@ export class WebGL2Engine {
       // one VAO per (childCur, parentCur): parent curr = bufs[parentCur], prev = bufs[1-parentCur]
       this.subVAOs = [0, 1].map((childCur) =>
         [0, 1].map((parentCur) =>
-          this.makeSubUpdateVAO(this.bufs[childCur]!, p.bufferAt(parentCur), p.bufferAt(1 - parentCur)),
+          this.makeSubUpdateVAO(
+            this.bufs[childCur]!,
+            p.bufferAt(parentCur),
+            p.bufferAt(1 - parentCur),
+          ),
         ),
       );
     }
@@ -310,6 +345,46 @@ export class WebGL2Engine {
     gl.uniform4fv(u.get('u_pfA')!, this.pfA);
     gl.uniform2fv(u.get('u_pfB')!, this.pfB);
     gl.uniform3f(u.get('u_turb')!, p.turbulence[0], p.turbulence[1], p.turbulence[2]);
+
+    if (this.feat.obstacles) {
+      const obs = p.obstacles;
+      const obN = Math.min(obs.length, 4);
+      gl.uniform1f(u.get('u_obCount')!, obN);
+      this.obA.fill(0);
+      this.obB.fill(0);
+      this.obSoft.fill(0);
+      this.obRel.fill(0);
+      for (let k = 0; k < obN; k++) {
+        const e = obs[k]!;
+        this.obA.set([e.center[0], e.center[1], e.radius, e.strength], k * 4);
+        this.obB.set([e.velocity[0], e.velocity[1], e.swirl, e.carry], k * 4);
+        this.obSoft[k] = e.softness;
+        this.obRel[k] = e.relative;
+      }
+      gl.uniform4fv(u.get('u_obA')!, this.obA);
+      gl.uniform4fv(u.get('u_obB')!, this.obB);
+      gl.uniform1fv(u.get('u_obSoft')!, this.obSoft);
+      gl.uniform1fv(u.get('u_obRel')!, this.obRel);
+    }
+
+    if (this.feat.colliders) {
+      const cols = p.colliders;
+      const colN = Math.min(cols.length, 4);
+      gl.uniform1f(u.get('u_colCount')!, colN);
+      this.colA.fill(0);
+      this.colB.fill(0);
+      this.colRel.fill(0);
+      for (let k = 0; k < colN; k++) {
+        const c = cols[k]!;
+        this.colA.set([c.kind, c.a[0], c.a[1], c.radius], k * 4);
+        this.colB.set([c.b[0], c.b[1], c.restitution, c.friction], k * 4);
+        this.colRel[k] = c.relative;
+      }
+      gl.uniform4fv(u.get('u_colA')!, this.colA);
+      gl.uniform4fv(u.get('u_colB')!, this.colB);
+      gl.uniform1fv(u.get('u_colRel')!, this.colRel);
+    }
+
     gl.uniform1f(u.get('u_time')!, this.timeAcc);
     this.timeAcc += dt;
 
@@ -419,15 +494,61 @@ export class WebGL2Engine {
   }
 }
 
+/** Which optional shader blocks this effect's graph needs. */
+export function featuresOf(p: EngineParams): ForceFeatures {
+  return { obstacles: p.obstacles.length > 0, colliders: p.colliders.length > 0 };
+}
+
 const UPDATE_UNIFORMS = [
-  'u_dt', 'u_gravity', 'u_wind', 'u_drag', 'u_emitter', 'u_velMin', 'u_velMax',
-  'u_lifeMin', 'u_lifeMax', 'u_spawnBase', 'u_spawnCount', 'u_capacity', 'u_frame',
-  'u_shape', 'u_shapeR', 'u_shapeSize',
-  'u_pfCount', 'u_pfA', 'u_pfB', 'u_turb', 'u_time',
-  'u_maskTbl', 'u_maskCount',
+  'u_dt',
+  'u_gravity',
+  'u_wind',
+  'u_drag',
+  'u_emitter',
+  'u_velMin',
+  'u_velMax',
+  'u_lifeMin',
+  'u_lifeMax',
+  'u_spawnBase',
+  'u_spawnCount',
+  'u_capacity',
+  'u_frame',
+  'u_shape',
+  'u_shapeR',
+  'u_shapeSize',
+  'u_pfCount',
+  'u_pfA',
+  'u_pfB',
+  'u_turb',
+  'u_time',
+  'u_obCount',
+  'u_obA',
+  'u_obB',
+  'u_obSoft',
+  'u_obRel',
+  'u_colCount',
+  'u_colA',
+  'u_colB',
+  'u_colRel',
+  'u_maskTbl',
+  'u_maskCount',
 ];
 const RENDER_UNIFORMS = [
-  'u_resolution', 'u_colorFrom', 'u_colorTo', 'u_sizeFrom', 'u_sizeTo', 'u_colorEase', 'u_sizeEase',
-  'u_textured', 'u_atlas', 'u_atlasSize', 'u_frameSize', 'u_grid', 'u_pad', 'u_fps', 'u_play',
-  'u_pick', 'u_seqRow',
+  'u_resolution',
+  'u_colorFrom',
+  'u_colorTo',
+  'u_sizeFrom',
+  'u_sizeTo',
+  'u_colorEase',
+  'u_sizeEase',
+  'u_textured',
+  'u_atlas',
+  'u_atlasSize',
+  'u_frameSize',
+  'u_grid',
+  'u_pad',
+  'u_fps',
+  'u_play',
+  'u_pick',
+  'u_seqRow',
 ];

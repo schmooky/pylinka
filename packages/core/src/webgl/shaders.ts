@@ -84,8 +84,127 @@ vec2 turbForce(vec2 pos) {
   return vec2(ny1 - ny0, -(nx1 - nx0)) / (2.0 * e) * u_turb.x;
 }`;
 
+/**
+ * Obstacles — bodies moving THROUGH the field (field.obstacle). Radial push out
+ * of a disc with a soft falloff, tangential swirl (the wake), and carry: an
+ * acceleration toward the body's own velocity, which is what makes a bow wave.
+ *
+ * Spliced in ONLY when the effect actually has a field.obstacle node, so an
+ * effect without one links the exact shader it linked before this feature
+ * existed (see the byte-identity test in core.test.ts).
+ */
+const OBSTACLE_GLSL = `
+uniform float u_obCount;
+uniform vec4  u_obA[4];    // center.xy, radius, strength
+uniform vec4  u_obB[4];    // velocity.xy, swirl, carry
+uniform float u_obSoft[4]; // 0 = tight shell at the surface, 1 = broad cushion
+uniform float u_obRel[4];  // 1 = centre is emitter-relative (structural space)
+
+vec2 obstacleForces(vec2 pos, vec2 vel, vec2 emitter) {
+  vec2 f = vec2(0.0);
+  for (int k = 0; k < 4; k++) {
+    if (float(k) >= u_obCount) break;
+    vec2 d = pos - (u_obA[k].xy + (u_obRel[k] > 0.5 ? emitter : vec2(0.0)));
+    float len = max(length(d), 1e-3);
+    vec2 dir = d / len;
+    float t = clamp(1.0 - len / max(u_obA[k].z, 1e-3), 0.0, 1.0);
+    float w = pow(t, mix(3.0, 0.5, clamp(u_obSoft[k], 0.0, 1.0)));
+    f += (dir * u_obA[k].w
+        + vec2(-dir.y, dir.x) * u_obB[k].z
+        + (u_obB[k].xy - vel) * u_obB[k].w) * w;
+  }
+  return f;
+}`;
+
+/**
+ * Solid geometry (output.collide*). Runs AFTER integration on the new position:
+ * resolve the penetration first, then reflect the normal component of velocity.
+ * kind 1 plane (a = point, b = normal) · 2 rect inside · 3 rect outside
+ * (a = min, b = max) · 4 circle outside · 5 circle inside (a = centre, r =
+ * radius, b = the disc's own velocity so a moving wall kicks what it hits).
+ *
+ * Also spliced in on demand — see OBSTACLE_GLSL.
+ */
+const COLLIDER_GLSL = `
+uniform float u_colCount;
+uniform vec4  u_colA[4];   // kind, a.xy, radius
+uniform vec4  u_colB[4];   // b.xy, restitution, friction
+uniform float u_colRel[4]; // 1 = geometry is emitter-relative (structural space)
+
+void resolveColliders(inout vec2 pos, inout vec2 vel, vec2 emitter) {
+  for (int k = 0; k < 4; k++) {
+    if (float(k) >= u_colCount) break;
+    float kind = u_colA[k].x;
+    vec2 off = u_colRel[k] > 0.5 ? emitter : vec2(0.0);
+    vec2 a = u_colA[k].yz + off;
+    float r = u_colA[k].w;
+    // b is a POSITION for the rect (max corner) but a VELOCITY for the circle
+    vec2 b = u_colB[k].xy + (kind > 1.5 && kind < 3.5 ? off : vec2(0.0));
+    float rest = u_colB[k].z;
+    float fric = u_colB[k].w;
+
+    if (kind < 1.5) {
+      vec2 n = b / max(length(b), 1e-6);
+      float sd = dot(pos - a, n);
+      if (sd < 0.0) {
+        pos -= n * sd;
+        float vn = dot(vel, n);
+        if (vn < 0.0) {
+          vec2 vt = vel - n * vn;
+          vel = vt * (1.0 - fric) - n * (vn * rest);
+        }
+      }
+    } else if (kind < 2.5) {
+      // kept inside the box (no helper fn: a swizzle as an inout arg is the
+      // kind of thing ANGLE/Metal has bitten this engine over before)
+      if (pos.x < a.x) { pos.x = a.x; if (vel.x < 0.0) { vel.x = -vel.x * rest; vel.y *= 1.0 - fric; } }
+      if (pos.x > b.x) { pos.x = b.x; if (vel.x > 0.0) { vel.x = -vel.x * rest; vel.y *= 1.0 - fric; } }
+      if (pos.y < a.y) { pos.y = a.y; if (vel.y < 0.0) { vel.y = -vel.y * rest; vel.x *= 1.0 - fric; } }
+      if (pos.y > b.y) { pos.y = b.y; if (vel.y > 0.0) { vel.y = -vel.y * rest; vel.x *= 1.0 - fric; } }
+    } else if (kind < 3.5) {
+      if (pos.x > a.x && pos.x < b.x && pos.y > a.y && pos.y < b.y) {
+        float dl = pos.x - a.x, dr = b.x - pos.x;
+        float du = pos.y - a.y, dd = b.y - pos.y;
+        float m = min(min(dl, dr), min(du, dd));
+        if (m == dl)      { pos.x = a.x; vel.x = -abs(vel.x) * rest; vel.y *= 1.0 - fric; }
+        else if (m == dr) { pos.x = b.x; vel.x =  abs(vel.x) * rest; vel.y *= 1.0 - fric; }
+        else if (m == du) { pos.y = a.y; vel.y = -abs(vel.y) * rest; vel.x *= 1.0 - fric; }
+        else              { pos.y = b.y; vel.y =  abs(vel.y) * rest; vel.x *= 1.0 - fric; }
+      }
+    } else {
+      bool inside = kind > 4.5;
+      vec2 d = pos - a;
+      float len = max(length(d), 1e-4);
+      if (inside ? (len > r) : (len < r)) {
+        vec2 n = d / len;
+        pos = a + n * r;
+        vec2 rel = vel - b;
+        float vn = dot(rel, n);
+        if (inside ? (vn > 0.0) : (vn < 0.0)) {
+          vec2 vt = rel - n * vn;
+          vel = b + vt * (1.0 - fric) - n * (vn * rest);
+        }
+      }
+    }
+  }
+}
+
+`;
+
+/** Which optional interaction blocks an effect needs (from its graph). */
+export interface ForceFeatures {
+  obstacles: boolean;
+  colliders: boolean;
+}
+
+export const NO_FEATURES: ForceFeatures = { obstacles: false, colliders: false };
+
+/** The force preamble for an effect: base fields + only the blocks it uses. */
+const forceGlsl = (ft: ForceFeatures): string =>
+  FORCE_GLSL + (ft.obstacles ? OBSTACLE_GLSL : '') + (ft.colliders ? COLLIDER_GLSL : '');
+
 /** Update (simulation) vertex shader — outputs new state via transform feedback. */
-export const UPDATE_VS = `#version 300 es
+export const updateVs = (ft: ForceFeatures = NO_FEATURES): string => `#version 300 es
 precision highp float;
 
 in vec2 i_pos;
@@ -123,7 +242,7 @@ uniform float u_maskCount;
 
 float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
 float rnd(float s, float k) { return hash11(s * 57.31 + k * 131.7 + 0.123); }
-${FORCE_GLSL}
+${forceGlsl(ft)}
 
 void main() {
   gl_Position = vec4(0.0, 0.0, 0.0, 1.0); // required by ANGLE/Metal even under rasterizer discard
@@ -156,10 +275,14 @@ void main() {
     return;
   }
 
-  vec2 force = u_gravity + u_wind + pointForces(i_pos, u_emitter) + turbForce(i_pos);
+  vec2 force = u_gravity + u_wind + pointForces(i_pos, u_emitter) + turbForce(i_pos)${ft.obstacles ? '\n             + obstacleForces(i_pos, i_vel, u_emitter)' : ''};
   vec2 vel = i_vel + force * u_dt;
   vel *= exp(-u_drag * u_dt);
-  o_pos  = i_pos + vel * u_dt;
+${ft.colliders
+  ? `  vec2 pos = i_pos + vel * u_dt;
+  resolveColliders(pos, vel, u_emitter);
+  o_pos  = pos;`
+  : `  o_pos  = i_pos + vel * u_dt;`}
   o_vel  = vel;
   o_age  = i_age + u_dt;
   o_life = i_life;
@@ -174,7 +297,7 @@ void main() {
  * parent's death position. There is no cursor-window emitter spawn. All other
  * integration matches UPDATE_VS.
  */
-export const UPDATE_VS_SUB = `#version 300 es
+export const updateVsSub = (ft: ForceFeatures = NO_FEATURES): string => `#version 300 es
 precision highp float;
 
 in vec2 i_pos;
@@ -213,7 +336,7 @@ uniform vec2  u_shapeSize;
 
 float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
 float rnd(float s, float k) { return hash11(s * 57.31 + k * 131.7 + 0.123); }
-${FORCE_GLSL}
+${forceGlsl(ft)}
 
 void main() {
   gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
@@ -242,10 +365,14 @@ void main() {
     return;
   }
 
-  vec2 force = u_gravity + u_wind + pointForces(i_pos, u_emitter) + turbForce(i_pos);
+  vec2 force = u_gravity + u_wind + pointForces(i_pos, u_emitter) + turbForce(i_pos)${ft.obstacles ? '\n             + obstacleForces(i_pos, i_vel, u_emitter)' : ''};
   vec2 vel = i_vel + force * u_dt;
   vel *= exp(-u_drag * u_dt);
-  o_pos  = i_pos + vel * u_dt;
+${ft.colliders
+  ? `  vec2 pos = i_pos + vel * u_dt;
+  resolveColliders(pos, vel, u_emitter);
+  o_pos  = pos;`
+  : `  o_pos  = i_pos + vel * u_dt;`}
   o_vel  = vel;
   o_age  = i_age + u_dt;
   o_life = i_life;

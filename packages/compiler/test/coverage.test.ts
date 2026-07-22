@@ -130,4 +130,100 @@ describe('compile — node coverage', () => {
     expect(c.updateSrc).toContain('easeSel_power2_out(ageN)');
     expect(c.updateSrc).toContain('easeSel_sine_in(ageN)');
   });
+
+  /** A body moving through the field + solid geometry it lands on. */
+  const interactionGraph = (): Graph => ({
+    nodes: [
+      { id: 'n1', kind: 'shape.circle', values: { radius: { t: 'f32', v: 200 } } },
+      { id: 'n2', kind: 'output.spawnPosition' },
+      { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 4 } } },
+      {
+        id: 'n4',
+        kind: 'field.obstacle',
+        values: {
+          center: { t: 'vec2', v: [0, 0] },
+          velocity: { t: 'vec2', v: [400, 0] },
+          radius: { t: 'f32', v: 150 },
+          strength: { t: 'f32', v: 2400 },
+          softness: { t: 'f32', v: 0.5 },
+          swirl: { t: 'f32', v: 600 },
+          carry: { t: 'f32', v: 3 },
+        },
+      },
+      { id: 'n5', kind: 'output.addForce' },
+      {
+        id: 'n6',
+        kind: 'output.collidePlane',
+        values: {
+          point: { t: 'vec2', v: [0, 400] },
+          normal: { t: 'vec2', v: [0, -1] },
+          restitution: { t: 'f32', v: 0.5 },
+          friction: { t: 'f32', v: 0.2 },
+        },
+      },
+      {
+        id: 'n7',
+        kind: 'output.collideRect',
+        structural: { mode: 'outside' },
+        values: {
+          min: { t: 'vec2', v: [-100, -100] },
+          max: { t: 'vec2', v: [100, 100] },
+          restitution: { t: 'f32', v: 0.3 },
+          friction: { t: 'f32', v: 0.1 },
+        },
+      },
+      {
+        id: 'n8',
+        kind: 'output.collideCircle',
+        values: {
+          center: { t: 'vec2', v: [0, 0] },
+          radius: { t: 'f32', v: 120 },
+          restitution: { t: 'f32', v: 0.6 },
+          friction: { t: 'f32', v: 0.05 },
+          velocity: { t: 'vec2', v: [0, 0] },
+        },
+      },
+    ],
+    edges: [
+      { id: 'e1', from: { nodeId: 'n1', portId: 'pos' }, to: { nodeId: 'n2', portId: 'pos' } },
+      { id: 'e2', from: { nodeId: 'n4', portId: 'force' }, to: { nodeId: 'n5', portId: 'force' } },
+    ],
+  });
+
+  it('field.obstacle pushes, swirls and carries, into the shared force register', () => {
+    const c = compile(bundle(interactionGraph()), V1_CATALOG, 'webgpu');
+    // soft falloff shell + tangential term + velocity inheritance
+    expect(c.updateSrc).toContain('pow(');
+    expect(c.updateSrc).toContain('mix(3.0, 0.5, clamp(');
+    expect(c.updateSrc).toMatch(/vec2f\(-x_n4_2\.y, x_n4_2\.x\)/);
+    expect(c.updateSrc).toContain('- p.vel)');
+    expect(c.updateSrc).toContain('force +=');
+  });
+
+  it('collide.* resolve penetration AFTER integration, then bounce', () => {
+    const c = compile(bundle(interactionGraph()), V1_CATALOG, 'webgpu');
+    const src = c.updateSrc;
+    const integrate = src.indexOf('p.pos += p.vel * U.dt;');
+    expect(integrate).toBeGreaterThan(0);
+    // every collider body sits after the integration line
+    for (const marker of ['k_n6_sd', 'k_n7_m', 'k_n8_vn']) {
+      expect(src.indexOf(marker), marker).toBeGreaterThan(integrate);
+    }
+    // plane: push back onto the surface, then reflect the normal component
+    expect(src).toContain('p.pos = p.pos - k_n6_n * k_n6_sd;');
+    // rect 'outside': eject along the axis of least penetration
+    expect(src).toContain('min(min(k_n7_dl, k_n7_dr), min(k_n7_du, k_n7_dd))');
+    // circle: relative to the disc's own velocity, so a moving wall kicks
+    expect(src).toContain('let k_n8_rel: vec2f = p.vel -');
+  });
+
+  it('the same interaction graph translates to valid GLSL for webgl2', () => {
+    const c = compile(bundle(interactionGraph()), V1_CATALOG, 'webgl2');
+    // typed lets became GLSL declarations, vec2f became vec2, no WGSL leftovers
+    expect(c.emitSrc).toContain('vec2 k_n6_n = ');
+    expect(c.emitSrc).toContain('float k_n6_sd = ');
+    expect(c.emitSrc).toContain('vec2 k_n8_vt = ');
+    expect(c.emitSrc).not.toMatch(/\bvec2f\(/);
+    expect(c.emitSrc).not.toMatch(/\blet\s/);
+  });
 });
