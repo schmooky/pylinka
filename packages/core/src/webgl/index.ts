@@ -132,6 +132,13 @@ export interface ParticlesHandle {
   autoClear: boolean;
   /** Alive particle count. Synchronous GPU readback — for debug/stats, not per-frame. */
   aliveCount(): number;
+  /**
+   * True while the WebGL context is gone (backgrounded tab, GPU reset, driver
+   * hiccup). `update()` is a no-op meanwhile and resumes on its own once the
+   * browser restores the context; particle state does not survive, so the pool
+   * refills from the emitter.
+   */
+  readonly contextLost: boolean;
   destroy(): void;
 }
 
@@ -167,6 +174,10 @@ export interface ParticlesOptions {
    * centred on the emitter and moves with it. Ignored for sub-emitters.
    */
   emissionMask?: EmissionMaskOptions;
+  /** Called when the GL context is lost. Recovery is automatic; this is for UI. */
+  onContextLost?: () => void;
+  /** Called after the context came back and the effect was rebuilt. */
+  onContextRestored?: () => void;
 }
 
 export interface EmissionMaskOptions {
@@ -249,6 +260,14 @@ export function createParticles(
     gl, params, opts.sizeScale ?? 1, resolveAtlas(opts.atlas),
     parentEngine ? { parent: parentEngine } : undefined,
     buildMaskTable(opts.emissionMask),
+    {
+      ...(opts.onContextLost ? { onContextLost: opts.onContextLost } : {}),
+      onContextRestored: () => {
+        // the pool came back empty, so the spawn schedule restarts with it
+        scheduler = new SpawnScheduler(curSystem.emitter, params.capacity);
+        opts.onContextRestored?.();
+      },
+    },
   );
   let scheduler = new SpawnScheduler(system.emitter, params.capacity);
   // last-applied graph, so setKnob can re-interpret every knob-bound port live
@@ -327,6 +346,9 @@ export function createParticles(
     },
     aliveCount() {
       return engine.aliveCount();
+    },
+    get contextLost() {
+      return engine.contextLost;
     },
     destroy() {
       engineOf.delete(handle);

@@ -50,6 +50,23 @@ trajectories.
 The base `@pylinka/core` entry holds the CPU scheduler, the knob bus and the timing helpers that
 every backend shares.
 
+## When the GPU disappears
+
+Phones take the GPU away: background the tab, reset the driver, let another page get greedy. Both
+WebGL2 backends survive it. They pause while the context is gone, rebuild every GPU object when the
+browser hands it back, and carry your knobs and emitter position across. The particles that were
+alive do not come back, so the pool refills from the emitter.
+
+```ts
+const fx = await createCompiledParticles(canvas, project, {
+  onContextLost: () => hud.showReconnecting(),
+  onContextRestored: () => hud.hideReconnecting(),
+});
+```
+
+On WebGPU the device is shared, and on the pixi path the renderer owns it, so a lost device is
+reported through the same callback and left for you to replace.
+
 ```bash
 npm i @pylinka/core
 ```

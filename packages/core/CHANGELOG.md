@@ -28,6 +28,12 @@
   The gallery has a `physics` group with six new effects, and there is a sandbox at `/interactive`
   for pushing a field around with the cursor.
 
+  Context loss no longer kills an effect. On WebGL2 both backends pause while the GPU context is
+  gone and rebuild themselves when the browser gives it back, carrying your knob values and emitter
+  position across. `contextLost` tells you where you stand, and `onContextLost` and
+  `onContextRestored` fire if you want to show something on screen. WebGPU device loss is detected
+  and reported, and replacing the device stays with whoever owns it.
+
 ### Patch Changes
 
 - Updated dependencies []:

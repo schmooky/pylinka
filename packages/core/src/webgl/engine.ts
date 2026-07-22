@@ -81,14 +81,17 @@ function link(
 export class WebGL2Engine {
   private readonly gl: WebGL2RenderingContext;
   private readonly capacity: number;
-  private readonly updateProg: WebGLProgram;
-  private readonly renderProg: WebGLProgram;
-  private readonly bufs: [WebGLBuffer, WebGLBuffer];
-  private readonly updateVAOs: [WebGLVertexArrayObject, WebGLVertexArrayObject];
+  // Every field below holds a GL object, so every one of them is invalidated by
+  // a context loss and rebuilt by createResources(). None of them can be
+  // readonly for that reason.
+  private updateProg!: WebGLProgram;
+  private renderProg!: WebGLProgram;
+  private bufs!: [WebGLBuffer, WebGLBuffer];
+  private updateVAOs!: [WebGLVertexArrayObject, WebGLVertexArrayObject];
   /** sub-emitter only: [childCur][parentCur] VAOs binding the parent's buffers. */
-  private readonly subVAOs: WebGLVertexArrayObject[][] = [];
-  private readonly renderVAOs: [WebGLVertexArrayObject, WebGLVertexArrayObject];
-  private readonly tf: WebGLTransformFeedback;
+  private subVAOs: WebGLVertexArrayObject[][] = [];
+  private renderVAOs!: [WebGLVertexArrayObject, WebGLVertexArrayObject];
+  private tf!: WebGLTransformFeedback;
   private readonly uUpdate = new Map<string, WebGLUniformLocation | null>();
   private readonly uRender = new Map<string, WebGLUniformLocation | null>();
 
@@ -110,10 +113,39 @@ export class WebGL2Engine {
 
   private readonly sizeScale: number;
   private readonly atlas: AtlasConfig | undefined;
-  private readonly tex: WebGLTexture | null = null;
+  private tex: WebGLTexture | null = null;
   private readonly sub: SubSource | undefined;
-  private readonly maskTex: WebGLTexture | null = null;
-  private readonly maskCount: number = 0;
+  private readonly mask: MaskConfig | undefined;
+  private maskTex: WebGLTexture | null = null;
+  private maskCount = 0;
+
+  /**
+   * Context-loss state. A lost context invalidates every GL object we hold, and
+   * calling into it just generates errors, so the engine goes quiet until the
+   * browser hands the context back. The rebuild is deferred to the next step()
+   * rather than done in the event handler: a sub-emitter's VAOs reference its
+   * PARENT's buffers, and step() order already guarantees the parent goes first.
+   */
+  private lost = false;
+  private needsRebuild = false;
+  private readonly onLost: () => void;
+  private readonly onRestored: () => void;
+  private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  private readonly handleLost = (e: Event): void => {
+    // without preventDefault the browser never fires webglcontextrestored
+    e.preventDefault();
+    this.lost = true;
+    this.onLost();
+  };
+  private readonly handleRestored = (): void => {
+    this.lost = false;
+    this.needsRebuild = true;
+  };
+
+  /** True while the GL context is gone. step()/render() are no-ops meanwhile. */
+  get contextLost(): boolean {
+    return this.lost;
+  }
 
   /** current ping-pong index (which buffer holds this-frame state). */
   get curIndex(): number {
@@ -133,6 +165,7 @@ export class WebGL2Engine {
     atlas?: AtlasConfig,
     sub?: SubSource,
     mask?: MaskConfig,
+    hooks?: { onContextLost?: () => void; onContextRestored?: () => void },
   ) {
     this.gl = gl;
     // a sub-emitter mirrors its parent 1:1, so it must share the parent's capacity
@@ -140,6 +173,32 @@ export class WebGL2Engine {
     this.sizeScale = sizeScale;
     this.atlas = atlas;
     this.sub = sub;
+    this.mask = mask;
+    this.feat = featuresOf(params);
+    this.onLost = hooks?.onContextLost ?? (() => undefined);
+    this.onRestored = hooks?.onContextRestored ?? (() => undefined);
+
+    this.canvas = gl.canvas;
+    this.canvas.addEventListener('webglcontextlost', this.handleLost as EventListener);
+    this.canvas.addEventListener('webglcontextrestored', this.handleRestored as EventListener);
+
+    this.createResources();
+  }
+
+  /**
+   * Build (or rebuild) every GL object this engine owns. Called once from the
+   * constructor and again after the context comes back. Particle state does not
+   * survive: the buffers come back zeroed and the pool refills from the emitter.
+   */
+  private createResources(): void {
+    const gl = this.gl;
+    const { atlas, sub, mask } = this;
+    this.uUpdate.clear();
+    this.uRender.clear();
+    this.subVAOs = [];
+    this.cur = 0;
+    this.spawnBase = 0;
+    this.frame = 0;
 
     if (mask && mask.count > 0 && !sub) {
       // RG32F row-major table, 2048 wide; sampled with texelFetch (no filtering)
@@ -161,7 +220,6 @@ export class WebGL2Engine {
     // Only link the interaction blocks the effect actually uses: an effect with
     // no field.obstacle / output.collide* node links the exact same shader it
     // did before those nodes existed.
-    this.feat = featuresOf(params);
     this.updateProg = link(
       gl,
       sub ? updateVsSub(this.feat) : updateVs(this.feat),
@@ -309,6 +367,12 @@ export class WebGL2Engine {
     wind: readonly [number, number],
     p: EngineParams,
   ): void {
+    if (this.lost) return;
+    if (this.needsRebuild) {
+      this.needsRebuild = false;
+      this.createResources();
+      this.onRestored();
+    }
     const gl = this.gl;
     const u = this.uUpdate;
     gl.useProgram(this.updateProg);
@@ -423,6 +487,7 @@ export class WebGL2Engine {
 
   /** Draw the current state into the bound framebuffer at the given size. */
   render(width: number, height: number, p: EngineParams): void {
+    if (this.lost || this.needsRebuild) return;
     const gl = this.gl;
     const u = this.uRender;
     gl.useProgram(this.renderProg);
@@ -466,6 +531,7 @@ export class WebGL2Engine {
    * a stats HUD, not every frame.
    */
   aliveCount(): number {
+    if (this.lost || this.needsRebuild) return 0;
     const gl = this.gl;
     const out = new Float32Array(this.capacity * STATE_FLOATS);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bufs[this.cur]!);
@@ -481,6 +547,9 @@ export class WebGL2Engine {
   }
 
   destroy(): void {
+    this.canvas.removeEventListener('webglcontextlost', this.handleLost as EventListener);
+    this.canvas.removeEventListener('webglcontextrestored', this.handleRestored as EventListener);
+    if (this.lost) return; // the objects are already gone with the context
     const gl = this.gl;
     gl.deleteProgram(this.updateProg);
     gl.deleteProgram(this.renderProg);

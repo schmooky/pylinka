@@ -577,24 +577,63 @@ export function createParticles(
   const parentSim = opts.subParent ? simOf.get(opts.subParent) : undefined;
   if (opts.subParent && !parentSim) throw new Error('subParent is not a live WebGL2 compiled handle.');
 
-  const sim = new WebGL2CompiledSim(gl, system, project.params, {
-    sprite: resolveSprite(opts.atlas),
-    anim: resolveAnim(opts.atlas),
-    ...(maskTable ? { mask: maskTable } : {}),
-    ...(parentSim ? { subParent: parentSim } : {}),
-    ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
-    startX: (canvas.width * zoom) / 2,
-    startY: (canvas.height * zoom) / 2,
-    ...(opts.onRecompile !== undefined ? { onRecompile: opts.onRecompile } : {}),
-  });
+  // The project can be edited live, so the rebuild after a context loss has to
+  // use the LATEST one, not the one we were constructed with.
+  let curProject = project;
+  const makeSim = () =>
+    new WebGL2CompiledSim(gl, pickSystem(curProject, opts.systemName) ?? system, curProject.params, {
+      sprite: resolveSprite(opts.atlas),
+      anim: resolveAnim(opts.atlas),
+      ...(maskTable ? { mask: maskTable } : {}),
+      ...(parentSim ? { subParent: parentSim } : {}),
+      ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
+      startX: (canvas.width * zoom) / 2,
+      startY: (canvas.height * zoom) / 2,
+      ...(opts.onRecompile !== undefined ? { onRecompile: opts.onRecompile } : {}),
+    });
+  let sim = makeSim();
+
+  // Context loss throws away every GL object, so the sim is rebuilt from
+  // scratch when the browser gives the context back. Knob writes and the
+  // emitter position are replayed onto the new one; particle state is not,
+  // because the buffers come back empty.
+  let lost = false;
+  let needsRebuild = false;
+  const knobLog = new Map<string, [number, number, number, number]>();
+  const onLost = (e: Event) => {
+    e.preventDefault(); // without this the browser never restores the context
+    lost = true;
+    opts.onContextLost?.();
+  };
+  const onRestored = () => {
+    lost = false;
+    needsRebuild = true;
+  };
+  canvas.addEventListener('webglcontextlost', onLost);
+  canvas.addEventListener('webglcontextrestored', onRestored);
 
   let destroyed = false;
   const handle: CompiledParticlesHandle = {
     autoClear: true,
     backendName: 'webgl2',
-    stats: sim.stats,
+    get stats() {
+      return sim.stats;
+    },
+    get contextLost() {
+      return lost;
+    },
     update(dtSeconds: number) {
-      if (destroyed) return;
+      if (destroyed || lost) return;
+      if (needsRebuild) {
+        needsRebuild = false;
+        const { ex, ey } = sim.clock;
+        sim = makeSim();
+        sim.clock.ex = ex;
+        sim.clock.ey = ey;
+        for (const [name, v] of knobLog) sim.knobs.set(name, v[0], v[1], v[2], v[3]);
+        simOf.set(handle, sim);
+        opts.onContextRestored?.();
+      }
       const dt = clampDt(dtSeconds, maxDt);
       sim.step(dt);
       gl.viewport(0, 0, canvas.width, canvas.height);
@@ -614,9 +653,11 @@ export function createParticles(
       sim.clock.spawnBurst(count);
     },
     setKnob(name: string, x: number, y?: number, z?: number, w?: number) {
+      knobLog.set(name, [x, y ?? 0, z ?? 0, w ?? 0]);
       sim.knobs.set(name, x, y, z, w);
     },
     apply(next: PylinkaProject): boolean {
+      curProject = next;
       return sim.applyProject(next, opts.systemName);
     },
     restart() {
@@ -624,13 +665,15 @@ export function createParticles(
       sim.clock.reset();
     },
     aliveCount() {
-      return sim.aliveCount();
+      return lost || needsRebuild ? 0 : sim.aliveCount();
     },
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      canvas.removeEventListener('webglcontextlost', onLost);
+      canvas.removeEventListener('webglcontextrestored', onRestored);
       simOf.delete(handle);
-      sim.destroy();
+      if (!lost) sim.destroy(); // a lost context already freed everything
     },
   };
   simOf.set(handle, sim);

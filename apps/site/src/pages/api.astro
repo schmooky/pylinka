@@ -125,12 +125,33 @@ fx.apply(editedProject);       // structural edits rebuild pipelines and reset t
     on the interpreted engine, <code>@pylinka/core/webgl</code>.
   </p>
 
-  <h2>Device loss</h2>
+  <h2>Context and device loss</h2>
   <p>
-    WebGPU device loss is routine on mobile, and so is losing a WebGL context when a tab sits in
-    the background. Pylinka 1.0 surfaces the WebGPU case through <code>onDeviceLost</code> and
-    leaves recovery to you. Re-acquiring the device and rebuilding pipelines automatically is the
-    next piece of hardening work, and until it lands you should treat a lost device as a signal to
-    tear the effect down and build it again.
+    Losing the GPU underneath you is routine on phones. A backgrounded tab, a driver reset or
+    another page hogging the GPU all take the context away, and every buffer, program and pipeline
+    dies with it.
+  </p>
+  <p>
+    On <strong>WebGL2</strong>, both the interpreted and the compiled backends recover on their own.
+    They listen for <code>webglcontextlost</code> and call <code>preventDefault()</code> on it,
+    which is what makes the browser willing to give the context back at all. While it is gone
+    <code>update()</code> does nothing and <code>contextLost</code> reads true, so a render loop
+    that keeps ticking costs nothing and throws nothing. When
+    <code>webglcontextrestored</code> arrives, the effect rebuilds every GPU object and carries your
+    knob values and emitter position across. Particles alive at the moment of the loss are gone for
+    good, because their buffers went with the context, so the pool refills from the emitter.
+  </p>
+  <pre><code>const fx = await createCompiledParticles(canvas, project, &#123;
+  onContextLost: () =&gt; hud.showReconnecting(),
+  onContextRestored: () =&gt; hud.hideReconnecting(),
+&#125;);
+
+if (fx.contextLost) &#123; /* the effect is paused, nothing to do */ &#125;</code></pre>
+  <p>
+    On <strong>WebGPU</strong> the device is shared per canvas, and on the pixi path it belongs to
+    the renderer, so Pylinka does not go behind your back and replace it. A lost device is detected,
+    the system stops queueing work rather than piling up validation errors,
+    <code>contextLost</code> flips, and both <code>onContextLost</code> and the older
+    <code>onDeviceLost</code> hook fire. Re-acquiring a device and rebuilding is the host's call.
   </p>
 </DocsLayout>
