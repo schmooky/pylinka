@@ -652,12 +652,29 @@ export async function createParticles(
   });
 
   let destroyed = false;
+  // A lost device invalidates every pipeline and buffer, and queueing work on
+  // it just piles up validation errors. Go quiet and tell the host. We do NOT
+  // re-acquire: the device is shared per canvas and, on the pixi path, owned by
+  // the renderer, so replacing it is the host's call.
+  let lost = false;
+  void device.lost.then((info) => {
+    if (destroyed) return;
+    lost = true;
+    console.warn(`Pylinka: WebGPU device lost (${info.reason}): ${info.message}`);
+    opts.onContextLost?.();
+  });
+
   const handle: CompiledParticlesHandle = {
     autoClear: true,
     backendName: 'webgpu',
-    stats: sim.stats,
+    get stats() {
+      return sim.stats;
+    },
+    get contextLost() {
+      return lost;
+    },
     update(dtSeconds: number) {
-      if (destroyed) return;
+      if (destroyed || lost) return;
       const dt = clampDt(dtSeconds, maxDt);
       sim.prepare(dt);
       const encoder = device.createCommandEncoder();
@@ -699,6 +716,7 @@ export async function createParticles(
       sim.clock.reset();
     },
     aliveCount() {
+      if (lost) return 0;
       return sim.stats.aliveCount;
     },
     destroy() {

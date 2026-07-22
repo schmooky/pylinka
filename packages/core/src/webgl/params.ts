@@ -47,9 +47,48 @@ export interface EngineParams {
   }[];
   /** field.turbulence: [strength, noise cell px, speed] ([0,…] = off). */
   turbulence: [number, number, number];
+  /**
+   * field.obstacle — up to 4 bodies moving through the field. `center` and
+   * `velocity` are absolute world px and are usually knob-bound, so a cursor or
+   * a flying object can drive them live (see `setKnob(name, x, y)`).
+   */
+  obstacles: {
+    center: [number, number];
+    velocity: [number, number];
+    radius: number;
+    strength: number;
+    softness: number;
+    swirl: number;
+    carry: number;
+    /** 1 = centre is emitter-relative (structural `space: 'emitter'`). */
+    relative: 0 | 1;
+  }[];
+  /** output.collide* — up to 4 solids, resolved after integration. */
+  colliders: {
+    /** 1 plane · 2 rect inside · 3 rect outside · 4 circle outside · 5 circle inside */
+    kind: 1 | 2 | 3 | 4 | 5;
+    /** plane: point · rect: min · circle: centre */
+    a: [number, number];
+    /** plane: normal · rect: max · circle: the disc's own velocity */
+    b: [number, number];
+    radius: number;
+    restitution: number;
+    friction: number;
+    /** 1 = geometry is emitter-relative (structural `space: 'emitter'`). */
+    relative: 0 | 1;
+  }[];
 }
 
+/** structural `space` → the runtime's emitter-relative flag. */
+const rel = (n: Node): 0 | 1 => (n.structural?.space === 'emitter' ? 1 : 0);
+
+/** Knob values as the interpreted runtime holds them: scalar or vec2. */
+export type KnobValues = Record<string, number | [number, number]>;
+
 const f = (l: Literal | undefined, d: number): number => (l?.t === 'f32' ? l.v : d);
+/** First component of a knob value (vec2 knobs read as scalars where needed). */
+const scalar = (v: number | [number, number] | undefined): number =>
+  v === undefined ? 0 : typeof v === 'number' ? v : v[0];
 const v2 = (l: Literal | undefined, d: [number, number]): [number, number] =>
   l?.t === 'vec2' ? [l.v[0], l.v[1]] : d;
 
@@ -68,7 +107,7 @@ export function parseColor(
 export function extractParams(
   system: System,
   params: ParamDef[],
-  knobValues: Record<string, number>,
+  knobValues: KnobValues,
 ): EngineParams {
   const g = system.graph;
   const nodes = new Map(g.nodes.map((n) => [n.id, n] as const));
@@ -85,11 +124,24 @@ export function extractParams(
     const knob = resolveKnob(n, portId, source, paramById);
     if (knob !== undefined) {
       const live = knobValues[knob];
-      if (live !== undefined) return live;
+      if (live !== undefined) return typeof live === 'number' ? live : live[0];
       const pd = params.find((x) => x.name === knob);
       return pd?.default.t === 'f32' ? pd.default.v : d;
     }
     return f(n.values?.[portId], d);
+  };
+  /** vec2 port value, knob-driven the same way — this is the cursor path. */
+  const vk = (n: Node | undefined, portId: string, d: [number, number]): [number, number] => {
+    if (!n) return d;
+    const knob = resolveKnob(n, portId, source, paramById);
+    if (knob !== undefined) {
+      const live = knobValues[knob];
+      if (Array.isArray(live)) return [live[0], live[1]];
+      if (typeof live === 'number') return [live, 0];
+      const pd = params.find((x) => x.name === knob);
+      if (pd?.default.t === 'vec2') return [pd.default.v[0], pd.default.v[1]];
+    }
+    return v2(n.values?.[portId], d);
   };
 
   const p: EngineParams = {
@@ -115,6 +167,8 @@ export function extractParams(
     sizeEase: 0,
     pointFields: [],
     turbulence: [0, 120, 1],
+    obstacles: [],
+    colliders: [],
   };
 
   const shapeNode = source(byKind('output.spawnPosition')?.id, 'pos');
@@ -169,16 +223,61 @@ export function extractParams(
     if (n.kind === 'field.turbulence') {
       p.turbulence = [fk(n, 'strength', 200), fk(n, 'scale', 120), fk(n, 'speed', 1)];
     }
+    if (n.kind === 'field.obstacle' && p.obstacles.length < 4) {
+      p.obstacles.push({
+        center: vk(n, 'center', [0, 0]),
+        velocity: vk(n, 'velocity', [0, 0]),
+        radius: fk(n, 'radius', 140),
+        strength: fk(n, 'strength', 2400),
+        softness: fk(n, 'softness', 0.5),
+        swirl: fk(n, 'swirl', 0),
+        carry: fk(n, 'carry', 0),
+        relative: rel(n),
+      });
+    }
+    if (n.kind === 'output.collidePlane' && p.colliders.length < 4) {
+      p.colliders.push({
+        kind: 1,
+        a: vk(n, 'point', [0, 400]),
+        b: vk(n, 'normal', [0, -1]),
+        radius: 0,
+        restitution: fk(n, 'restitution', 0.45),
+        friction: fk(n, 'friction', 0.1),
+        relative: rel(n),
+      });
+    }
+    if (n.kind === 'output.collideRect' && p.colliders.length < 4) {
+      p.colliders.push({
+        kind: (n.structural?.mode ?? 'inside') === 'outside' ? 3 : 2,
+        a: vk(n, 'min', [-300, -300]),
+        b: vk(n, 'max', [300, 300]),
+        radius: 0,
+        restitution: fk(n, 'restitution', 0.45),
+        friction: fk(n, 'friction', 0.1),
+        relative: rel(n),
+      });
+    }
+    if (n.kind === 'output.collideCircle' && p.colliders.length < 4) {
+      p.colliders.push({
+        kind: (n.structural?.mode ?? 'outside') === 'inside' ? 5 : 4,
+        a: vk(n, 'center', [0, 0]),
+        b: vk(n, 'velocity', [0, 0]),
+        radius: fk(n, 'radius', 120),
+        restitution: fk(n, 'restitution', 0.45),
+        friction: fk(n, 'friction', 0.1),
+        relative: rel(n),
+      });
+    }
     if (n.kind === 'field.directional') {
       const strengthKnob = resolveKnob(n, 'strength', source, paramById);
       const angleKnob = resolveKnob(n, 'angle', source, paramById);
       if (strengthKnob) {
         p.windPowerKnob = strengthKnob;
-        p.windPower = knobValues[strengthKnob] ?? 0;
+        p.windPower = scalar(knobValues[strengthKnob]);
       } else p.windPower = f(n.values?.strength, 0);
       if (angleKnob) {
         p.windDirKnob = angleKnob;
-        p.windDir = knobValues[angleKnob] ?? 0;
+        p.windDir = scalar(knobValues[angleKnob]);
       } else p.windDir = f(n.values?.angle, 0);
     }
   }

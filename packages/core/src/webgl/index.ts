@@ -20,8 +20,8 @@
 import type { PylinkaProject } from '@pylinka/graph';
 import { SpawnScheduler } from '../scheduler.js';
 import { clampDt } from '../time.js';
-import { WebGL2Engine, type AtlasConfig, type MaskConfig } from './engine.js';
-import { extractParams, type EngineParams } from './params.js';
+import { featuresOf, WebGL2Engine, type AtlasConfig, type MaskConfig } from './engine.js';
+import { extractParams, type EngineParams, type KnobValues } from './params.js';
 
 /**
  * Rasterize an emission mask into a point table: one emitter-relative offset
@@ -116,8 +116,12 @@ export interface ParticlesHandle {
   setEmitter(x: number, y: number): void;
   /** Emit an extra burst next frame. */
   spawnBurst(count: number): void;
-  /** Set a named knob live (e.g. 'windPower', 'windDir'). */
-  setKnob(name: string, value: number): void;
+  /**
+   * Set a named knob live (e.g. 'windPower'). Pass a second component for a
+   * vec2 knob — that's how a cursor or a moving object drives `field.obstacle`
+   * / `output.collide*` positions: `fx.setKnob('cursor', x, y)`.
+   */
+  setKnob(name: string, x: number, y?: number): void;
   /**
    * Re-read an edited project into the running effect with no restart (the
    * uniform-driven live-edit path for editors). Returns false if a change needs
@@ -128,6 +132,13 @@ export interface ParticlesHandle {
   autoClear: boolean;
   /** Alive particle count. Synchronous GPU readback — for debug/stats, not per-frame. */
   aliveCount(): number;
+  /**
+   * True while the WebGL context is gone (backgrounded tab, GPU reset, driver
+   * hiccup). `update()` is a no-op meanwhile and resumes on its own once the
+   * browser restores the context; particle state does not survive, so the pool
+   * refills from the emitter.
+   */
+  readonly contextLost: boolean;
   destroy(): void;
 }
 
@@ -163,6 +174,10 @@ export interface ParticlesOptions {
    * centred on the emitter and moves with it. Ignored for sub-emitters.
    */
   emissionMask?: EmissionMaskOptions;
+  /** Called when the GL context is lost. Recovery is automatic; this is for UI. */
+  onContextLost?: () => void;
+  /** Called after the context came back and the effect was rebuilt. */
+  onContextRestored?: () => void;
 }
 
 export interface EmissionMaskOptions {
@@ -208,7 +223,7 @@ export interface AtlasOptions {
   row?: number;
 }
 
-export { extractParams, parseColor, type EngineParams } from './params.js';
+export { extractParams, parseColor, type EngineParams, type KnobValues } from './params.js';
 export { WebGL2Engine } from './engine.js';
 
 /** Handle → engine, so a sub-emitter can reach its parent's GPU buffers. */
@@ -232,8 +247,11 @@ export function createParticles(
   if (!system) throw new Error('Project has no systems.');
 
   // knob values seeded from ParamDef defaults (by name)
-  const knobValues: Record<string, number> = {};
-  for (const p of project.params) if (p.default.t === 'f32') knobValues[p.name] = p.default.v;
+  const knobValues: KnobValues = {};
+  for (const p of project.params) {
+    if (p.default.t === 'f32') knobValues[p.name] = p.default.v;
+    else if (p.default.t === 'vec2') knobValues[p.name] = [p.default.v[0], p.default.v[1]];
+  }
 
   const params: EngineParams = extractParams(system, project.params, knobValues);
   const parentEngine = opts.subParent ? engineOf.get(opts.subParent) : undefined;
@@ -242,6 +260,14 @@ export function createParticles(
     gl, params, opts.sizeScale ?? 1, resolveAtlas(opts.atlas),
     parentEngine ? { parent: parentEngine } : undefined,
     buildMaskTable(opts.emissionMask),
+    {
+      ...(opts.onContextLost ? { onContextLost: opts.onContextLost } : {}),
+      onContextRestored: () => {
+        // the pool came back empty, so the spawn schedule restarts with it
+        scheduler = new SpawnScheduler(curSystem.emitter, params.capacity);
+        opts.onContextRestored?.();
+      },
+    },
   );
   let scheduler = new SpawnScheduler(system.emitter, params.capacity);
   // last-applied graph, so setKnob can re-interpret every knob-bound port live
@@ -288,8 +314,8 @@ export function createParticles(
     spawnBurst(count: number) {
       scheduler.spawnBurst(count);
     },
-    setKnob(name: string, value: number) {
-      knobValues[name] = value;
+    setKnob(name: string, x: number, y?: number) {
+      knobValues[name] = y === undefined ? x : [x, y];
       Object.assign(params, extractParams(curSystem, curParams, knobValues));
       recomputeWind();
     },
@@ -299,9 +325,18 @@ export function createParticles(
         next.systems.find((s) => s.enabled) ??
         next.systems[0];
       if (!sys) return false;
-      for (const pd of next.params) if (pd.default.t === 'f32' && !(pd.name in knobValues)) knobValues[pd.name] = pd.default.v;
+      for (const pd of next.params) {
+        if (pd.name in knobValues) continue;
+        if (pd.default.t === 'f32') knobValues[pd.name] = pd.default.v;
+        else if (pd.default.t === 'vec2') knobValues[pd.name] = [pd.default.v[0], pd.default.v[1]];
+      }
       const np = extractParams(sys, next.params, knobValues);
       if (np.capacity !== params.capacity) return false; // needs a full re-create
+      // adding/removing the first obstacle or collider changes which shader
+      // blocks are linked, so the program has to be rebuilt
+      const was = featuresOf(params);
+      const now = featuresOf(np);
+      if (was.obstacles !== now.obstacles || was.colliders !== now.colliders) return false;
       curSystem = sys;
       curParams = next.params;
       Object.assign(params, np);
@@ -311,6 +346,9 @@ export function createParticles(
     },
     aliveCount() {
       return engine.aliveCount();
+    },
+    get contextLost() {
+      return engine.contextLost;
     },
     destroy() {
       engineOf.delete(handle);

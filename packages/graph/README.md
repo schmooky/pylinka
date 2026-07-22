@@ -1,26 +1,26 @@
 # @pylinka/graph
 
-Shared kernel of [Pylinka](https://pylinka.schmooky.dev) — a GPU-driven, node-based particle
+The shared kernel of [Pylinka](https://pylinka.schmooky.dev), a GPU-driven node-based particle
 system for PixiJS.
 
-This package holds everything the editor, compiler, and runtime agree on, with **zero runtime
-dependencies**:
+Everything the editor, the compiler and the runtime have to agree on lives here, with no runtime
+dependencies. That means the graph model itself (nodes, edges, systems, knobs), the node catalog
+with its typed ports and defaults, the validator that checks a graph before anyone tries to compile
+it, and the content hashing and uniform slot assignment that the compiler and runtime both depend
+on.
 
-- **Graph types** — nodes, edges, systems, knobs.
-- **Node catalog** — the full set of node schemas (emitters, forces, fields, masks, splines,
-  render) with typed sockets and defaults.
-- **Validation** — structural + type checking of a graph before compile.
-- **Hashing & slot assignment** — stable content hashes and GPU slot layout shared by the
-  compiler and runtime.
+The catalog is the interesting part. It covers spawn shapes, generators, math, force fields
+including the `obstacle` body, and the output sinks, which is where the `collide` family for
+floors, walls, boxes and discs sits.
 
 ```bash
 npm i @pylinka/graph
 ```
 
-Most users don't consume this directly — it arrives as a dependency of
+You rarely install this on purpose. It arrives as a dependency of
 [`@pylinka/compiler`](https://www.npmjs.com/package/@pylinka/compiler) and
 [`@pylinka/core`](https://www.npmjs.com/package/@pylinka/core).
 
-Docs, node editor, and a 60+ effect recipe gallery: **https://pylinka.schmooky.dev**
+Docs, the node editor and 69 recorded effects: **https://pylinka.schmooky.dev**
 
 MIT © pylinka contributors

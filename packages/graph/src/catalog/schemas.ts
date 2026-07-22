@@ -5,8 +5,10 @@
  * spec ambiguities resolved during authoring (param.ref output type, math.*
  * polymorphism, dynamic structural references).
  *
- * M2-only nodes (curl, vortex, curlField, drawnVectorField, drawnArea,
- * math.expression, tex.ordered/animated) are intentionally absent.
+ * M2-only nodes (curl, curlField, drawnVectorField, drawnArea, math.expression,
+ * tex.ordered/animated) are intentionally absent. field.vortex was promoted to
+ * v1 on owner request; field.turbulence, field.obstacle and the output.collide*
+ * family were added after v1 froze (see docs/QUESTIONS.md).
  */
 import type { Literal, NodeCodegen, NodeSchema, PortSpec } from '../types.js';
 
@@ -36,6 +38,14 @@ function schema(s: Omit<NodeSchema, 'codegen' | 'structural'> & Partial<Pick<Nod
     ...s,
   };
 }
+
+/**
+ * Frame of reference for the position-like ports of the interaction nodes.
+ * 'world' = absolute px (the default, and what a cursor knob wants).
+ * 'emitter' = offsets from the emitter, so geometry follows a moving emitter
+ * and an effect stays portable between canvas sizes.
+ */
+const SPACE_OPTIONS = ['world', 'emitter'];
 
 // The GSAP-named ease set (§13.9), shared by every structural `ease` param.
 const EASE_OPTIONS = [
@@ -195,6 +205,29 @@ const fields: NodeSchema[] = [
   schema({ kind: 'field.vortex', label: 'Vortex', namespace: 'field', evalTime: 'update', impact: 'medium', inputs: [inPort('center', 'vec2', v2(0, 0)), inPort('strength', 'f32', f(300)), inPort('pull', 'f32', f(0)), inPort('radius', 'f32', f(240))], outputs: [outPort('force', 'vec2')] }),
   // curl of animated value noise (divergence-free swirls); scale = noise cell px
   schema({ kind: 'field.turbulence', label: 'Turbulence', namespace: 'field', evalTime: 'update', impact: 'medium', inputs: [inPort('strength', 'f32', f(200)), inPort('scale', 'f32', f(120)), inPort('speed', 'f32', f(1))], outputs: [outPort('force', 'vec2')] }),
+  // A moving body that shoves the field aside. `center`/`velocity` are ABSOLUTE
+  // world (like field.radial, unlike field.vortex) so they can be bound to live
+  // vec2 knobs — a cursor, or an object flying through the field. `carry` drags
+  // particles toward the body's own velocity, which is what makes a bow wave and
+  // a wake read as motion rather than as a static push.
+  schema({
+    kind: 'field.obstacle',
+    label: 'Obstacle (push)',
+    namespace: 'field',
+    evalTime: 'update',
+    impact: 'low',
+    inputs: [
+      inPort('center', 'vec2', v2(0, 0)),
+      inPort('velocity', 'vec2', v2(0, 0)),
+      inPort('radius', 'f32', f(140)),
+      inPort('strength', 'f32', f(2400)),
+      inPort('softness', 'f32', f(0.5)),
+      inPort('swirl', 'f32', f(0)),
+      inPort('carry', 'f32', f(0)),
+    ],
+    outputs: [outPort('force', 'vec2')],
+    structural: [{ key: 'space', options: SPACE_OPTIONS, default: 'world' }],
+  }),
 ];
 
 // ===========================================================================
@@ -229,6 +262,66 @@ const outputs: NodeSchema[] = [
   schema({ kind: 'output.killIf', label: 'Kill if', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('cond', 'bool', boolean(false))], outputs: [] }),
   schema({ kind: 'output.killIfOutOfRect', label: 'Kill if out of rect', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('min', 'vec2', v2(0, 0)), inPort('max', 'vec2', v2(100, 100))], outputs: [] }),
   schema({ kind: 'output.reflectInRect', label: 'Reflect in rect', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('min', 'vec2', v2(0, 0)), inPort('max', 'vec2', v2(100, 100))], outputs: [] }),
+  // ---- solid geometry (post-integration; see §13.6 "collide" lane) ----------
+  // These resolve a penetration properly — push the particle back onto the
+  // surface, THEN reflect the normal component. `output.reflectInRect` only
+  // flipped velocity, so a particle that overshot far in one step could flip
+  // every frame and buzz along the boundary. restitution = bounciness (0 dead,
+  // 1 elastic); friction = fraction of tangential speed shed per hit.
+  schema({
+    kind: 'output.collidePlane',
+    label: 'Collide: plane (floor/wall)',
+    namespace: 'output',
+    evalTime: 'update',
+    impact: 'low',
+    inputs: [
+      inPort('point', 'vec2', v2(0, 400)),
+      inPort('normal', 'vec2', v2(0, -1)),
+      inPort('restitution', 'f32', f(0.45)),
+      inPort('friction', 'f32', f(0.1)),
+    ],
+    outputs: [],
+    structural: [{ key: 'space', options: SPACE_OPTIONS, default: 'world' }],
+  }),
+  schema({
+    kind: 'output.collideRect',
+    label: 'Collide: rect',
+    namespace: 'output',
+    evalTime: 'update',
+    impact: 'low',
+    inputs: [
+      inPort('min', 'vec2', v2(-300, -300)),
+      inPort('max', 'vec2', v2(300, 300)),
+      inPort('restitution', 'f32', f(0.45)),
+      inPort('friction', 'f32', f(0.1)),
+    ],
+    outputs: [],
+    // 'inside' keeps particles in the box; 'outside' makes the box a solid crate
+    structural: [
+      { key: 'mode', options: ['inside', 'outside'], default: 'inside' },
+      { key: 'space', options: SPACE_OPTIONS, default: 'world' },
+    ],
+  }),
+  schema({
+    kind: 'output.collideCircle',
+    label: 'Collide: circle',
+    namespace: 'output',
+    evalTime: 'update',
+    impact: 'low',
+    inputs: [
+      inPort('center', 'vec2', v2(0, 0)),
+      inPort('radius', 'f32', f(120)),
+      inPort('restitution', 'f32', f(0.45)),
+      inPort('friction', 'f32', f(0.1)),
+      // the disc's own velocity: a moving wall kicks what it hits
+      inPort('velocity', 'vec2', v2(0, 0)),
+    ],
+    outputs: [],
+    structural: [
+      { key: 'mode', options: ['outside', 'inside'], default: 'outside' },
+      { key: 'space', options: SPACE_OPTIONS, default: 'world' },
+    ],
+  }),
 ];
 
 // ===========================================================================

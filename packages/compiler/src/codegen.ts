@@ -325,6 +325,33 @@ export const NODE_CODEGEN: Record<string, NodeCodegen> = {
     };
   },
 
+  // obstacle: a body moving through the field. Radial push out of a disc with a
+  // soft falloff, an optional tangential swirl (that's what leaves a wake rather
+  // than a clean hole), and `carry` — an acceleration toward the body's OWN
+  // velocity, so particles get dragged along in front of it and released behind.
+  // center/velocity are absolute world (bind them to vec2 knobs for a cursor).
+  'field.obstacle': (ctx, i, s) => {
+    const d = ctx.temp('vec2');
+    const len = ctx.temp('f32');
+    const dir = ctx.temp('vec2');
+    const t = ctx.temp('f32');
+    const w = ctx.temp('f32');
+    const centre = s.space === 'emitter' ? `(U.emitterPos + ${i.center})` : i.center;
+    ctx.line(`let ${d} = p.pos - ${centre};`);
+    ctx.line(`let ${len} = max(length(${d}), 1e-3);`);
+    ctx.line(`let ${dir} = ${d} / ${len};`);
+    ctx.line(`let ${t} = clamp(1.0 - ${len} / max(${i.radius}, 1e-3), 0.0, 1.0);`);
+    // softness 0 → a tight shell right at the surface, 1 → a broad soft cushion
+    ctx.line(`let ${w} = pow(${t}, mix(3.0, 0.5, clamp(${i.softness}, 0.0, 1.0)));`);
+    return {
+      outputs: {
+        force:
+          `(${dir} * ${i.strength} + vec2f(-${dir}.y, ${dir}.x) * ${i.swirl}` +
+          ` + (${i.velocity} - p.vel) * ${i.carry}) * ${w}`,
+      },
+    };
+  },
+
   // shape.*  (output named 'pos')
   'shape.point': (_c, i) => ({ outputs: { pos: i.offset! } }),
   'shape.circle': (ctx, i) => {

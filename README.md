@@ -1,53 +1,54 @@
 # Pylinka
 
-> A GPU-driven, node-based particle system for [PixiJS](https://pixijs.com) — a Neutrino-style
-> dataflow editor whose graph compiles to GPU programs, with everything live-tweakable, a recipe
-> gallery, and a versionable project format. **WebGPU first, WebGL2 fallback, built for slot games
-> on real phones.**
+A node-based particle system for [PixiJS](https://pixijs.com) that runs on the GPU. You wire a
+graph, it compiles to WGSL or GLSL, and particle state stays in GPU memory for as long as the
+effect plays. It was built for slot games running on phones, so the WebGL2 path gets the same
+care as the WebGPU one.
 
 **License:** MIT · **Site:** `pylinka.schmooky.dev`
 
-The complete, normative specification lives in [`REQUIREMENTS.md`](./REQUIREMENTS.md) — that file is
-the single source of truth. This README is only a pointer.
+[`REQUIREMENTS.md`](./REQUIREMENTS.md) is the normative spec. Where it disagrees with this file,
+it wins.
 
 ## Install
 
 ```bash
-npm i @pylinka/core        # runtime — createParticles(canvas, project)
-npm i @pylinka/format      # load/save/migrate editor-exported projects
+npm i @pylinka/core        # runtime
+npm i @pylinka/format      # load, save and migrate editor projects
 ```
 
 Design an effect in the [editor](https://pylinka.schmooky.dev/editor), export the project JSON,
-and play it back with `createParticles` — see [`packages/core`](./packages/core/README.md).
+play it back with `createParticles`. The [core README](./packages/core/README.md) has the shortest
+version of that loop.
 
 ## Packages
 
-| Package | Description | Status |
-| --- | --- | --- |
-| [`@pylinka/graph`](./packages/graph) | Shared kernel: graph types, node catalog, validation, hashing, slot assignment. Zero deps. | ✅ shipped |
-| [`@pylinka/compiler`](./packages/compiler) | SystemBundle → IR → GPU program codegen (WGSL; GLSL ES 3.00 is M2). Zero deps. Golden byte-locked. | ✅ shipped |
-| [`@pylinka/format`](./packages/format) | Serialize / parse / migrate the `pylinka` project format. | ✅ shipped |
-| [`@pylinka/core`](./packages/core) | Runtime. **Compiled backends** — `/gpu` (`createCompiledParticles`, auto), `/webgpu` (compute kernels), `/webgl2` (fused TF step shader); **pixi-v8 integration** — `/pixi` (`createPylinka`, render pipe, device/context sharing); `/webgl` interpreted engine (masks, atlas sequences, sub-emitters); CPU scheduler/knobs/timing. Peer `pixi.js@^8` (optional). | ✅ WebGPU compute + compiled WebGL2 + pixi pipe all run |
-| [`apps/site`](./apps/site) | Docs + **`/editor`** (React Flow node editor with live preview) + **`/recipes`** (44-effect webm gallery). | ✅ shipped |
-| [`tools/atlas-extract`](./tools/atlas-extract) · [`tools/gen-previews`](./tools/gen-previews) | Extract sprite sequences from a Spine atlas · record recipe webm/poster previews. | ✅ shipped |
+| Package | What it does |
+| --- | --- |
+| [`@pylinka/graph`](./packages/graph) | The shared kernel every other package speaks: graph types, the node catalog, validation, hashing, uniform slot assignment. No dependencies. |
+| [`@pylinka/compiler`](./packages/compiler) | Turns a system into GPU code. WGSL for WebGPU, GLSL ES 3.00 for the WebGL2 transform-feedback path. Both are byte-locked against golden files. |
+| [`@pylinka/format`](./packages/format) | Reads, writes and migrates the `pylinka` project format. |
+| [`@pylinka/core`](./packages/core) | The runtime. `/pixi` mounts systems inside a pixi v8 scene, `/gpu` drives a bare canvas on whichever compiled backend is available, `/webgl` is the interpreted engine that carries emission masks, animated atlases and sub-emitters. `pixi.js@^8` is an optional peer. |
+| [`apps/site`](./apps/site) | Docs, the node editor at `/editor`, 69 recorded effects at `/recipes`, and an interaction sandbox at `/interactive`. |
+| [`tools/atlas-extract`](./tools/atlas-extract) · [`tools/gen-previews`](./tools/gen-previews) | Pull sprite sequences out of a Spine atlas · record the gallery previews. |
 
 ## Development
 
 ```bash
 pnpm install
-pnpm typecheck   # tsc across all packages
-pnpm lint        # eslint 9 flat config
-pnpm test        # vitest (unit + golden + allocation)
+pnpm typecheck
+pnpm lint
+pnpm test
 ```
 
-Try it — one dev server hosts everything:
+One dev server hosts everything:
 
 ```bash
 pnpm --filter @pylinka/site dev
-# → localhost:5212         docs
-#   localhost:5212/editor   node editor + live preview
-#   localhost:5212/recipes  effect gallery
+# localhost:5212              docs
+# localhost:5212/editor       node editor with live preview
+# localhost:5212/recipes      effect gallery
+# localhost:5212/interactive  cursor and collision sandbox
 ```
 
-Requires Node ≥ 22 and pnpm ≥ 9. See `REQUIREMENTS.md §4.4` for the full toolchain and `§18` for the
-execution plan.
+Needs Node 22 or newer and pnpm 9 or newer. `REQUIREMENTS.md` §4.4 lists the full toolchain.

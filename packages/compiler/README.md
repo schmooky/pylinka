@@ -1,28 +1,30 @@
 # @pylinka/compiler
 
-Compiler of [Pylinka](https://pylinka.schmooky.dev) — a GPU-driven, node-based particle system
+The compiler of [Pylinka](https://pylinka.schmooky.dev), a GPU-driven node-based particle system
 for PixiJS.
 
-Turns a validated node graph (`SystemBundle` from
-[`@pylinka/graph`](https://www.npmjs.com/package/@pylinka/graph)) into a backend-neutral IR and
-then into GPU programs. **Zero runtime dependencies**, and the codegen output is golden
-byte-locked in tests — the same graph always produces the same shader bytes.
+It takes a validated node graph, a `SystemBundle` from
+[`@pylinka/graph`](https://www.npmjs.com/package/@pylinka/graph), lowers it to a backend-neutral
+IR, and emits a GPU program. No runtime dependencies. The output is locked against golden files in
+the test suite, so the same graph always produces the same shader bytes.
 
-- **WGSL** target (`compile(bundle, catalog, 'webgpu')`) — the §13 compute kernels the
-  `@pylinka/core/webgpu` backend dispatches.
-- **GLSL ES 3.00** target (`compile(bundle, catalog, 'webgl2')`) — a fused transform-feedback
-  step shader (spawn + update in one pass, cursor-window scheme) run by `@pylinka/core/webgl2`;
-  the interleaved state layout ships as `WEBGL2_LAYOUT`.
-- Knobs and inline values compile to **live uniforms** (one vec4 slot table) — tweaking a value
-  at runtime never triggers a recompile; only structural edits do.
+There are two targets. `compile(bundle, catalog, 'webgpu')` emits the WGSL compute kernels that
+`@pylinka/core/webgpu` dispatches. `compile(bundle, catalog, 'webgl2')` emits one fused
+transform-feedback step shader, spawn and update in a single pass using the cursor-window scheme,
+run by `@pylinka/core/webgl2`. Its interleaved state layout ships alongside as `WEBGL2_LAYOUT`.
+
+Knobs and inline values become live uniforms in a single vec4 slot table, so changing a value at
+runtime never triggers a recompile. Only structural edits do, and those reset the pool. The
+generated code is built from your graph, which has a pleasant consequence: a graph without a
+collider contains no collision instructions at all.
 
 ```bash
 npm i @pylinka/compiler
 ```
 
-Most users don't call the compiler directly — `@pylinka/core`'s `createCompiledParticles()` /
-`createPylinka()` compile projects for you.
+You usually never call this yourself. `createCompiledParticles()` and `createPylinka()` in
+`@pylinka/core` compile projects for you.
 
-Docs, node editor, and a 60+ effect recipe gallery: **https://pylinka.schmooky.dev**
+Docs, the node editor and 69 recorded effects: **https://pylinka.schmooky.dev**
 
 MIT © pylinka contributors

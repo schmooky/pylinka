@@ -1,6 +1,6 @@
 {
   "name": "@pylinka/core",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "description": "Pylinka runtime: WebGPU compute + compiled WebGL2 transform-feedback backends running the graph as generated GPU code, an interpreted WebGL2 engine, CPU scheduler, knob bus with live-uniform (zero-recompile) updates, and a pixi.js v8 render pipe.",
   "license": "MIT",
   "repository": {

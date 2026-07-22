@@ -1,5 +1,45 @@
 # @pylinka/core
 
+## 1.0.0
+
+### Major Changes
+
+- Particles can react to things now.
+
+  `field.obstacle` is a body that moves through the field. It shoves particles out of a disc, adds a
+  swirl around the edge, and drags them along with it, so something crossing a dust cloud gets a bow
+  wave in front and a curling wake behind. Bind its centre and velocity to knobs and a cursor or a
+  flying sprite drives it every frame.
+
+  `output.collidePlane`, `output.collideRect` and `output.collideCircle` give you floors, walls,
+  boxes and discs. Particles land on them, bounce with `restitution`, slide with `friction`, and stop
+  passing through. The rect works as a container or as a solid crate, and the circle can be handed a
+  velocity so a moving wall kicks what it hits.
+
+  All four read their geometry either in world coordinates or relative to the emitter. Emitter space
+  is what you want for a floor that follows a character, or for an effect that has to survive a
+  change of canvas size.
+
+  `setKnob` and `params.set` take a second component now. That is how a pointer position reaches a
+  vec2 port without touching the graph.
+
+  An effect that uses none of this compiles to exactly the same GPU code it did before.
+
+  The gallery has a `physics` group with six new effects, and there is a sandbox at `/interactive`
+  for pushing a field around with the cursor.
+
+  Context loss no longer kills an effect. On WebGL2 both backends pause while the GPU context is
+  gone and rebuild themselves when the browser gives it back, carrying your knob values and emitter
+  position across. `contextLost` tells you where you stand, and `onContextLost` and
+  `onContextRestored` fire if you want to show something on screen. WebGPU device loss is detected
+  and reported, and replacing the device stays with whoever owns it.
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @pylinka/graph@1.0.0
+  - @pylinka/compiler@1.0.0
+
 ## 0.5.0
 
 ### Minor Changes

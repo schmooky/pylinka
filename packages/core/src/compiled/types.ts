@@ -42,6 +42,13 @@ export interface CompiledParticlesHandle {
   aliveCount(): number;
   /** Async-refreshed stats (§11.5) — reading never triggers a readback. */
   readonly stats: CompiledStats;
+  /**
+   * True while the GPU context or device is gone. `update()` is a no-op
+   * meanwhile. On WebGL2 the effect rebuilds itself once the browser restores
+   * the context, minus the particles that were alive at the time. On WebGPU the
+   * device belongs to whoever created it, so recovery is the host's call.
+   */
+  readonly contextLost: boolean;
   readonly backendName: 'webgpu' | 'webgl2';
   destroy(): void;
 }
@@ -70,4 +77,8 @@ export interface CompiledParticlesOptions {
   subParent?: CompiledParticlesHandle;
   /** Called after any pipeline rebuild with the time it took. */
   onRecompile?: (info: { ms: number; reason: 'structural' | 'blend' }) => void;
+  /** Called when the GPU context or device is lost. */
+  onContextLost?: () => void;
+  /** Called after a lost context came back and the effect was rebuilt (WebGL2). */
+  onContextRestored?: () => void;
 }

@@ -3,13 +3,13 @@ import DocsLayout from '../layouts/DocsLayout.astro';
 import { V1_SCHEMAS, CATALOG_VERSION } from '@pylinka/graph';
 
 const blurbs: Record<string, string> = {
-  input: 'Read particle and emitter state — position, velocity, age, life, time, spawn index.',
+  input: 'Read particle and emitter state: position, velocity, age, life, time, spawn index.',
   param: 'Read a project knob by reference.',
-  gen: 'Generators: stable/per-frame randomness and value, colour, and scale curves over life.',
+  gen: 'Stable and per-frame randomness, plus value, colour and scale curves over life.',
   math: 'Arithmetic and vector helpers.',
-  field: "Analytic force fields that accumulate into a particle's motion.",
+  field: "Force fields that accumulate into a particle's motion, including the obstacle body.",
   shape: 'Spawn shapes, emitter-relative, feeding output.spawnPosition.',
-  output: 'Sinks — where results are written. Every system needs spawnPosition and initLife.',
+  output: 'Where results are written, including the collide family. Every system needs spawnPosition and initLife.',
   tex: 'Texture selection for rendering.',
 };
 const order = ['input', 'param', 'gen', 'math', 'field', 'shape', 'output', 'tex'] as const;
@@ -28,7 +28,7 @@ const groups = order
   }));
 
 const sig = (ports: readonly { id: string; type: string }[]) =>
-  ports.map((p) => `${p.id}:${p.type}`).join(', ') || '—';
+  ports.map((p) => `${p.id}:${p.type}`).join(', ') || 'none';
 ---
 
 <DocsLayout
@@ -38,8 +38,9 @@ const sig = (ports: readonly { id: string; type: string }[]) =>
 >
   <h1>Nodes</h1>
   <p class="!text-base !text-muted-foreground">
-    The v{CATALOG_VERSION} node catalog — {V1_SCHEMAS.length} kinds, grouped by namespace. Rendered
-    directly from <code>@pylinka/graph</code>.
+    The v{CATALOG_VERSION} catalog holds {V1_SCHEMAS.length} node kinds, grouped by namespace.
+    This page is rendered straight from <code>@pylinka/graph</code>, so it cannot drift from the
+    code.
   </p>
 
   {

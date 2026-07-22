@@ -1,6 +1,6 @@
 {
   "name": "@pylinka/format",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "description": "Pylinka project format: parse, serialize (inline↔blob assets), and migrate documents.",
   "license": "MIT",
   "repository": {

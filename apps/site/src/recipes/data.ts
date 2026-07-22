@@ -6,7 +6,7 @@ import type { Literal, Node, PylinkaProject, System } from '@pylinka/graph';
 import type { EditorProject, EmitterPathData } from '../editor/types';
 import { MASK_BOLT, MASK_HEART, MASK_RING, MASK_STAR, MASK_WIN } from '../editor/maskShapes';
 
-export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'swirl' | 'drawn' | 'combo';
+export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'swirl' | 'drawn' | 'physics' | 'combo';
 
 export interface RecipeAtlas {
   url: string;
@@ -74,6 +74,31 @@ interface FxOpts {
   scaleTo?: number;
   scaleEase?: string;
   atlas?: RecipeAtlas;
+  /**
+   * Solid geometry + moving bodies. All of these are authored in EMITTER space
+   * (structural `space: 'emitter'`), so a recipe stays correct at any card size
+   * — same reason velocities and radii are plain px here.
+   */
+  /** floor plane `y` px below the emitter */
+  floor?: { y: number; bounce?: number; friction?: number };
+  /** box the particles are kept inside, centred on the emitter */
+  box?: { w: number; h: number; bounce?: number; friction?: number };
+  /** solid crate they bounce off, offset from the emitter */
+  crate?: { x: number; y: number; w: number; h: number; bounce?: number; friction?: number };
+  /** solid disc they bounce off, offset from the emitter */
+  disc?: { x: number; y: number; r: number; bounce?: number; friction?: number };
+  /** field.obstacle: a body that shoves the field aside (see the interaction lab) */
+  obstacle?: {
+    x?: number;
+    y?: number;
+    radius: number;
+    strength: number;
+    softness?: number;
+    swirl?: number;
+    carry?: number;
+    /** the body's own velocity — drives `carry`, i.e. the bow wave */
+    vel?: Vec2;
+  };
   /** drawn emission area: particles spawn only inside this mask (data-URL image) */
   mask?: { src: string; width: number };
   /** emitter trajectory spline (normalized 0..1 canvas points) */
@@ -126,6 +151,25 @@ function buildSystem(o: SysOpts, id: string, idp: string, name: string, enabled 
     nodes.push({ id: nid(12), kind: 'output.addForce' });
     link(11, 'force', 12, 'force');
   }
+  if (o.obstacle) {
+    const ob = o.obstacle;
+    nodes.push({
+      id: nid(13),
+      kind: 'field.obstacle',
+      structural: { space: 'emitter' },
+      values: {
+        center: v2([ob.x ?? 0, ob.y ?? 0]),
+        velocity: v2(ob.vel ?? [0, 0]),
+        radius: f(ob.radius),
+        strength: f(ob.strength),
+        softness: f(ob.softness ?? 0.6),
+        swirl: f(ob.swirl ?? 0),
+        carry: f(ob.carry ?? 0),
+      },
+    });
+    nodes.push({ id: nid(14), kind: 'output.addForce' });
+    link(13, 'force', 14, 'force');
+  }
   if (o.vortex) {
     nodes.push({ id: nid(17), kind: 'field.vortex', values: { center: v2([0, 0]), strength: f(o.vortex[0]), pull: f(o.vortex[1]), radius: f(o.vortex[2]) } });
     nodes.push({ id: nid(18), kind: 'output.addForce' });
@@ -146,6 +190,37 @@ function buildSystem(o: SysOpts, id: string, idp: string, name: string, enabled 
   nodes.push({ id: nid(23), kind: 'gen.scaleOverLife', structural: { ease: o.scaleEase ?? 'linear' }, values: { from: f(o.scaleFrom ?? 1), to: f(o.scaleTo ?? 0) } });
   nodes.push({ id: nid(24), kind: 'output.writeScale' });
   link(23, 'out', 24, 'scale');
+
+  // solid geometry — pure output sinks, so they get ids after the look nodes
+  let cid = 25;
+  const solid = (kind: string, structural: Record<string, string>, values: Node['values']) =>
+    nodes.push({ id: nid(cid++), kind, structural: { space: 'emitter', ...structural }, values });
+  if (o.floor) {
+    solid('output.collidePlane', {}, {
+      point: v2([0, o.floor.y]), normal: v2([0, -1]),
+      restitution: f(o.floor.bounce ?? 0.45), friction: f(o.floor.friction ?? 0.12),
+    });
+  }
+  if (o.box) {
+    const [hw, hh] = [o.box.w / 2, o.box.h / 2];
+    solid('output.collideRect', { mode: 'inside' }, {
+      min: v2([-hw, -hh]), max: v2([hw, hh]),
+      restitution: f(o.box.bounce ?? 0.5), friction: f(o.box.friction ?? 0.08),
+    });
+  }
+  if (o.crate) {
+    solid('output.collideRect', { mode: 'outside' }, {
+      min: v2([o.crate.x, o.crate.y]), max: v2([o.crate.x + o.crate.w, o.crate.y + o.crate.h]),
+      restitution: f(o.crate.bounce ?? 0.4), friction: f(o.crate.friction ?? 0.25),
+    });
+  }
+  if (o.disc) {
+    solid('output.collideCircle', { mode: 'outside' }, {
+      center: v2([o.disc.x, o.disc.y]), radius: f(o.disc.r),
+      restitution: f(o.disc.bounce ?? 0.6), friction: f(o.disc.friction ?? 0.1),
+      velocity: v2([0, 0]),
+    });
+  }
 
   const emitter: System['emitter'] =
     o.mode === 'burst'
@@ -410,4 +485,56 @@ export const RECIPES: Recipe[] = [
     lifeMin: 0.6, lifeMax: 1.2, gravity: [0, 320],
     path: { points: [[0.16, 0.3], [0.5, 0.72], [0.84, 0.3]], duration: 2.6, mode: 'pingpong', closed: false },
     colorFrom: '#fcd34dff', colorTo: '#dc262600', colorEase: 'power2.out', scaleFrom: 1.1, scaleTo: 0 }),
+
+  // ── physics — solid geometry + bodies moving through the field ────────
+  fx({ slug: 'fountain-basin', title: 'Fountain Basin', group: 'physics',
+    oneLiner: 'Sparks arc up and bounce off the basin floor below.',
+    tags: ['collision', 'floor', 'gravity'],
+    capacity: 4000, rate: 460, shape: 'point', velMin: [-165, -430], velMax: [165, -570],
+    lifeMin: 2.6, lifeMax: 3.6, gravity: [0, 900], drag: 0.04,
+    floor: { y: 170, bounce: 0.46, friction: 0.16 },
+    colorFrom: '#bfefffff', colorTo: '#2f7fff00', colorEase: 'power2.out', scaleFrom: 1.1, scaleTo: 0.5 }),
+
+  fx({ slug: 'snow-globe', title: 'Snow Globe', group: 'physics',
+    oneLiner: 'Motes drift inside a sealed box, tapping off the walls.',
+    tags: ['collision', 'box', 'ambient'],
+    capacity: 6000, rate: 700, shape: 'rect', size: [520, 380],
+    velMin: [-38, -30], velMax: [38, 40], lifeMin: 3.4, lifeMax: 5.2,
+    gravity: [0, 46], drag: 0.28, turb: [70, 150, 0.5],
+    box: { w: 560, h: 420, bounce: 0.7, friction: 0.04 },
+    colorFrom: '#e8f4ffcc', colorTo: '#9ec9ff00', colorEase: 'sine.inOut', scaleFrom: 0.85, scaleTo: 0.5 }),
+
+  fx({ slug: 'hail-on-crate', title: 'Hail on Crate', group: 'physics',
+    oneLiner: 'Hail splits around a solid crate and settles on the floor.',
+    tags: ['collision', 'crate', 'rain'],
+    capacity: 5000, rate: 620, shape: 'rect', size: [640, 430],
+    velMin: [-25, 40], velMax: [25, 150], lifeMin: 1.9, lifeMax: 2.8, gravity: [0, 1000],
+    crate: { x: -110, y: 40, w: 220, h: 150, bounce: 0.45, friction: 0.3 },
+    floor: { y: 210, bounce: 0.32, friction: 0.3 },
+    colorFrom: '#dff1ffff', colorTo: '#7fb4e800', scaleFrom: 0.8, scaleTo: 0.55 }),
+
+  fx({ slug: 'spark-anvil', title: 'Spark Anvil', group: 'physics',
+    oneLiner: 'A burst rains onto a steel ball and sprays off it.',
+    tags: ['collision', 'circle', 'burst'],
+    capacity: 4000, rate: 900, shape: 'rect', size: [300, 8],
+    velMin: [-45, 40], velMax: [45, 130], lifeMin: 1.1, lifeMax: 1.7, gravity: [0, 1200],
+    disc: { x: 0, y: 130, r: 105, bounce: 0.52, friction: 0.08 },
+    floor: { y: 235, bounce: 0.3, friction: 0.34 },
+    colorFrom: '#fff0c2ff', colorTo: '#ff5a1f00', colorEase: 'power2.out', scaleFrom: 1, scaleTo: 0.4 }),
+
+  fx({ slug: 'stream-past-stone', title: 'Stream Past Stone', group: 'physics',
+    oneLiner: 'A drifting stream parts around an invisible body and curls behind it.',
+    tags: ['obstacle', 'wake', 'flow'],
+    capacity: 9000, rate: 2600, shape: 'rect', size: [960, 520],
+    velMin: [235, -12], velMax: [315, 12], lifeMin: 1.6, lifeMax: 2.4, drag: 0.1,
+    obstacle: { x: -40, y: 0, radius: 200, strength: 2600, softness: 0.55, swirl: 2400, carry: 0.35 },
+    colorFrom: '#a8e8ffcc', colorTo: '#2b6cff00', colorEase: 'sine.out', scaleFrom: 0.8, scaleTo: 0.45 }),
+
+  fx({ slug: 'magnet-void', title: 'Magnet Void', group: 'physics',
+    oneLiner: 'Dust orbits a hole it can never fall into.',
+    tags: ['obstacle', 'swirl', 'void'],
+    capacity: 9000, rate: 1500, shape: 'rect', size: [620, 500],
+    velMin: [-16, -16], velMax: [16, 16], lifeMin: 3.2, lifeMax: 4.6, drag: 0.22,
+    obstacle: { radius: 215, strength: 600, softness: 0.9, swirl: 3600, carry: 0 },
+    colorFrom: '#ffd8f4cc', colorTo: '#7a3cff00', colorEase: 'sine.inOut', scaleFrom: 0.75, scaleTo: 0.4 }),
 ];

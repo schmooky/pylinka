@@ -4,7 +4,7 @@ import DocsLayout from '../layouts/DocsLayout.astro';
 
 <DocsLayout
   title="Getting started — Pylinka GPU particles for PixiJS"
-  description="Install @pylinka/core and render your first WebGL2 particle effect on a canvas — no WebGPU required. Follow the emitter, tweak knobs live, spawn bursts."
+  description="Install @pylinka/core and render your first WebGL2 particle effect on a canvas, no WebGPU required. Follow the emitter, tweak knobs live, spawn bursts."
   active="getting-started"
 >
   <h1>Getting started</h1>
@@ -15,12 +15,12 @@ import DocsLayout from '../layouts/DocsLayout.astro';
   <h2>Install</h2>
   <pre><code>pnpm add @pylinka/core</code></pre>
 
-  <h2>Run it on a canvas (WebGL2)</h2>
+  <h2>Run it on a canvas</h2>
   <p>
-    The quickest path — works in any WebGL2 browser, no pixi and no WebGPU
-    required. Give it a canvas and a project; the simulation runs on the GPU via
-    transform feedback. Browse ready-made effects in the <a href="/recipes">recipes gallery</a>,
-    or tweak one live in the <a href="/editor">editor</a>.
+    The shortest path needs a canvas and a project, no pixi and no WebGPU. The simulation runs on
+    the GPU through transform feedback, which every WebGL2 browser has. Grab a ready-made effect
+    from the <a href="/recipes">recipes gallery</a> or bend one into shape in the
+    <a href="/editor">editor</a>.
   </p>
   <pre><code>import &#123; createParticles &#125; from '@pylinka/core/webgl';
 import project from './sparks.pylinka.json';
@@ -29,31 +29,28 @@ const fx = createParticles(canvas, project);
 
 function frame(dt) &#123;
   fx.setEmitter(mouseX, mouseY);   // where new particles are born
-  fx.update(dt);                    // step the sim + render
+  fx.update(dt);                    // step the sim and render
   requestAnimationFrame(() =&gt; frame(1 / 60));
 &#125;
 requestAnimationFrame(() =&gt; frame(1 / 60));
 
 fx.setKnob('windPower', 40);        // live, zero recompile
+fx.setKnob('cursor', x, y);         // vec2 knobs take a second component
 fx.spawnBurst(300);</code></pre>
   <p>
-    <code>createParticles</code> interprets the common node patterns — spawn
-    shape, random velocity &amp; life, gravity, wind, drag, colour- and
-    scale-over-life — into a GPU model. Effects using nodes outside that set
-    still run; the extra nodes are ignored.
+    This entry point interprets the common node patterns into a fixed GPU model: spawn shape,
+    random velocity and life, gravity, wind, drag, colour and scale over life, obstacles and
+    colliders. An effect that uses nodes outside that set still runs, and the extra nodes are
+    quietly ignored. Convenient right up until the moment you wonder why a node did nothing, so
+    reach for the compiled backends below once an effect gets serious.
   </p>
 
   <h2>The pixi v8 path</h2>
   <p>
-    For interleaving particles inside a PixiJS scene graph, the runtime also peers
-    on <code>pixi.js@^8</code> and integrates as a render pipe. This mounts a
-    system as a scene-graph node:
-  </p>
-
-  <h3>Mount a system</h3>
-  <p>
-    A Pylinka <em>project</em> is a JSON document describing one or more particle systems. Author it
-    in the editor or start from a recipe, then load it into your renderer:
+    To interleave particles inside a PixiJS scene graph, the runtime peers on
+    <code>pixi.js@^8</code> and installs itself as a render pipe. A Pylinka <em>project</em> is a
+    JSON document holding one or more particle systems. Author it in the editor or start from a
+    recipe, then hand it to your renderer:
   </p>
   <pre><code>import &#123; Application &#125; from 'pixi.js';
 import &#123; createPylinka &#125; from '@pylinka/core';
@@ -64,7 +61,7 @@ await app.init(&#123; preference: 'webgpu', resizeTo: window &#125;);
 
 const pylinka = await createPylinka(project, &#123; renderer: app.renderer &#125;);
 
-// Add the view to a STATIC layer — never a moving sprite (see below).
+// add the view to a STATIC layer, never to a moving sprite (see below)
 const vfx = new Container();
 app.stage.addChild(vfx);
 vfx.addChild(pylinka.systems.sparks.view);
@@ -72,42 +69,44 @@ vfx.addChild(pylinka.systems.sparks.view);
 app.ticker.add((ticker) =&gt; pylinka.update(ticker.deltaMS / 1000));</code></pre>
 
   <p>
-    The backend is derived from the renderer you pass: a WebGPU renderer shares its device, a WebGL
-    renderer uses the WebGL2 simulation in the same context. For headless use, pass an explicit
-    <code>device</code> instead of <code>renderer</code>.
+    The backend comes from the renderer you pass. A WebGPU renderer shares its device, a WebGL
+    renderer gets the WebGL2 simulation in the same context. For headless use, pass an explicit
+    <code>device</code> instead of a <code>renderer</code>.
   </p>
 
   <h2>Move the emitter, not the view</h2>
   <p>
-    Simulation is world-space: the emitter position is read only at spawn. To make an effect trail a
-    moving object, drive the emitter — don't reparent the view.
+    Simulation happens in world space and the emitter position is read only at spawn. So a trail
+    that follows a moving object comes from driving the emitter. Reparenting the view transforms
+    every live particle along with the sprite, which turns a trail into a rigid clump.
   </p>
-  <pre><code>// ✅ the view stays in a static layer; the emitter follows the target
+  <pre><code>// good: the view sits in a static layer, the emitter follows the target
 pylinka.systems.sparks.follow(coinSprite);
 
-// ✅ or set the position yourself each frame
+// also good: set the position yourself each frame
 pylinka.systems.sparks.setEmitterPosition(x, y);
 
-// ❌ never do this — it transforms every live particle with the coin
+// never: this drags every live particle along with the coin
 coinSprite.addChild(pylinka.systems.sparks.view);</code></pre>
 
   <h2>Tweak values live</h2>
   <p>
-    Any value promoted to a knob is adjustable at runtime with zero recompilation — the write lands
-    on the next frame:
+    Any value promoted to a knob is adjustable at runtime with no recompilation. The write lands on
+    the next frame:
   </p>
   <pre><code>pylinka.params.set('windPower', 40);
-pylinka.params.set('windDir', Math.PI * 0.5);</code></pre>
+pylinka.params.set('windDir', Math.PI * 0.5);
+pylinka.params.set('cursor', pointerX, pointerY);   // vec2 knob</code></pre>
 
   <h2>Bursts and lifecycle</h2>
   <pre><code>const sparks = pylinka.systems.sparks;
 
 sparks.spawnBurst(200);   // add 200 particles next frame
-sparks.restart();         // reset the pool (+ prewarm if configured)
+sparks.restart();         // reset the pool, plus prewarm if configured
 sparks.destroy();         // release GPU resources</code></pre>
 
   <p>
-    That's the whole surface for playing an effect. Next, read <a href="/concepts">Core concepts</a>
-    to understand systems, the graph, and knobs, or jump to the full <a href="/api">API</a>.
+    <a href="/concepts">Core concepts</a> covers systems, the graph and knobs in more depth. The
+    <a href="/api">API page</a> has the full runtime surface.
   </p>
 </DocsLayout>
