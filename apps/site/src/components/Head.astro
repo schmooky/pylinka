@@ -1,5 +1,12 @@
 ---
-/** Shared <head> SEO/GEO metadata: canonical, Open Graph, Twitter, JSON-LD. */
+/**
+ * Shared <head> SEO/GEO metadata: canonical, Open Graph, Twitter, JSON-LD.
+ *
+ * Anything here that describes the project is read at build time rather than
+ * typed in. Hardcoded facts in metadata rot quietly: nobody reads the <head>,
+ * so a stale number can sit in a social card for months.
+ */
+import corePkg from '../../../../packages/core/package.json';
 interface Props {
   title: string;
   description: string;
@@ -64,7 +71,7 @@ const favicon =
   operatingSystem: 'Web',
   description,
   url: site.href,
-  softwareVersion: '0.x',
+  softwareVersion: corePkg.version,
   license: 'https://opensource.org/licenses/MIT',
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
   author: { '@type': 'Organization', name: 'schmooky' },
