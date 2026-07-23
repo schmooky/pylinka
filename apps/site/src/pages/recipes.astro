@@ -2,8 +2,10 @@
 import '../styles/global.css';
 import Head from '../components/Head.astro';
 import { RECIPES } from '../recipes/data';
+import { filterTabs, groupBlurb } from '../recipes/groups';
 
-const groups = ['all', 'trails', 'fire', 'magic', 'ambient', 'ui', 'abstract', 'swirl', 'drawn', 'physics', 'combo'];
+const groups = filterTabs();
+const blurb = groupBlurb();
 ---
 
 <!doctype html>
@@ -11,7 +13,7 @@ const groups = ['all', 'trails', 'fire', 'magic', 'ambient', 'ui', 'abstract', '
   <head>
     <Head
       title={`Pylinka Recipes — ${RECIPES.length} ready-made GPU particle effects for PixiJS`}
-      description={`A gallery of ${RECIPES.length} open-source particle effects for PixiJS — trails, fire, magic, ambient, UI, abstract, swirling vortexes, drawn emission areas, and multi-emitter combos. Each is a real pylinka project you can open in the editor and tweak live.`}
+      description={`A gallery of ${RECIPES.length} open-source particle effects for PixiJS: ${blurb}. Each one is a real pylinka project you can open in the editor and tweak live.`}
       path="/recipes"
     />
   </head>
@@ -85,7 +87,7 @@ const groups = ['all', 'trails', 'fire', 'magic', 'ambient', 'ui', 'abstract', '
     </main>
 
     <script>
-      // Play only on-screen videos (autoplaying 44 at once wastes CPU).
+      // Play only on-screen videos: autoplaying the whole gallery wastes CPU.
       const io = new IntersectionObserver(
         (entries) => {
           for (const en of entries) {
