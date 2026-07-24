@@ -24,8 +24,14 @@ export class PylinkaRenderPipe implements RenderPipe<ParticleView> {
     this.renderer = renderer;
   }
 
-  /** Build phase: enqueue this view as an instruction so execute() runs for it. */
+  /** Build phase: enqueue this view as an instruction so execute() runs for it.
+   *  A non-batched (direct-draw) renderable MUST break pixi's open batch first —
+   *  otherwise batchable siblings on either side merge into one batch that is
+   *  emitted AFTER this instruction and paints over the particles, regardless of
+   *  true scene order (and across the whole RenderGroup). Mirrors pixi's own
+   *  MeshPipe.addRenderable for direct-draw meshes. */
   addRenderable(view: ParticleView, instructionSet: InstructionSet): void {
+    this.renderer.renderPipes.batch.break(instructionSet);
     instructionSet.add(view);
   }
 

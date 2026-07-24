@@ -57,8 +57,17 @@
         under.addChild(g1);
         app.stage.addChild(under);
 
-        // THE PARTICLES — §11.5 runtime, view added between two pixi layers
-        const fx = await createPylinka(recipe.project, { renderer: app.renderer, seed: 1234 });
+        // THE PARTICLES — §11.5 runtime, view added between two pixi layers.
+        // ?texture=coins proves the official texture API: a sprite-sheet atlas
+        // (rows = sequences, cols = frames) handed straight to createPylinka.
+        const texture = params.get('texture') === 'coins'
+          ? { image: '/atlas/coins.png', cols: 10, rows: 7, fps: 14, play: 'loop' as const, pick: 'per-particle' as const }
+          : undefined;
+        const fx = await createPylinka(recipe.project, {
+          renderer: app.renderer,
+          seed: 1234,
+          ...(texture ? { texture } : {}),
+        });
         state.runtime = fx;
         for (const name of Object.keys(fx.systems)) {
           app.stage.addChild(fx.systems[name]!.view);

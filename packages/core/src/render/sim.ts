@@ -13,6 +13,7 @@
  */
 import type { ParamDef, PylinkaProject, System } from '@pylinka/graph';
 import type { KnobStore } from '../knobs.js';
+import type { CompiledAtlasOptions } from '../compiled/sprite.js';
 
 /** A 2×3 affine (pixi worldTransform: a, b, c, d, tx, ty). */
 export interface Affine {
@@ -68,6 +69,9 @@ export interface SimBackendDeps {
   /** Project-wide knob store shared across systems (KnobBus fan-out). */
   knobs: KnobStore;
   seed?: number;
+  /** resolved texture/atlas for this system (single sprite or animated sheet);
+   *  the backend resolves it to sprite + anim. Absent → the soft-disc sprite. */
+  atlas?: CompiledAtlasOptions;
 }
 
 export type SimBackendFactory = (deps: SimBackendDeps) => SimBackend;

@@ -13,6 +13,8 @@ import { resolveBackend } from './backend.js';
 import { registerCompiledBackends } from './backends.js';
 import { ParticleView } from './particle-view.js';
 import { getSimBackendFactory, type SimBackend, type SimStats } from './sim.js';
+import { resolveTexture, type TextureInput } from './texture.js';
+import type { CompiledAtlasOptions } from '../compiled/sprite.js';
 
 export interface CreateOptions {
   /** The host pixi Renderer (app.renderer). Backend + device derive from it. */
@@ -24,6 +26,37 @@ export interface CreateOptions {
   /** deterministic base seed (capture mode) */
   seed?: number;
   onDeviceLost?: () => void;
+  /** Texture for every system — a single sprite or an animated sheet (§7.6).
+   *  Accepts a URL/data-URL, a DOM image, or a pixi Texture. */
+  texture?: TextureInput;
+  /** Per-system textures keyed by System.name — overrides `texture`. */
+  textures?: Record<string, TextureInput>;
+}
+
+/** Editor-exported project JSON carries per-system textures (not part of the
+ *  core Project type). Honour them so a plain export renders textured with no
+ *  extra wiring. Explicit `texture`/`textures` options take precedence. */
+interface TexturedProject {
+  textures?: { id: string; src: string; cols?: number; rows?: number; pad?: number; fps?: number; play?: 'loop' | 'once'; pick?: 'per-particle' | 'per-spawn' }[];
+  systemTextures?: Record<string, string | null>;
+}
+
+function projectTextureFor(project: PylinkaProject, system: System): TextureInput | undefined {
+  const p = project as PylinkaProject & TexturedProject;
+  const texId = p.systemTextures?.[system.id];
+  const t = texId != null ? p.textures?.find((x) => x.id === texId) : undefined;
+  if (t === undefined) return undefined;
+  return { image: t.src, cols: t.cols, rows: t.rows, pad: t.pad, fps: t.fps, play: t.play, pick: t.pick };
+}
+
+/** Resolve the texture a system should use (option → per-system → project JSON). */
+async function atlasFor(
+  project: PylinkaProject,
+  system: System,
+  opts: CreateOptions,
+): Promise<CompiledAtlasOptions | undefined> {
+  const input = opts.textures?.[system.name] ?? opts.texture ?? projectTextureFor(project, system);
+  return input === undefined ? undefined : resolveTexture(input);
 }
 
 /** A pixi Container with a global-position getter (structural, any DisplayObject). */
@@ -126,6 +159,7 @@ function buildSystem(
   project: Pick<PylinkaProject, 'params'>,
   knobs: KnobStore,
   opts: CreateOptions,
+  atlas: CompiledAtlasOptions | undefined,
 ): SystemHandle {
   registerCompiledBackends();
   const resolved = resolveBackend(opts.renderer as Parameters<typeof resolveBackend>[0]);
@@ -148,6 +182,7 @@ function buildSystem(
     params: project.params,
     knobs,
     ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
+    ...(atlas !== undefined ? { atlas } : {}),
   });
   view.sim = sim;
   return new SystemHandle(view, sim, knobs);
@@ -166,7 +201,9 @@ export async function createParticleSystem(
 ): Promise<ParticleSystemView> {
   const knobs = new KnobStore(bundle.params);
   watchDeviceLost(opts);
-  return buildSystem(bundle.system, { params: bundle.params }, knobs, opts);
+  const input = opts.textures?.[bundle.system.name] ?? opts.texture;
+  const atlas = input === undefined ? undefined : await resolveTexture(input);
+  return buildSystem(bundle.system, { params: bundle.params }, knobs, opts, atlas);
 }
 
 /** Build every enabled system of a project (§11.5). */
@@ -180,7 +217,8 @@ export async function createPylinka(
   const handles: SystemHandle[] = [];
   for (const sys of project.systems) {
     if (!sys.enabled) continue;
-    const h = buildSystem(sys, project, knobs, opts);
+    const atlas = await atlasFor(project, sys, opts);
+    const h = buildSystem(sys, project, knobs, opts, atlas);
     systems[sys.name] = h;
     handles.push(h);
   }
