@@ -81,6 +81,11 @@ function link(
 export class WebGL2Engine {
   private readonly gl: WebGL2RenderingContext;
   private readonly capacity: number;
+  /** parent-slot count for a sub-emitter (death detection loops these);
+   *  capacity == parentCap × burstMax under a death-burst. */
+  private parentCap = 0;
+  private burstMax = 1;
+  private hasBurst = false;
   // Every field below holds a GL object, so every one of them is invalidated by
   // a context loss and rebuilt by createResources(). None of them can be
   // readonly for that reason.
@@ -88,8 +93,8 @@ export class WebGL2Engine {
   private renderProg!: WebGLProgram;
   private bufs!: [WebGLBuffer, WebGLBuffer];
   private updateVAOs!: [WebGLVertexArrayObject, WebGLVertexArrayObject];
-  /** sub-emitter only: [childCur][parentCur] VAOs binding the parent's buffers. */
-  private subVAOs: WebGLVertexArrayObject[][] = [];
+  /** sub-emitter only: [childCur][parentCur][burstCopy] VAOs binding the parent's buffers. */
+  private subVAOs: WebGLVertexArrayObject[][][] = [];
   private renderVAOs!: [WebGLVertexArrayObject, WebGLVertexArrayObject];
   private tf!: WebGLTransformFeedback;
   private readonly uUpdate = new Map<string, WebGLUniformLocation | null>();
@@ -168,8 +173,13 @@ export class WebGL2Engine {
     hooks?: { onContextLost?: () => void; onContextRestored?: () => void },
   ) {
     this.gl = gl;
-    // a sub-emitter mirrors its parent 1:1, so it must share the parent's capacity
-    this.capacity = sub ? sub.parent.capacityValue : params.capacity;
+    // a sub-emitter mirrors its parent 1:1, so it shares the parent's capacity.
+    // A death-burst spawns up to `max` children per parent death → the child
+    // pool is parentCap × max, laid out in `max` blocked regions (see step()).
+    this.hasBurst = sub !== undefined && params.deathBurst !== undefined;
+    this.burstMax = sub ? (params.deathBurst?.max ?? 1) : 1;
+    this.parentCap = sub ? sub.parent.capacityValue : params.capacity;
+    this.capacity = sub ? this.parentCap * this.burstMax : params.capacity;
     this.sizeScale = sizeScale;
     this.atlas = atlas;
     this.sub = sub;
@@ -222,7 +232,7 @@ export class WebGL2Engine {
     // did before those nodes existed.
     this.updateProg = link(
       gl,
-      sub ? updateVsSub(this.feat) : updateVs(this.feat),
+      sub ? updateVsSub(this.feat, this.hasBurst) : updateVs(this.feat),
       UPDATE_FS,
       TF_VARYINGS,
     );
@@ -253,13 +263,17 @@ export class WebGL2Engine {
     this.updateVAOs = [this.makeUpdateVAO(this.bufs[0]), this.makeUpdateVAO(this.bufs[1])];
     if (sub) {
       const p = sub.parent;
-      // one VAO per (childCur, parentCur): parent curr = bufs[parentCur], prev = bufs[1-parentCur]
+      // one VAO per (childCur, parentCur, burstCopy): parent curr = bufs[parentCur],
+      // prev = bufs[1-parentCur]; child state read from burst region k.
       this.subVAOs = [0, 1].map((childCur) =>
         [0, 1].map((parentCur) =>
-          this.makeSubUpdateVAO(
-            this.bufs[childCur]!,
-            p.bufferAt(parentCur),
-            p.bufferAt(1 - parentCur),
+          Array.from({ length: this.burstMax }, (_, k) =>
+            this.makeSubUpdateVAO(
+              this.bufs[childCur]!,
+              k * this.parentCap * STRIDE,
+              p.bufferAt(parentCur),
+              p.bufferAt(1 - parentCur),
+            ),
           ),
         ),
       );
@@ -302,9 +316,12 @@ export class WebGL2Engine {
     return vao;
   }
 
-  /** Sub-emitter update VAO: child state + parent current & previous slots. */
+  /** Sub-emitter update VAO. Child state is read from burst region `childOff`
+   *  (0 without a burst), so `max` passes cover the pool; parent cur/prev are
+   *  read from region 0 (parent slot = vertex id). i_pVel feeds inheritance. */
   private makeSubUpdateVAO(
     childBuf: WebGLBuffer,
+    childOff: number,
     parentCur: WebGLBuffer,
     parentPrev: WebGLBuffer,
   ): WebGLVertexArrayObject {
@@ -318,12 +335,13 @@ export class WebGL2Engine {
       gl.enableVertexAttribArray(l);
       gl.vertexAttribPointer(l, size, gl.FLOAT, false, STRIDE, off);
     };
-    bind(childBuf, 'i_pos', 2, 0);
-    bind(childBuf, 'i_vel', 2, 8);
-    bind(childBuf, 'i_age', 1, 16);
-    bind(childBuf, 'i_life', 1, 20);
-    bind(childBuf, 'i_seed', 1, 24);
+    bind(childBuf, 'i_pos', 2, childOff + 0);
+    bind(childBuf, 'i_vel', 2, childOff + 8);
+    bind(childBuf, 'i_age', 1, childOff + 16);
+    bind(childBuf, 'i_life', 1, childOff + 20);
+    bind(childBuf, 'i_seed', 1, childOff + 24);
     bind(parentCur, 'i_pPos', 2, 0);
+    bind(parentCur, 'i_pVel', 2, 8); // parent death-velocity (burst inheritance; absent → skipped)
     bind(parentCur, 'i_pAge', 1, 16);
     bind(parentCur, 'i_pLife', 1, 20);
     bind(parentPrev, 'i_pAgePrev', 1, 16);
@@ -461,20 +479,38 @@ export class WebGL2Engine {
     }
 
     const dst = 1 - this.cur;
-    const vao = this.sub
-      ? this.subVAOs[this.cur]![this.sub.parent.curIndex]!
-      : this.updateVAOs[this.cur]!;
-    gl.bindVertexArray(vao);
     // The generic ARRAY_BUFFER binding must not reference the TF output buffer
     // (WebGL2 forbids a buffer bound to both a TF and a non-TF target). The VAO
     // holds the attribute bindings, so clearing the generic point is safe.
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, this.tf);
-    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.bufs[dst]!);
     gl.enable(gl.RASTERIZER_DISCARD);
-    gl.beginTransformFeedback(gl.POINTS);
-    gl.drawArrays(gl.POINTS, 0, this.capacity);
-    gl.endTransformFeedback();
+    if (this.sub) {
+      // sub-emitter: `burstMax` passes, copy k reads child region k + parent
+      // region 0 and writes child region k. burstMax==1 (no burst node) is a
+      // single whole-buffer pass, identical to the classic sub-emitter.
+      const parentCur = this.sub.parent.curIndex;
+      const uK = this.uUpdate.get('u_burstK') ?? null;
+      const db = p.deathBurst;
+      gl.uniform1f(u.get('u_countMin')!, db?.countMin ?? 1);
+      gl.uniform1f(u.get('u_countMax')!, db?.countMax ?? 1);
+      gl.uniform1f(u.get('u_inherit')!, db?.inherit ?? 0);
+      const regionBytes = this.parentCap * STRIDE;
+      for (let k = 0; k < this.burstMax; k++) {
+        if (uK) gl.uniform1i(uK, k);
+        gl.bindVertexArray(this.subVAOs[this.cur]![parentCur]![k]!);
+        gl.bindBufferRange(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.bufs[dst]!, k * regionBytes, regionBytes);
+        gl.beginTransformFeedback(gl.POINTS);
+        gl.drawArrays(gl.POINTS, 0, this.parentCap);
+        gl.endTransformFeedback();
+      }
+    } else {
+      gl.bindVertexArray(this.updateVAOs[this.cur]!);
+      gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.bufs[dst]!);
+      gl.beginTransformFeedback(gl.POINTS);
+      gl.drawArrays(gl.POINTS, 0, this.capacity);
+      gl.endTransformFeedback();
+    }
     gl.disable(gl.RASTERIZER_DISCARD);
     gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null);
     gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, null);
@@ -555,7 +591,7 @@ export class WebGL2Engine {
     gl.deleteProgram(this.renderProg);
     for (const b of this.bufs) gl.deleteBuffer(b);
     for (const v of this.updateVAOs) gl.deleteVertexArray(v);
-    for (const row of this.subVAOs) for (const v of row) gl.deleteVertexArray(v);
+    for (const a of this.subVAOs) for (const row of a) for (const v of row) gl.deleteVertexArray(v);
     for (const v of this.renderVAOs) gl.deleteVertexArray(v);
     gl.deleteTransformFeedback(this.tf);
     if (this.tex) gl.deleteTexture(this.tex);
@@ -601,6 +637,11 @@ const UPDATE_UNIFORMS = [
   'u_colRel',
   'u_maskTbl',
   'u_maskCount',
+  // death-burst (sub-emitter only)
+  'u_burstK',
+  'u_countMin',
+  'u_countMax',
+  'u_inherit',
 ];
 const RENDER_UNIFORMS = [
   'u_resolution',
