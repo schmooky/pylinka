@@ -382,7 +382,7 @@ export const RECIPES: Recipe[] = [
     oneLiner: 'Rockets climb and burst into a shower of shrapnel where each one dies.',
     tags: ['combo', 'sub-emitter', 'explosion', 'burst', 'death-burst'],
     layers: [
-      { name: 'ships', capacity: 128, blend: 'add', rate: 55, velMin: [-70, -280], velMax: [70, -430], lifeMin: 0.75, lifeMax: 1.1, gravity: [0, 380], colorFrom: '#fff2c0ff', colorTo: '#ff9a3cff', colorEase: 'linear', scaleFrom: 1.3, scaleTo: 1 },
+      { name: 'ships', capacity: 128, blend: 'add', shape: 'rect', size: [260, 12], rate: 55, velMin: [-70, -280], velMax: [70, -430], lifeMin: 0.75, lifeMax: 1.1, gravity: [0, 380], colorFrom: '#fff2c0ff', colorTo: '#ff9a3cff', colorEase: 'linear', scaleFrom: 1.3, scaleTo: 1 },
       { name: 'shrapnel', blend: 'add', velMin: [-280, -280], velMax: [280, 280], lifeMin: 0.5, lifeMax: 1.15, gravity: [0, 560], drag: 1.3, colorFrom: '#ffe08aff', colorTo: '#ff3b0000', colorEase: 'power2.out', scaleFrom: 1.6, scaleTo: 0, burst: { max: 20, countMin: 10, countMax: 18, inherit: 0.3 } },
     ],
     links: [[1, 0]],

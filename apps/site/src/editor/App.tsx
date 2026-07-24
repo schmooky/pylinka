@@ -232,7 +232,7 @@ function EditorApp() {
           </ReactFlow>
           </div>
         </div>
-        <div className="w-[460px] shrink-0 border-l border-border">
+        <div className="w-[42vw] min-w-[480px] max-w-[860px] shrink-0 border-l border-border">
           <Preview />
         </div>
       </div>

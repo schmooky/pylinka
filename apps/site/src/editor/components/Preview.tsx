@@ -84,10 +84,15 @@ export function Preview() {
   projRef.current = project;
 
   // off by default: a still emitter shows the graph you authored, not a motion
-  // the preview added. Mouse still overrides, and trajectory splines still run.
+  // the preview added. Trajectory splines still run regardless.
   const [orbit, setOrbit] = useState(false);
   const orbitRef = useRef(orbit);
   orbitRef.current = orbit;
+  // cursor-follow is a toggle now (was always-on while hovering) — parked at the
+  // canvas centre when off, so an effect sits still and you can actually watch it.
+  const [follow, setFollow] = useState(false);
+  const followRef = useRef(follow);
+  followRef.current = follow;
   const mouseRef = useRef<[number, number] | null>(null);
   const [hud, setHud] = useState('');
   const [backend, setBackend] = useState<BackendChoice>(initialBackend);
@@ -315,6 +320,7 @@ export function Preview() {
   }, [rev]);
 
   const onMove = (e: React.PointerEvent) => {
+    if (!followRef.current) return; // emitter parked unless "follow" is on
     const c = canvasRef.current!;
     const r = c.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -352,12 +358,13 @@ export function Preview() {
         )}
       </div>
       <div className="flex items-center gap-3 border-b border-border px-3 py-2 text-xs">
-        <label className="flex items-center gap-1.5"><input type="checkbox" checked={orbit} onChange={(e) => setOrbit(e.target.checked)} /> orbit</label>
+        <label className="flex items-center gap-1.5" title="Emitter follows the cursor while hovering the preview (off = parked at centre)">
+          <input type="checkbox" checked={follow} onChange={(e) => { setFollow(e.target.checked); if (!e.target.checked) mouseRef.current = null; }} /> follow
+        </label>
+        <label className="flex items-center gap-1.5" title="Move the emitter on a circle — a quick trail test"><input type="checkbox" checked={orbit} onChange={(e) => setOrbit(e.target.checked)} /> orbit</label>
         <button className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={() => fxRef.current.forEach((h) => h.spawnBurst(400))}>Burst</button>
-        <span className="text-muted-foreground">
-          {backend === 'webgl'
-            ? 'move mouse over canvas'
-            : 'compiled graph · full GPU pipeline'}
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+          {follow ? 'following cursor' : orbit ? 'orbiting' : 'parked at centre'}
         </span>
       </div>
       <div className="flex border-b border-border text-xs">
