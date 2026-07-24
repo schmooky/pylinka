@@ -13,6 +13,10 @@ export interface EditorTexture {
   fps: number;
   play: 'loop' | 'once';
   pick: 'per-particle' | 'per-spawn';
+  /** editor-only: source frames of a sequence built from individual files, kept
+   *  so they can be reordered and re-baked. Absent for a plain sprite/sheet. The
+   *  baked grid lives in `src` + cols/rows; a strict consumer ignores this. */
+  frames?: string[];
 }
 
 /** A painted/image emission area: opaque pixels of `src` mark where particles spawn. */

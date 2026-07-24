@@ -108,6 +108,9 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
   const params = useEditor((s) => s.project.params);
   const setStructural = useEditor((s) => s.setStructural);
   const setValue = useEditor((s) => s.setValue);
+  const textures = useEditor((s) => s.project.textures);
+  const setNodeAsset = useEditor((s) => s.setNodeAsset);
+  const setAssetsOpen = useEditor((s) => s.setAssetsOpen);
   const deleteNode = useEditor((s) => s.deleteNode);
   const promoteValue = useEditor((s) => s.promoteValue);
   const unbindKnob = useEditor((s) => s.unbindKnob);
@@ -222,6 +225,27 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
                 value={node.structural?.[s.key] ?? s.default}
                 onChange={(v) => setStructural(node.id, s.key, v)}
               />
+            </div>
+          ) : s.key === 'asset' ? (
+            <div key={s.key} className="flex items-center gap-1" style={{ height: STRUCT_H }}>
+              <select
+                className="nodrag sel min-w-0 flex-1"
+                value={node.structural?.asset ?? ''}
+                onPointerDown={(e) => e.stopPropagation()}
+                onChange={(e) => setNodeAsset(node.id, e.target.value || null)}>
+                <option value="">None</option>
+                {(textures ?? []).map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              <button
+                className="nodrag shrink-0 rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                style={{ borderColor: 'var(--color-border)' }}
+                title="Open the asset manager"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => setAssetsOpen(true)}>
+                ⋯
+              </button>
             </div>
           ) : (
             <div key={s.key} className="flex items-center justify-between gap-2" style={{ height: STRUCT_H }}>
