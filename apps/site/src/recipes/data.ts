@@ -244,7 +244,14 @@ function fx(o: FxOpts): Recipe {
 
 
 /** One emitter in a multi-emitter recipe. */
-type Layer = SysOpts & { name: string; atlas?: RecipeAtlas };
+type Layer = SysOpts & {
+  name: string;
+  atlas?: RecipeAtlas;
+  /** as a sub-emitter child: burst this many particles per parent death, up to
+   *  `max` (also the child-pool multiplier), inheriting a fraction of the
+   *  parent's death velocity. Adds an output.deathBurst node to this system. */
+  burst?: { max: number; countMin: number; countMax: number; inherit: number };
+};
 interface ComboOpts {
   slug: string;
   title: string;
@@ -261,6 +268,21 @@ const PREFIX = 'abcdefgh';
 function combo(o: ComboOpts): Recipe {
   const sysId = (i: number) => `s${i + 1}`;
   const systems = o.layers.map((L, i) => buildSystem(L, sysId(i), PREFIX[i]!, L.name));
+  // death-burst: turn a sub-emitter child into a real explosion (many spawns
+  // per parent death) via an output.deathBurst node.
+  o.layers.forEach((L, i) => {
+    if (!L.burst) return;
+    systems[i]!.graph.nodes.push({
+      id: `${PREFIX[i]!}40`,
+      kind: 'output.deathBurst',
+      structural: { max: String(L.burst.max) },
+      values: {
+        countMin: f(L.burst.countMin),
+        countMax: f(L.burst.countMax),
+        inheritVelocity: f(L.burst.inherit),
+      },
+    });
+  });
   const systemAtlases: Record<string, RecipeAtlas> = {};
   o.layers.forEach((L, i) => { if (L.atlas) systemAtlases[sysId(i)] = L.atlas; });
   const subEmitters: Record<string, string> = {};
@@ -352,6 +374,16 @@ export const RECIPES: Recipe[] = [
     layers: [
       { name: 'rocket', capacity: 520, blend: 'add', rate: 16, velMin: [-60, -640], velMax: [60, -520], lifeMin: 0.7, lifeMax: 1, gravity: [0, 320], colorFrom: '#fff6c8ff', colorTo: '#ffdd8800', colorEase: 'sine.out', scaleFrom: 1, scaleTo: 0.6 },
       { name: 'burst', capacity: 520, blend: 'add', shape: 'circle', radius: 4, velMin: [-300, -300], velMax: [300, 300], lifeMin: 0.7, lifeMax: 1.2, gravity: [0, 260], drag: 1.1, colorFrom: '#fff0a0ff', colorTo: '#ff3ca000', colorEase: 'power2.out', scaleFrom: 1.4, scaleTo: 0 },
+    ],
+    links: [[1, 0]],
+  }),
+  combo({
+    slug: 'exploding-ships', title: 'Exploding Ships', group: 'combo',
+    oneLiner: 'Rockets climb and burst into a shower of shrapnel where each one dies.',
+    tags: ['combo', 'sub-emitter', 'explosion', 'burst', 'death-burst'],
+    layers: [
+      { name: 'ships', capacity: 128, blend: 'add', rate: 55, velMin: [-70, -280], velMax: [70, -430], lifeMin: 0.75, lifeMax: 1.1, gravity: [0, 380], colorFrom: '#fff2c0ff', colorTo: '#ff9a3cff', colorEase: 'linear', scaleFrom: 1.3, scaleTo: 1 },
+      { name: 'shrapnel', blend: 'add', velMin: [-280, -280], velMax: [280, 280], lifeMin: 0.5, lifeMax: 1.15, gravity: [0, 560], drag: 1.3, colorFrom: '#ffe08aff', colorTo: '#ff3b0000', colorEase: 'power2.out', scaleFrom: 1.6, scaleTo: 0, burst: { max: 20, countMin: 10, countMax: 18, inherit: 0.3 } },
     ],
     links: [[1, 0]],
   }),
