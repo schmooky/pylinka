@@ -154,6 +154,16 @@ const gens: NodeSchema[] = [
     structural: [{ key: 'ease', options: EASE_OPTIONS, default: 'linear' }],
   }),
   schema({
+    kind: 'gen.ease',
+    label: 'Ease',
+    namespace: 'gen',
+    evalTime: 'both',
+    impact: 'low',
+    inputs: [inPort('t', 'f32', f(0))],
+    outputs: [outPort('out', 'f32')],
+    structural: [{ key: 'ease', options: EASE_OPTIONS, default: 'power2.out' }],
+  }),
+  schema({
     kind: 'gen.noise',
     label: 'Noise',
     namespace: 'gen',

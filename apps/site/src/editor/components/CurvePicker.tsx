@@ -20,7 +20,7 @@ const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const clamp = (n: number, lo: number, hi: number) => (n < lo ? lo : n > hi ? hi : n);
 
 /** Short human label for an ease key. */
-export function easeLabel(key: string): string {
+function easeLabel(key: string): string {
   return parseCubicBezier(key) ? 'custom' : key;
 }
 
