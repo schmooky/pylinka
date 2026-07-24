@@ -295,7 +295,53 @@ function combo(o: ComboOpts): Recipe {
   };
 }
 
+/** Showcase for the standalone gen.ease node: particle SIZE is driven by an Ease
+ *  node wired from input.ageNormalized → a `back.out` curve that overshoots, so
+ *  motes pop in. (The Ease node runs on the compiled backends; open on WebGPU/
+ *  WebGL2 to see the pop — the interpreted gallery falls back to a plain fade.) */
+function easePop(): Recipe {
+  const nid = (n: number) => `k${n}`;
+  const edge = (i: number, fn: number, fp: string, tn: number, tp: string) => ({
+    id: `ke${i}`, from: { nodeId: nid(fn), portId: fp }, to: { nodeId: nid(tn), portId: tp },
+  });
+  const nodes: Node[] = [
+    { id: nid(1), kind: 'shape.circle', values: { radius: f(70) } },
+    { id: nid(2), kind: 'output.spawnPosition' },
+    { id: nid(3), kind: 'gen.randomRange', values: { min: f(0.9), max: f(1.7) } },
+    { id: nid(4), kind: 'output.initLife' },
+    { id: nid(5), kind: 'gen.randomVec2', values: { min: v2([-12, -12]), max: v2([12, 12]) } },
+    { id: nid(6), kind: 'output.initVelocity' },
+    { id: nid(7), kind: 'input.ageNormalized' },
+    { id: nid(8), kind: 'gen.ease', structural: { ease: 'back.out' } },
+    { id: nid(9), kind: 'output.writeScale' },
+    { id: nid(10), kind: 'gen.colorOverLife', structural: { ease: 'sine.out' }, values: { from: col('#d8c7ffff'), to: col('#6a2ad000') } },
+    { id: nid(11), kind: 'output.writeColor' },
+  ];
+  const graph = {
+    nodes,
+    edges: [
+      edge(1, 1, 'pos', 2, 'pos'),
+      edge(2, 3, 'out', 4, 'life'),
+      edge(3, 5, 'out', 6, 'vel'),
+      edge(4, 7, 'out', 8, 't'),
+      edge(5, 8, 'out', 9, 'scale'),
+      edge(6, 10, 'out', 11, 'color'),
+    ],
+  };
+  const system: System = {
+    id: 's1', name: 'motes', capacity: 1400, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 26 }, graph,
+  };
+  const project: PylinkaProject = { ...META, id: 'ease-pop', name: 'Ease Pop', params: [], assets: [], systems: [system] };
+  return {
+    slug: 'ease-pop', title: 'Ease Pop', group: 'abstract',
+    oneLiner: 'Violet motes that pop in — size driven by a standalone Ease node (back.out) wired from age.',
+    tags: ['ease', 'curve', 'nodes', 'scale'], project,
+  };
+}
+
 export const RECIPES: Recipe[] = [
+  easePop(),
   // ── trails ────────────────────────────────────────────────────────────
   fx({ slug: 'coin-spark-trail', title: 'Coin Spark Trail', group: 'trails', oneLiner: 'Amber sparks that hang and fall behind a flying coin.', tags: ['trail', 'sparks', 'gravity'], capacity: 4000, rate: 420, rod: 1.4, velMin: [-45, -150], velMax: [45, -240], lifeMin: 0.6, lifeMax: 1.3, gravity: [0, 340], colorFrom: '#ffd27aff', colorTo: '#ff3b0000', colorEase: 'power2.out', scaleFrom: 1.6, scaleEase: 'power2.out' }),
   fx({ slug: 'comet-tail', title: 'Comet Tail', group: 'trails', oneLiner: 'A cyan comet streak with drag and no gravity.', tags: ['trail', 'drag', 'additive'], capacity: 4000, rate: 520, rod: 2, velMin: [-15, -15], velMax: [15, 15], lifeMin: 0.8, lifeMax: 1.6, drag: 1.6, colorFrom: '#aee9ffff', colorTo: '#3a86ff00', colorEase: 'power2.out', scaleFrom: 1.2, scaleEase: 'power2.out' }),

@@ -157,7 +157,7 @@ const gens: NodeSchema[] = [
     kind: 'gen.ease',
     label: 'Ease',
     namespace: 'gen',
-    evalTime: 'both',
+    evalTime: 'inferred',
     impact: 'low',
     inputs: [inPort('t', 'f32', f(0))],
     outputs: [outPort('out', 'f32')],
