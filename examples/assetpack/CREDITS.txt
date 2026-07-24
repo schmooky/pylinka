@@ -1,0 +1,16 @@
+Brackeys VFX Bundle — texture credits
+=====================================
+
+License: Creative Commons Zero (CC0 / public domain). No attribution is
+required, but credit is given here because these creators deserve it.
+
+Particle textures ... Picster  (https://github.com/RPicster/Godot-particle-and-vfx-textures)
+                      Kenney   (https://kenney.nl/assets/particle-pack)
+Flipbooks .......... Thomas Iché (https://unity.com/blog/engine-platform/free-vfx-image-sequences-flipbooks)
+Pre-drawn sheets ... CodeManu (https://codemanu.itch.io/vfx-free-pack)
+
+Repackaged (and some modified) by Brackeys. For this repo the images were
+downscaled and re-sliced to exact grid multiples so the atlas UVs stay clean:
+  opaque/  single 128×128 sprites, additive-friendly (sit on black)
+  alpha/   single 128×128 sprites with real transparency (normal blend)
+  sheets/  animated flipbooks (8×8) and pre-drawn grids (cols×rows in the name)

@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditor } from '../store';
 import type { EditorTexture } from '../types';
+import { VFX_ASSETS, type VfxAsset } from '../../recipes/vfxAssets';
 
 const EMPTY: EditorTexture[] = [];
 
@@ -56,9 +57,11 @@ export function AssetManager() {
   const updateTexture = useEditor((s) => s.updateTexture);
   const removeTexture = useEditor((s) => s.removeTexture);
   const setActive = useEditor((s) => s.setActiveTexture);
+  const setActiveBlend = useEditor((s) => s.setActiveBlend);
 
   const [selId, setSelId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const selected = textures.find((t) => t.id === selId) ?? null;
 
   useEffect(() => {
@@ -115,6 +118,19 @@ export function AssetManager() {
       cols: 10, rows: 7, pad: 2, fps: 14, play: 'loop', pick: 'per-particle',
     });
     setSelId(id);
+  };
+
+  // add a built-in Brackeys VFX texture, and set the blend it wants (opaque
+  // sprites want `add`, alpha sprites want `normal`) on the active system.
+  const addBuiltInVfx = async (a: VfxAsset) => {
+    const img = await loadImage(a.url);
+    const id = addTextureId({
+      name: a.name, src: a.url, width: img.naturalWidth, height: img.naturalHeight,
+      cols: a.cols, rows: a.rows, pad: a.pad, fps: a.fps, play: a.play, pick: a.pick,
+    });
+    setActiveBlend(a.blend);
+    setSelId(id);
+    setPickerOpen(false);
   };
 
   return createPortal(
@@ -174,6 +190,7 @@ export function AssetManager() {
                 <span className="text-[9px]">pick several frames — baked into a strip</span>
                 <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { const fs = [...(e.target.files ?? [])]; if (fs.length) void addSequence(fs); }} />
               </label>
+              <button className="rounded-md border py-1.5 font-medium text-foreground hover:bg-black/20" style={{ borderColor: 'var(--color-border)' }} onClick={() => setPickerOpen(true)}>✨ Built-in VFX library…</button>
               <button className="rounded-md border py-1.5 text-muted-foreground hover:bg-black/20" style={{ borderColor: 'var(--color-border)' }} onClick={addBuiltInCoins}>Add built-in coins ↺</button>
             </div>
           </div>
@@ -203,8 +220,61 @@ export function AssetManager() {
           </div>
         </div>
       </div>
+      {pickerOpen && <VfxPicker onPick={addBuiltInVfx} onClose={() => setPickerOpen(false)} />}
     </div>,
     document.body,
+  );
+}
+
+/** Grid of built-in Brackeys VFX textures, grouped by kind. Picking one adds it
+ *  to the project (and sets the matching blend) so it shows in the library. */
+function VfxPicker({ onPick, onClose }: { onPick(a: VfxAsset): void; onClose(): void }) {
+  const groups: { label: string; hint: string; kind: VfxAsset['kind'] }[] = [
+    { label: 'Sparks & magic', hint: 'opaque · additive', kind: 'opaque' },
+    { label: 'Alpha sprites', hint: 'transparent · normal blend', kind: 'alpha' },
+    { label: 'Animated sheets', hint: 'flipbooks & pre-drawn grids', kind: 'sheet' },
+  ];
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-6"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div
+        className="flex h-[78vh] w-[min(860px,90vw)] flex-col overflow-hidden rounded-xl border shadow-2xl"
+        style={{ background: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-foreground)' }}>
+        <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm font-semibold">Built-in VFX library</span>
+            <span className="text-[11px] text-muted-foreground">Brackeys pack · CC0 · {VFX_ASSETS.length} textures</span>
+          </div>
+          <button className="rounded-md px-2 py-1 text-muted-foreground hover:bg-black/20 hover:text-foreground" onClick={onClose}>✕</button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {groups.map((g) => (
+            <div key={g.kind} className="mb-5">
+              <div className="mb-2 flex items-baseline gap-2">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{g.label}</span>
+                <span className="text-[10px] text-muted-foreground">{g.hint}</span>
+              </div>
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                {VFX_ASSETS.filter((a) => a.kind === g.kind).map((a) => (
+                  <button
+                    key={a.key}
+                    onClick={() => onPick(a)}
+                    title={`${a.name} — ${a.cols}×${a.rows} · ${a.blend}`}
+                    className="group/vfx flex flex-col gap-1 rounded-lg border p-1.5 text-left hover:bg-black/20"
+                    style={{ borderColor: 'var(--color-border)' }}>
+                    <div className="grid aspect-square place-items-center overflow-hidden rounded bg-[repeating-conic-gradient(#0000_0_25%,#ffffff08_0_50%)] bg-black/50" style={{ backgroundSize: '12px 12px' }}>
+                      <img src={a.url} alt="" className="max-h-full max-w-full object-contain" />
+                    </div>
+                    <span className="truncate text-[10px]">{a.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pylinka × pixi — Announcer (z-order best practices)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #0b0f1a; overflow: hidden;
+        font-family: 'Fira Code', ui-monospace, monospace; }
+      #banner { position: fixed; left: 12px; top: 12px; z-index: 2; max-width: 48ch;
+        color: #cbd5e1; font-size: 12px; line-height: 1.55; background: #0009;
+        padding: 10px 12px; border: 1px solid #1e293b; border-radius: 8px; }
+      #banner b { color: #fbbf24; font-weight: 500; }
+      #banner code { color: #93c5fd; }
+      #go { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 2;
+        font-family: inherit; font-size: 14px; font-weight: 600; color: #0b0f1a;
+        background: #fbbf24; border: 0; border-radius: 999px; padding: 10px 22px; cursor: pointer;
+        box-shadow: 0 6px 24px #fbbf2455; }
+      #go:hover { filter: brightness(1.05); }
+    </style>
+  </head>
+  <body>
+    <div id="banner">
+      <b>Announcer — layering particles with the pixi scene graph</b><br />
+      Click the button: a <code>dim</code> layer covers the scene, then an
+      <code>announcer</code> container shows a card. The star burst sits
+      <em>behind</em> the card and the confetti rains <em>in front</em> of the
+      text — pylinka views obey their place in the scene graph, so they layer
+      correctly against ordinary pixi <code>Graphics</code> and <code>Text</code>.
+    </div>
+    <button id="go">🎉 Announce</button>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

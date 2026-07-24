@@ -5,8 +5,9 @@
 import type { Literal, Node, PylinkaProject, System } from '@pylinka/graph';
 import type { EditorProject, EmitterPathData } from '../editor/types';
 import { MASK_BOLT, MASK_HEART, MASK_RING, MASK_STAR, MASK_WIN } from '../editor/maskShapes';
+import { VFX_BY_KEY, type VfxAsset } from './vfxAssets';
 
-export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'swirl' | 'drawn' | 'physics' | 'combo';
+export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'swirl' | 'drawn' | 'physics' | 'combo' | 'vfx';
 
 export interface RecipeAtlas {
   url: string;
@@ -239,6 +240,25 @@ function fx(o: FxOpts): Recipe {
   if (o.mask) (project as EditorProject).systemMasks = { s1: { src: o.mask.src, width: o.mask.width, offset: [0, 0] } };
   if (o.path) (project as EditorProject).systemPaths = { s1: o.path };
   return { slug: o.slug, title: o.title, group: o.group, oneLiner: o.oneLiner, tags: o.tags, project, ...(o.atlas ? { atlas: o.atlas } : {}) };
+}
+
+/** A `RecipeAtlas` descriptor for a catalog texture. */
+function atlasOf(a: VfxAsset): RecipeAtlas {
+  return { url: a.url, cols: a.cols, rows: a.rows, frameW: a.frameW, frameH: a.frameH, pad: a.pad, fps: a.fps, play: a.play, pick: a.pick };
+}
+
+/** A textured recipe over a Brackeys VFX catalog asset (`key`). The asset's
+ *  atlas + sensible blend (opaque→add, alpha→normal) are wired automatically;
+ *  everything else is plain `fx()`. On fork the atlas seeds an editor texture,
+ *  so the effect's image shows up in the Asset Manager. */
+type VfxRecipeOpts = Omit<FxOpts, 'atlas'> & { key: string };
+function vfx(o: VfxRecipeOpts): Recipe {
+  const a = VFX_BY_KEY[o.key];
+  if (!a) throw new Error(`unknown vfx asset: ${o.key}`);
+  // default `blend` from the asset; the leftover `key` is harmless — fx() only
+  // reads the fields it knows about.
+  const { blend, ...rest } = o;
+  return fx({ ...rest, blend: blend ?? a.blend, atlas: atlasOf(a) });
 }
 
 
@@ -615,4 +635,167 @@ export const RECIPES: Recipe[] = [
     velMin: [-16, -16], velMax: [16, 16], lifeMin: 3.2, lifeMax: 4.6, drag: 0.22,
     obstacle: { radius: 215, strength: 600, softness: 0.9, swirl: 3600, carry: 0 },
     colorFrom: '#ffd8f4cc', colorTo: '#7a3cff00', colorEase: 'sine.inOut', scaleFrom: 0.75, scaleTo: 0.4 }),
+
+  // ── Brackeys VFX (CC0) — textured recipes ─────────────────────────────────
+  // Each binds one catalog image. Opaque sprites use additive blend (they sit
+  // on black), alpha sprites use normal, animated flipbooks play once over the
+  // particle's life. Fork any of these to see its texture in the Asset Manager.
+
+  // magical sparks — opaque, additive
+  vfx({ slug: 'spark-jet', title: 'Spark Jet', group: 'vfx', key: 'spark_01',
+    oneLiner: 'A jet of hot sparks arcing up and raining back down.', tags: ['spark', 'fountain', 'opaque'],
+    capacity: 700, rate: 110, velMin: [-70, -360], velMax: [70, -190], lifeMin: 0.9, lifeMax: 1.7, gravity: [0, 340],
+    colorFrom: '#ffe6a8ff', colorTo: '#ff5a0000', colorEase: 'sine.in', scaleFrom: 1.6, scaleTo: 0.6 }),
+  vfx({ slug: 'spark-burst', title: 'Spark Burst', group: 'vfx', key: 'spark_03',
+    oneLiner: 'A radial pop of cyan sparks that drag to a stop.', tags: ['spark', 'burst', 'opaque'],
+    capacity: 700, mode: 'burst', burstCount: 110, burstInterval: 1.4, velMin: [-300, -300], velMax: [300, 300],
+    lifeMin: 0.7, lifeMax: 1.3, gravity: [0, 200], drag: 0.7,
+    colorFrom: '#c3f0ffff', colorTo: '#1f6bff00', colorEase: 'sine.in', scaleFrom: 1.8, scaleTo: 0.5 }),
+  vfx({ slug: 'spark-drift', title: 'Spark Drift', group: 'vfx', key: 'spark_05',
+    oneLiner: 'Lazy embers floating upward off a fire.', tags: ['spark', 'ambient', 'opaque'],
+    capacity: 500, rate: 70, shape: 'rect', size: [180, 12], velMin: [-24, -70], velMax: [24, -24],
+    lifeMin: 1.4, lifeMax: 2.6, colorFrom: '#fff0c0ff', colorTo: '#ff7a0000', colorEase: 'sine.in', scaleFrom: 1.3, scaleTo: 0.7 }),
+  vfx({ slug: 'spark-swirl', title: 'Spark Swirl', group: 'vfx', key: 'spark_07',
+    oneLiner: 'Sparks caught in a magenta whirlpool.', tags: ['spark', 'swirl', 'opaque'],
+    capacity: 900, rate: 150, shape: 'circle', radius: 40, velMin: [-16, -16], velMax: [16, 16],
+    lifeMin: 1.4, lifeMax: 2.2, drag: 0.08, vortex: [1700, 130, 280],
+    colorFrom: '#ffc0f0ff', colorTo: '#a021ff00', colorEase: 'sine.out', scaleFrom: 1.4, scaleTo: 0.6 }),
+  vfx({ slug: 'arcane-motes', title: 'Arcane Motes', group: 'vfx', key: 'magic_01',
+    oneLiner: 'Soft magical motes rising and fading.', tags: ['magic', 'ambient', 'opaque'],
+    capacity: 500, rate: 60, shape: 'rect', size: [220, 60], velMin: [-16, -50], velMax: [16, -16],
+    lifeMin: 1.6, lifeMax: 3, colorFrom: '#bfe0ffff', colorTo: '#7a4bff00', colorEase: 'sine.inOut', scaleFrom: 2, scaleTo: 1 }),
+  vfx({ slug: 'rune-swirl', title: 'Rune Swirl', group: 'vfx', key: 'magic_03',
+    oneLiner: 'Violet glyph-light spun around a caster.', tags: ['magic', 'swirl', 'opaque'],
+    capacity: 800, rate: 130, shape: 'circle', radius: 46, velMin: [-12, -12], velMax: [12, 12],
+    lifeMin: 1.5, lifeMax: 2.4, drag: 0.06, vortex: [1500, 90, 300],
+    colorFrom: '#e0c0ffff', colorTo: '#5a1fd000', colorEase: 'sine.out', scaleFrom: 2.2, scaleTo: 0.9 }),
+  vfx({ slug: 'fae-dust', title: 'Fae Dust', group: 'vfx', key: 'magic_05',
+    oneLiner: 'Teal faerie dust drifting on a breeze.', tags: ['magic', 'ambient', 'opaque'],
+    capacity: 500, rate: 55, shape: 'rect', size: [260, 120], velMin: [-20, -30], velMax: [20, 10],
+    lifeMin: 2, lifeMax: 3.4, wind: [40, 20], colorFrom: '#b8ffe6ff', colorTo: '#1f9bff00', colorEase: 'sine.inOut', scaleFrom: 1.8, scaleTo: 0.9 }),
+  // magical sparks — alpha, normal blend (covers transparent textures)
+  vfx({ slug: 'soft-sparks', title: 'Soft Sparks', group: 'vfx', key: 'spark_01_a',
+    oneLiner: 'The same sparks as an alpha texture, composited normally.', tags: ['spark', 'alpha', 'normal'],
+    capacity: 600, rate: 90, velMin: [-60, -300], velMax: [60, -150], lifeMin: 0.9, lifeMax: 1.7, gravity: [0, 320],
+    colorFrom: '#fff2d0ff', colorTo: '#ffb86633', colorEase: 'sine.in', scaleFrom: 1.5, scaleTo: 0.7 }),
+  vfx({ slug: 'gentle-glyphs', title: 'Gentle Glyphs', group: 'vfx', key: 'magic_01_a',
+    oneLiner: 'Alpha magic motes — no additive bloom, just soft light.', tags: ['magic', 'alpha', 'normal'],
+    capacity: 400, rate: 46, shape: 'rect', size: [220, 80], velMin: [-14, -46], velMax: [14, -14],
+    lifeMin: 1.8, lifeMax: 3, colorFrom: '#dcccffff', colorTo: '#8a6bff22', colorEase: 'sine.inOut', scaleFrom: 2, scaleTo: 1 }),
+
+  // stars
+  vfx({ slug: 'star-fall', title: 'Star Fall', group: 'vfx', key: 'star_01',
+    oneLiner: 'Golden stars raining down and twinkling out.', tags: ['star', 'ui', 'opaque'],
+    capacity: 500, rate: 46, shape: 'rect', size: [420, 8], velMin: [-20, 40], velMax: [20, 150], lifeMin: 1.6, lifeMax: 3,
+    gravity: [0, 60], colorFrom: '#fff4c0ff', colorTo: '#ffcf5a00', colorEase: 'sine.in', scaleFrom: 2.4, scaleTo: 1.4 }),
+  vfx({ slug: 'twinkle-field', title: 'Twinkle Field', group: 'vfx', key: 'star_03',
+    oneLiner: 'A field of stars fading in and out in place.', tags: ['star', 'ambient', 'opaque'],
+    capacity: 260, rate: 22, shape: 'rect', size: [460, 300], velMin: [-4, -4], velMax: [4, 4], lifeMin: 1.4, lifeMax: 2.6,
+    colorFrom: '#ffffffff', colorTo: '#a8c8ff00', colorEase: 'sine.inOut', scaleFrom: 2.2, scaleTo: 0.4 }),
+  vfx({ slug: 'shooting-stars', title: 'Shooting Stars', group: 'vfx', key: 'star_05',
+    oneLiner: 'Bright stars streaking across on a diagonal.', tags: ['star', 'trails', 'opaque'],
+    capacity: 300, rate: 12, shape: 'rect', size: [40, 260], velMin: [220, 90], velMax: [360, 150], lifeMin: 1.2, lifeMax: 2,
+    colorFrom: '#eafaffff', colorTo: '#4aa8ff00', colorEase: 'sine.in', scaleFrom: 2, scaleTo: 0.8 }),
+  vfx({ slug: 'soft-stars', title: 'Soft Stars', group: 'vfx', key: 'star_01_a',
+    oneLiner: 'Alpha stars drifting up — soft, no glow.', tags: ['star', 'alpha', 'normal'],
+    capacity: 300, rate: 30, shape: 'rect', size: [360, 40], velMin: [-14, -60], velMax: [14, -20], lifeMin: 1.6, lifeMax: 2.8,
+    colorFrom: '#ffffffff', colorTo: '#cfe0ff22', colorEase: 'sine.inOut', scaleFrom: 2, scaleTo: 1 }),
+
+  // fire / light
+  vfx({ slug: 'candle-flames', title: 'Candle Flames', group: 'vfx', key: 'flame_01',
+    oneLiner: 'Little flame sprites licking upward.', tags: ['fire', 'opaque'],
+    capacity: 400, rate: 60, shape: 'rect', size: [40, 8], velMin: [-12, -120], velMax: [12, -70], lifeMin: 0.7, lifeMax: 1.3,
+    colorFrom: '#ffe0a0ff', colorTo: '#ff300000', colorEase: 'sine.in', scaleFrom: 3, scaleTo: 1.2 }),
+  vfx({ slug: 'ember-rise', title: 'Ember Rise', group: 'vfx', key: 'flame_02',
+    oneLiner: 'Fat orange embers rising off coals.', tags: ['fire', 'opaque'],
+    capacity: 500, rate: 70, shape: 'rect', size: [120, 10], velMin: [-24, -150], velMax: [24, -80], lifeMin: 0.9, lifeMax: 1.8,
+    wind: [30, -10], colorFrom: '#ffd28aff', colorTo: '#ff2e0000', colorEase: 'sine.in', scaleFrom: 2.6, scaleTo: 1 }),
+  vfx({ slug: 'glow-orbs', title: 'Glow Orbs', group: 'vfx', key: 'circle_02',
+    oneLiner: 'Fat soft orbs bobbing and fading.', tags: ['ambient', 'opaque'],
+    capacity: 260, rate: 30, shape: 'rect', size: [340, 200], velMin: [-10, -22], velMax: [10, 10], lifeMin: 1.6, lifeMax: 3,
+    colorFrom: '#aef0ffff', colorTo: '#2b8cff00', colorEase: 'sine.inOut', scaleFrom: 4, scaleTo: 2 }),
+  vfx({ slug: 'light-bloom', title: 'Light Bloom', group: 'vfx', key: 'light_01',
+    oneLiner: 'Gentle blooms of light welling up.', tags: ['ambient', 'opaque'],
+    capacity: 220, rate: 24, shape: 'rect', size: [360, 120], velMin: [-8, -40], velMax: [8, -12], lifeMin: 1.4, lifeMax: 2.6,
+    colorFrom: '#fff0d0ff', colorTo: '#ffb04a00', colorEase: 'sine.inOut', scaleFrom: 4.5, scaleTo: 2 }),
+  vfx({ slug: 'lens-flares', title: 'Lens Flares', group: 'vfx', key: 'flare_01',
+    oneLiner: 'Anamorphic flares drifting sideways.', tags: ['abstract', 'opaque'],
+    capacity: 180, rate: 16, shape: 'rect', size: [80, 260], velMin: [60, -8], velMax: [140, 8], lifeMin: 1.6, lifeMax: 2.8,
+    colorFrom: '#cfeaffff', colorTo: '#3a7bff00', colorEase: 'sine.inOut', scaleFrom: 4, scaleTo: 3 }),
+  vfx({ slug: 'muzzle-flash', title: 'Muzzle Flash', group: 'vfx', key: 'muzzle_01',
+    oneLiner: 'A short forward burst — gun muzzle style.', tags: ['fire', 'burst', 'opaque'],
+    capacity: 200, mode: 'burst', burstCount: 10, burstInterval: 0.7, velMin: [200, -30], velMax: [420, 30],
+    lifeMin: 0.2, lifeMax: 0.45, colorFrom: '#fff2c0ff', colorTo: '#ff6a0000', colorEase: 'power2.in', scaleFrom: 5, scaleTo: 2 }),
+  vfx({ slug: 'twirl-trails', title: 'Twirl Trails', group: 'vfx', key: 'twirl_01',
+    oneLiner: 'Twirl sprites caught in a slow vortex.', tags: ['swirl', 'opaque'],
+    capacity: 500, rate: 90, shape: 'circle', radius: 30, velMin: [-10, -10], velMax: [10, 10], lifeMin: 1.6, lifeMax: 2.6,
+    drag: 0.05, vortex: [1300, 70, 320], colorFrom: '#d0f0ffff', colorTo: '#2b6cff00', colorEase: 'sine.out', scaleFrom: 2.6, scaleTo: 1 }),
+
+  // smoke — alpha, normal blend (the transparent smokes)
+  vfx({ slug: 'soft-smoke', title: 'Soft Smoke', group: 'vfx', key: 'smoke_01_a',
+    oneLiner: 'Grey smoke billowing up and thinning out.', tags: ['smoke', 'alpha', 'normal'],
+    capacity: 300, rate: 26, shape: 'rect', size: [80, 12], velMin: [-16, -70], velMax: [16, -30], lifeMin: 1.8, lifeMax: 3.2,
+    wind: [24, -8], colorFrom: '#c8c8c8cc', colorTo: '#20202000', colorEase: 'sine.in', scaleFrom: 5, scaleTo: 11 }),
+  vfx({ slug: 'wisp-smoke', title: 'Wisp Smoke', group: 'vfx', key: 'smoke_03_a',
+    oneLiner: 'Thin wisps curling off a smoulder.', tags: ['smoke', 'alpha', 'normal'],
+    capacity: 240, rate: 20, shape: 'rect', size: [40, 8], velMin: [-10, -90], velMax: [10, -50], lifeMin: 1.6, lifeMax: 3,
+    wind: [40, -12], colorFrom: '#d8d8d8bb', colorTo: '#30303000', colorEase: 'sine.in', scaleFrom: 4, scaleTo: 9 }),
+  vfx({ slug: 'steam-plume', title: 'Steam Plume', group: 'vfx', key: 'smoke_05_a',
+    oneLiner: 'A soft white plume of steam.', tags: ['smoke', 'alpha', 'normal'],
+    capacity: 260, rate: 24, shape: 'rect', size: [60, 10], velMin: [-12, -80], velMax: [12, -40], lifeMin: 1.6, lifeMax: 3,
+    colorFrom: '#f0f0f0cc', colorTo: '#c0c0c000', colorEase: 'sine.in', scaleFrom: 5, scaleTo: 12 }),
+  vfx({ slug: 'dust-kick', title: 'Dust Kick', group: 'vfx', key: 'dirt_01_a',
+    oneLiner: 'A low puff of dust kicked outward.', tags: ['smoke', 'alpha', 'normal'],
+    capacity: 260, mode: 'burst', burstCount: 26, burstInterval: 1.4, velMin: [-160, -70], velMax: [160, 10],
+    lifeMin: 0.8, lifeMax: 1.6, gravity: [0, 120], drag: 0.5, colorFrom: '#b0a290cc', colorTo: '#6b5a4400', colorEase: 'sine.in', scaleFrom: 4, scaleTo: 9 }),
+
+  // animated flipbooks — one particle plays the whole sheet
+  vfx({ slug: 'magic-blast', title: 'Magic Blast', group: 'vfx', key: 'explosion_smoke_01_8x8',
+    oneLiner: 'A blue arcane blast — a 64-frame flipbook per particle.', tags: ['explosion', 'flipbook', 'sheet'],
+    capacity: 40, mode: 'burst', burstCount: 3, burstInterval: 1.9, velMin: [-30, -40], velMax: [30, 0], lifeMin: 1.7, lifeMax: 2,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 22, scaleTo: 26 }),
+  vfx({ slug: 'explosion', title: 'Explosion', group: 'vfx', key: 'explosion_01_8x8',
+    oneLiner: 'A fiery flipbook explosion on a loop.', tags: ['explosion', 'flipbook', 'sheet'],
+    capacity: 40, mode: 'burst', burstCount: 2, burstInterval: 1.7, velMin: [-20, -20], velMax: [20, 20], lifeMin: 1.5, lifeMax: 1.75,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 24, scaleTo: 28 }),
+  vfx({ slug: 'fire-plume-anim', title: 'Fire Plume', group: 'vfx', key: 'fire_01_8x8',
+    oneLiner: 'Animated fire — a rising column of flipbook flame.', tags: ['fire', 'flipbook', 'sheet'],
+    capacity: 60, rate: 8, velMin: [-10, -30], velMax: [10, -10], lifeMin: 1.9, lifeMax: 2.3,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 18, scaleTo: 22 }),
+  vfx({ slug: 'bonfire', title: 'Bonfire', group: 'vfx', key: 'fire_03_8x8',
+    oneLiner: 'A thick animated bonfire flame.', tags: ['fire', 'flipbook', 'sheet'],
+    capacity: 60, rate: 7, velMin: [-8, -24], velMax: [8, -6], lifeMin: 1.9, lifeMax: 2.3,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 20, scaleTo: 24 }),
+  vfx({ slug: 'wispy-smoke-anim', title: 'Wispy Smoke', group: 'vfx', key: 'wispy_smoke_01_8x8',
+    oneLiner: 'A slow animated smoke flipbook drifting up.', tags: ['smoke', 'flipbook', 'sheet'],
+    capacity: 50, rate: 5, velMin: [-14, -34], velMax: [14, -14], lifeMin: 2.4, lifeMax: 2.9, wind: [24, -8],
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 18, scaleTo: 26 }),
+  vfx({ slug: 'cloud-puff', title: 'Cloud Puff', group: 'vfx', key: 'cloud_01_8x8',
+    oneLiner: 'A puff of cloud, born and gone in one loop.', tags: ['smoke', 'flipbook', 'sheet'],
+    capacity: 40, mode: 'burst', burstCount: 2, burstInterval: 2.4, velMin: [-16, -20], velMax: [16, 0], lifeMin: 2.6, lifeMax: 3.1,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 20, scaleTo: 28 }),
+  vfx({ slug: 'cartoon-boom', title: 'Cartoon Boom', group: 'vfx', key: 'explosion_6x5',
+    oneLiner: 'A stylised pre-drawn boom (6×5 sheet).', tags: ['explosion', 'sheet'],
+    capacity: 40, mode: 'burst', burstCount: 3, burstInterval: 1.2, velMin: [-40, -40], velMax: [40, 40], lifeMin: 0.9, lifeMax: 1.1,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 20, scaleTo: 24 }),
+  vfx({ slug: 'star-burst-anim', title: 'Star Burst', group: 'vfx', key: 'star_explosion_6x5',
+    oneLiner: 'A pre-drawn burst of glittering stars.', tags: ['explosion', 'star', 'sheet'],
+    capacity: 40, mode: 'burst', burstCount: 3, burstInterval: 1.2, velMin: [-50, -50], velMax: [50, 50], lifeMin: 0.9, lifeMax: 1.1,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 20, scaleTo: 24 }),
+  vfx({ slug: 'power-charge', title: 'Power Charge', group: 'vfx', key: 'charge_7x6',
+    oneLiner: 'A looping charge-up ring pulling inward.', tags: ['magic', 'sheet'],
+    capacity: 40, rate: 4, shape: 'circle', radius: 10, velMin: [-6, -6], velMax: [6, 6], lifeMin: 1.4, lifeMax: 1.8,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 22, scaleTo: 22 }),
+  vfx({ slug: 'vortex-portal', title: 'Vortex Portal', group: 'vfx', key: 'vortex_6x5',
+    oneLiner: 'A slowly spinning portal vortex.', tags: ['swirl', 'sheet'],
+    capacity: 30, rate: 2, velMin: [-4, -4], velMax: [4, 4], lifeMin: 1.6, lifeMax: 2.2,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.inOut', scaleFrom: 26, scaleTo: 26 }),
+  vfx({ slug: 'shock-ring', title: 'Shock Ring', group: 'vfx', key: 'electric_ring_6x5',
+    oneLiner: 'An expanding ring of electricity.', tags: ['abstract', 'sheet'],
+    capacity: 30, mode: 'burst', burstCount: 2, burstInterval: 1.1, velMin: [-8, -8], velMax: [8, 8], lifeMin: 0.9, lifeMax: 1.1,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 18, scaleTo: 24 }),
+  vfx({ slug: 'torch', title: 'Torch', group: 'vfx', key: 'flame_01_16x4',
+    oneLiner: 'A tall looping torch flame (16×4 flipbook).', tags: ['fire', 'flipbook', 'sheet'],
+    capacity: 40, rate: 5, shape: 'rect', size: [20, 6], velMin: [-4, -18], velMax: [4, -6], lifeMin: 1.6, lifeMax: 2.2,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 16, scaleTo: 18 }),
 ];

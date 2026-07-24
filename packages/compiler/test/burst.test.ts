@@ -89,7 +89,7 @@ describe('death-burst codegen', () => {
 
   it('clamps max to [1,64] and defaults sensibly', () => {
     const g = burstGraph();
-    (g.nodes.find((n) => n.id === 'n6') as { structural: { max: string } }).structural.max = '999';
+    g.nodes.find((n) => n.id === 'n6')!.structural!.max = '999';
     expect(compile(bundle(g), V1_CATALOG, 'webgpu').burst).toEqual({ max: 64 });
   });
 });

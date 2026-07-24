@@ -1,0 +1,25 @@
+{
+  "name": "@pylinka/example-assetpack",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "assets": "assetpack -c .assetpack.js",
+    "predev": "assetpack -c .assetpack.js",
+    "dev": "vite",
+    "prebuild": "assetpack -c .assetpack.js",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pylinka/core": "workspace:*",
+    "@pylinka/graph": "workspace:*",
+    "pixi.js": "^8.19.0"
+  },
+  "devDependencies": {
+    "@assetpack/core": "^1.7.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.4.3"
+  }
+}

@@ -184,6 +184,8 @@ interface EditorState {
   removeSystem(id: string): void;
   renameSystem(id: string, name: string): void;
   toggleSystem(id: string): void;
+  /** set the active system's blend mode (preview re-creates the engine) */
+  setActiveBlend(mode: System['blendMode']): void;
   /** make `childId` spawn on `parentId`'s particle deaths (null = born at cursor) */
   setSubParent(childId: string, parentId: string | null): void;
   // knobs (project params)
@@ -429,6 +431,10 @@ export const useEditor = create<EditorState>((set, get) => {
         const sys = p.systems.find((x) => x.id === id);
         if (sys) sys.enabled = !sys.enabled;
       }, true);
+    },
+
+    setActiveBlend(mode) {
+      commit((_p, sys) => { sys.blendMode = mode; }, true);
     },
 
     setSubParent(childId, parentId) {
