@@ -92,6 +92,9 @@ export function Preview() {
   const followRef = useRef(follow);
   followRef.current = follow;
   const mouseRef = useRef<[number, number] | null>(null);
+  // preview view transform — a pure CSS zoom/pan of the canvas (no engine cost).
+  const [view, setView] = useState({ z: 1, x: 0, y: 0 });
+  const panRef = useRef<{ cx: number; cy: number; vx: number; vy: number } | null>(null);
   const [hud, setHud] = useState('');
   const [backend, setBackend] = useState<BackendChoice>(initialBackend);
   const backendRef = useRef(backend);
@@ -318,12 +321,29 @@ export function Preview() {
   }, [rev]);
 
   const onMove = (e: React.PointerEvent) => {
+    if (panRef.current) {
+      setView((v) => ({ ...v, x: panRef.current!.vx + (e.clientX - panRef.current!.cx), y: panRef.current!.vy + (e.clientY - panRef.current!.cy) }));
+      return;
+    }
     if (!followRef.current) return; // emitter parked unless "follow" is on
     const c = canvasRef.current!;
     const r = c.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    mouseRef.current = [(e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr];
+    // map client → canvas pixels via the rect, so it's correct under CSS zoom
+    mouseRef.current = [((e.clientX - r.left) / r.width) * c.width, ((e.clientY - r.top) / r.height) * c.height];
   };
+  const onPanDown = (e: React.PointerEvent) => {
+    if (followRef.current) return; // when following, drag/hover drives the emitter
+    panRef.current = { cx: e.clientX, cy: e.clientY, vx: view.x, vy: view.y };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onPanUp = (e: React.PointerEvent) => {
+    panRef.current = null;
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+  };
+  const onWheel = (e: React.WheelEvent) => {
+    setView((v) => ({ ...v, z: Math.min(8, Math.max(0.25, v.z * (e.deltaY < 0 ? 1.12 : 0.893))) }));
+  };
+  const fitView = () => setView({ z: 1, x: 0, y: 0 });
 
   return (
     <div className="flex h-full flex-col">
@@ -341,8 +361,20 @@ export function Preview() {
         </select>
         <span className="min-w-0 flex-1 truncate text-right font-mono text-muted-foreground">{hud}</span>
       </div>
-      <div className="relative min-h-[340px] flex-1 bg-black">
-        <canvas key={backend} ref={canvasRef} className="block h-full w-full" onPointerMove={onMove} onPointerLeave={() => (mouseRef.current = null)} />
+      <div
+        className="relative min-h-[340px] flex-1 overflow-hidden bg-black"
+        style={{ cursor: view.z !== 1 || view.x !== 0 || view.y !== 0 ? 'grab' : 'default' }}
+        onPointerDown={onPanDown}
+        onPointerMove={onMove}
+        onPointerUp={onPanUp}
+        onPointerLeave={() => { mouseRef.current = null; panRef.current = null; }}
+        onWheel={onWheel}>
+        <canvas
+          key={backend}
+          ref={canvasRef}
+          className="block h-full w-full"
+          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, transformOrigin: 'center' }}
+        />
         <PathOverlay editing={pathEdit} />
         {pathEdit && (
           <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[10px] text-[#c4b5fd]">
@@ -364,6 +396,14 @@ export function Preview() {
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
           {follow ? 'following cursor' : orbit ? 'orbiting' : 'parked at centre'}
         </span>
+        <span className="font-mono text-[10px] text-muted-foreground">{Math.round(view.z * 100)}%</span>
+        <button
+          className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+          title="Fit — reset zoom & pan (scroll to zoom, drag to pan)"
+          disabled={view.z === 1 && view.x === 0 && view.y === 0}
+          onClick={fitView}>
+          ⛶ Fit
+        </button>
       </div>
     </div>
   );
