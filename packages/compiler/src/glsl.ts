@@ -53,11 +53,9 @@ export const WEBGL2_LAYOUT: Webgl2Layout = {
   spawnCursorUniform: 'u_spawnCursor',
 };
 
-/** The §13.9 ease function as GLSL, named per distinct ease key. */
-export function easeFnGlsl(name: string, easeBodyWgsl: string): string {
-  // ease bodies only ever declare `let u` (an f32) — see wgsl.ts EASE_BODIES
-  return `float ${name}(float t) { ${easeBodyWgsl.replace(/\blet\s+/g, 'float ')} }`;
-}
+// The §13.9 ease function as GLSL is centralized in ease.ts (single source of
+// truth). Re-exported here so backend call sites keep importing from './glsl'.
+export { easeFnGlsl } from './ease.js';
 
 export interface GlslStepOptions {
   slots: number;

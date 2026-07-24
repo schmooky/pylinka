@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.2.1",
+    "@pylinka/compiler": "workspace:*",
     "@pylinka/core": "workspace:*",
     "@pylinka/graph": "workspace:*",
     "@xyflow/react": "^12.3.0",

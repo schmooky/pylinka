@@ -60,6 +60,9 @@ importers:
       '@astrojs/sitemap':
         specifier: ^3.2.1
         version: 3.7.3
+      '@pylinka/compiler':
+        specifier: workspace:*
+        version: link:../../packages/compiler
       '@pylinka/core':
         specifier: workspace:*
         version: link:../../packages/core

@@ -60,37 +60,10 @@ fn safeNormalize(v: vec2f) -> vec2f {
   return parts.join('\n');
 }
 
-/** WGSL/GLSL-safe function name for an ease key ('sine.out' → 'easeSel_sine_out'). */
-export function easeFnName(key: string): string {
-  return 'easeSel_' + key.replace(/\./g, '_');
-}
-
-/** The §13.9 ease function, inlined per distinct `ease` choice used by a system. */
-export function easeFn(ease: string): string {
-  const body = EASE_BODIES[ease];
-  if (body === undefined) throw new Error(`Unknown ease "${ease}"`);
-  return `fn ${easeFnName(ease)}(t: f32) -> f32 { ${body} }`;
-}
-
-export const EASE_BODIES: Record<string, string> = {
-  linear: 'return t;',
-  'power1.in': 'return t * t;',
-  'power1.out': 'let u = 1.0 - t; return 1.0 - u * u;',
-  'power1.inOut': 'if (t < 0.5) { return 2.0 * t * t; } let u = 1.0 - t; return 1.0 - 2.0 * u * u;',
-  'power2.in': 'return t * t * t;',
-  'power2.out': 'let u = 1.0 - t; return 1.0 - u * u * u;',
-  'power2.inOut':
-    'if (t < 0.5) { return 4.0 * t * t * t; } let u = 1.0 - t; return 1.0 - 4.0 * u * u * u;',
-  'power3.in': 'return t * t * t * t;',
-  'power3.out': 'let u = 1.0 - t; return 1.0 - u * u * u * u;',
-  'sine.in': 'return 1.0 - cos(t * 1.5707963267948966);',
-  'sine.out': 'return sin(t * 1.5707963267948966);',
-  'sine.inOut': 'return 0.5 - 0.5 * cos(t * 3.141592653589793);',
-  'expo.out': 'if (t >= 1.0) { return 1.0; } return 1.0 - exp2(-10.0 * t);',
-  'back.out': 'let u = t - 1.0; return 1.0 + 2.70158 * u * u * u + 1.70158 * u * u;',
-};
-
-export const EASE_KEYS = Object.keys(EASE_BODIES);
+// Easing (§13.9) is centralized in ease.ts — the single source of truth shared
+// by the WGSL/GLSL shader backends and the editor's JS curve sampler. Custom
+// cubic-bezier curves ride the same `structural.ease` string channel.
+export { EASE_BODIES, EASE_KEYS, easeFn, easeFnName } from './ease.js';
 
 /** Emit kernel scaffold (§13.5). `body` is the generated init body (indented).
  *  An emission mask (binding 7) overrides the analytic spawn offset when set:

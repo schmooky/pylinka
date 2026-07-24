@@ -19,7 +19,7 @@ import { easeFnGlsl, GLSL_DISCARD_FS, glslStepShader, glslSubStepShader } from '
 import { naturalCompare, resolveEvalTimes } from './topo.js';
 import { wgslBodyToGlsl } from './translate.js';
 import { CompileError, V1_BINDINGS, type CompiledSystem } from './types.js';
-import { EASE_BODIES, easeFn, easeFnName, emitKernel, preamble, subEmitKernel, updateKernel } from './wgsl.js';
+import { easeFn, emitKernel, preamble, subEmitKernel, updateKernel } from './wgsl.js';
 
 const INIT_OUTPUT_ORDER = [
   'output.spawnPosition',
@@ -100,7 +100,7 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
         safeNormalize: initFlags.safeNormalize || updateFlags.safeNormalize,
       },
       ...(allEases.length > 0
-        ? { easeSrcs: allEases.map((e) => easeFnGlsl(easeFnName(e), EASE_BODIES[e]!)) }
+        ? { easeSrcs: allEases.map((e) => easeFnGlsl(e)) }
         : {}),
       initBody: wgslBodyToGlsl(initBody, ctx.tempTypes),
       updateBody: wgslBodyToGlsl(body, ctx.tempTypes),
