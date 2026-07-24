@@ -122,6 +122,9 @@ export class WebGPUSystemSim {
   private readbackInflight = false;
   private destroyed = false;
   private readonly _capacity: number;
+  /** parent-slot count a sub-emitter iterates (prevAlive + subEmit dispatch).
+   *  Equals _capacity except under a death-burst, where _capacity = parentCap × max. */
+  private readonly parentCap: number;
   private subPipe: GPUComputePipeline | null = null;
   private subBind: GPUBindGroup | null = null;
   private prevAlive: GPUBuffer | null = null;
@@ -159,8 +162,13 @@ export class WebGPUSystemSim {
     );
 
     // a sub-emitter mirrors its parent slot-for-slot, so it shares the parent's
-    // capacity (the subEmit kernel indexes parent slots 1:1).
-    const cap = opts.subParent ? opts.subParent.capacity : system.capacity;
+    // capacity (the subEmit kernel indexes parent slots 1:1). A death-burst
+    // spawns up to `max` children per parent death, so its pool is
+    // parentCapacity × max — prevAlive + the subEmit dispatch still index the
+    // parent's slots, only the child pool (hot/rnd/meta/freeList) grows.
+    const burstMax = this.compiled.burst?.max ?? 1;
+    this.parentCap = opts.subParent ? opts.subParent.capacity : system.capacity;
+    const cap = opts.subParent ? this.parentCap * burstMax : system.capacity;
     this._capacity = cap;
     const mk = (size: number, usage: GPUBufferUsageFlags) => device.createBuffer({ size, usage });
     const simUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST;
@@ -255,11 +263,12 @@ export class WebGPUSystemSim {
    *  Bindings 0-6 (own sim) + 8/9 (parent hot/meta, read-only) + 10 (prevAlive). */
   private buildSubEmit(parent: { hot: GPUBuffer; meta: GPUBuffer }): void {
     const d = this.device;
+    // one shadow bit per PARENT slot (not the ×max child pool)
     this.prevAlive = d.createBuffer({
-      size: this.capacity * 4,
+      size: this.parentCap * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    d.queue.writeBuffer(this.prevAlive, 0, new Uint32Array(this.capacity));
+    d.queue.writeBuffer(this.prevAlive, 0, new Uint32Array(this.parentCap));
     const st = GPUShaderStage.COMPUTE;
     const layout = d.createBindGroupLayout({
       entries: [
@@ -407,10 +416,11 @@ export class WebGPUSystemSim {
   encodeCompute(encoder: GPUCommandEncoder): void {
     const pass = encoder.beginComputePass();
     if (this.subPipe && this.subBind) {
-      // sub-emitter: spawn one child per parent death this frame (no clock emit)
+      // sub-emitter: spawn on parent deaths this frame (no clock emit). One
+      // invocation per PARENT slot; the kernel loops the burst internally.
       pass.setBindGroup(0, this.subBind);
       pass.setPipeline(this.subPipe);
-      pass.dispatchWorkgroups(Math.ceil(this.capacity / 64));
+      pass.dispatchWorkgroups(Math.ceil(this.parentCap / 64));
     } else if (this.clock.spawnCount > 0) {
       pass.setBindGroup(0, this.computeBind);
       pass.setPipeline(this.emitPipe);

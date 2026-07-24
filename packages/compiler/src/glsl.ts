@@ -13,6 +13,8 @@
  * fragment stage that completes the program.
  */
 
+import type { SubBurst } from './wgsl.js';
+
 /** Per-particle interleaved state layout shared by compiler and runtime. */
 export interface Webgl2Attrib {
   name: string;
@@ -53,11 +55,9 @@ export const WEBGL2_LAYOUT: Webgl2Layout = {
   spawnCursorUniform: 'u_spawnCursor',
 };
 
-/** The §13.9 ease function as GLSL, named per distinct ease key. */
-export function easeFnGlsl(name: string, easeBodyWgsl: string): string {
-  // ease bodies only ever declare `let u` (an f32) — see wgsl.ts EASE_BODIES
-  return `float ${name}(float t) { ${easeBodyWgsl.replace(/\blet\s+/g, 'float ')} }`;
-}
+// The §13.9 ease function as GLSL is centralized in ease.ts (single source of
+// truth). Re-exported here so backend call sites keep importing from './glsl'.
+export { easeFnGlsl } from './ease.js';
 
 export interface GlslStepOptions {
   slots: number;
@@ -70,6 +70,9 @@ export interface GlslStepOptions {
   postIntegrate: string;
   /** setVelocity graphs omit the force/drag integration lines (§13.6) */
   setVelocity: boolean;
+  /** death-burst config (sub-step only) — spawns countMin..countMax per death
+   *  across `max` k-region passes (uniform u_burstK selects the pass). */
+  burst?: SubBurst;
 }
 
 /** The fused transform-feedback step vertex shader. */
@@ -263,6 +266,7 @@ struct SystemUniforms {
 
 uniform SystemUniforms U;
 uniform vec4 V[${o.slots}];
+${o.burst ? 'uniform int u_burstK; // which burst copy (0..max-1) this pass writes' : ''}
 
 in vec2 i_pos;
 in vec2 i_vel;
@@ -277,6 +281,7 @@ in float i_rot;
 in vec2 i_pPos;
 in uint i_pFlags;
 in uint i_pFlagsPrev;
+${o.burst ? 'in vec2 i_pVel; // parent death-velocity (for inheritance)' : ''}
 
 out vec2 o_pos;
 out vec2 o_vel;
@@ -329,15 +334,26 @@ void main() {
   uint slot = uint(gl_VertexID);
   bool wasAlive = (i_flags & 1u) != 0u;
   bool parentJustDied = ((i_pFlagsPrev & 1u) != 0u) && ((i_pFlags & 1u) == 0u);
+${
+  o.burst
+    ? `  // burst: this pass writes copy u_burstK; each death fires the first
+  //  burstN of the max copies. burstN keys off the parent slot only, so
+  //  every copy agrees on it.
+  uint dseed = hash2(U.baseSeed, hash2(slot, U.frame));
+  float burstF = mix(${o.burst.countMin}, ${o.burst.countMax}, srand(dseed, 176u));
+  uint burstN = min(uint(max(floor(burstF + 0.5), 0.0)), ${o.burst.max}u);
+  bool doSpawn = !wasAlive && parentJustDied && uint(u_burstK) < burstN;`
+    : `  bool doSpawn = !wasAlive && parentJustDied;`
+}
 
-  if (!wasAlive && parentJustDied) {
+  if (doSpawn) {
     vec2 spawnOrigin = i_pPos;
-    uint seed = hash2(U.baseSeed, hash2(slot, U.frame));
+    uint seed = hash2(U.baseSeed, ${o.burst ? 'hash2(slot, hash2(U.frame, uint(u_burstK) + 1u))' : 'hash2(slot, U.frame)'});
 
 ${o.initBody}
 
     o_pos = spawnOrigin + o_spawnLocal;
-    o_vel = o_initVel;
+    o_vel = ${o.burst ? 'o_initVel + (' + o.burst.inherit + ') * i_pVel' : 'o_initVel'};
     o_life = max(o_initLife, 1e-4);
     o_age = 0.0;
     o_seed = seed;

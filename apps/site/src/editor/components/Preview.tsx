@@ -9,10 +9,8 @@ import { createCompiledParticles, type CompiledParticlesHandle } from '@pylinka/
 import { createPathDriver, type PathDriver } from '@pylinka/core';
 import type { System } from '@pylinka/graph';
 import { useEditor } from '../store';
+import { usePreview } from '../previewStore';
 import { frameSize, type EditorProject } from '../types';
-import { Assets } from './Assets';
-import { Knobs } from './Knobs';
-import { EmitterPanel } from './EmitterPanel';
 import { PathOverlay } from './PathOverlay';
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -72,6 +70,15 @@ function initialBackend(): BackendChoice {
   return v === 'webgpu' || v === 'webgl2' ? v : 'webgl';
 }
 
+/** The single active pointer tool for the preview. Scroll always zooms; Fit resets. */
+type Tool = 'pan' | 'follow' | 'orbit' | 'spawn';
+const TOOLS: { id: Tool; icon: string; label: string; hint: string }[] = [
+  { id: 'pan', icon: '✋', label: 'Pan', hint: 'drag to move the view · scroll to zoom' },
+  { id: 'follow', icon: '⌖', label: 'Follow', hint: 'the emitter tracks your cursor' },
+  { id: 'orbit', icon: '⟳', label: 'Orbit', hint: 'the emitter circles the centre' },
+  { id: 'spawn', icon: '✛', label: 'Spawn', hint: 'click the preview to burst there' },
+];
+
 export function Preview() {
   const project = useEditor((s) => s.project);
   const rev = useEditor((s) => s.rev);
@@ -84,11 +91,25 @@ export function Preview() {
   projRef.current = project;
 
   // off by default: a still emitter shows the graph you authored, not a motion
-  // the preview added. Mouse still overrides, and trajectory splines still run.
-  const [orbit, setOrbit] = useState(false);
-  const orbitRef = useRef(orbit);
-  orbitRef.current = orbit;
+  // the preview added. Trajectory splines still run regardless.
+  // ONE active pointer tool at a time (small toolbar): pan the view · make the
+  // emitter follow the cursor · orbit the emitter · click to spawn a burst.
+  const [tool, setTool] = useState<Tool>('pan');
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
   const mouseRef = useRef<[number, number] | null>(null);
+  // preview view transform — a pure CSS zoom/pan of the canvas (no engine cost).
+  const [view, setView] = useState({ z: 1, x: 0, y: 0 });
+  const panRef = useRef<{ cx: number; cy: number; vx: number; vy: number } | null>(null);
+  // interactive spawn tester — spawn a burst on the ACTIVE emitter on demand
+  // (the runtime API a dev calls: handle.spawnBurst(n)). Optionally at a click.
+  const activeSystemId = useEditor((s) => s.activeSystemId);
+  const activeSysRef = useRef(activeSystemId);
+  activeSysRef.current = activeSystemId;
+  const [burstCount, setBurstCount] = useState(100);
+  const burstCountRef = useRef(burstCount);
+  burstCountRef.current = burstCount;
+  const spawnReq = useRef<{ x: number; y: number } | null>(null);
   const [hud, setHud] = useState('');
   const [backend, setBackend] = useState<BackendChoice>(initialBackend);
   const backendRef = useRef(backend);
@@ -100,11 +121,10 @@ export function Preview() {
     window.clearTimeout(recompTimer.current);
     recompTimer.current = window.setTimeout(() => setRecompiled(''), 1800);
   };
-  const [knobs, setKnobs] = useState<Record<string, number>>({});
-  const knobsRef = useRef(knobs);
-  knobsRef.current = knobs;
-  const [tab, setTab] = useState<'knobs' | 'emitter' | 'assets'>('knobs');
-  const [pathEdit, setPathEdit] = useState(false);
+  // knobs + pathEdit live in the preview store so the left-panel Knobs/Emitter
+  // tabs can drive them; Preview owns the handles and registers the apply hook.
+  const setKnobsStore = usePreview((s) => s.setKnobs);
+  const pathEdit = usePreview((s) => s.pathEdit);
 
   // (re)create one particle handle per ENABLED system, PARENTS FIRST so a
   // sub-emitter can wire to its parent's live handle. Only the first handle
@@ -192,7 +212,7 @@ export function Preview() {
           h = ch;
         }
         h.autoClear = i === 0;
-        for (const [n, v] of Object.entries(knobsRef.current)) h.setKnob(n, v);
+        for (const [n, v] of Object.entries(usePreview.getState().knobs)) h.setKnob(n, v);
         handles.push(h);
         sysIds.push(sys.id);
       } catch (e) {
@@ -221,9 +241,10 @@ export function Preview() {
 
     const init: Record<string, number> = {};
     for (const p of projRef.current.params) if (p.default.t === 'f32') init[p.name] = p.default.v;
-    const seeded = Object.keys(knobsRef.current).length > 0 ? knobsRef.current : init;
-    setKnobs(seeded);
-    knobsRef.current = seeded;
+    const cur = usePreview.getState().knobs;
+    setKnobsStore(Object.keys(cur).length > 0 ? cur : init);
+    // let the left-panel Knobs tab push live values into the running handles
+    usePreview.getState().setApply((name, v) => fxRef.current.forEach((h) => h.setKnob(name, v)));
     setHud('');
     void recreate();
 
@@ -239,8 +260,8 @@ export function Preview() {
       const handles = fxRef.current;
       if (handles.length) {
         let ex: number, ey: number;
-        if (mouseRef.current) [ex, ey] = mouseRef.current;
-        else if (orbitRef.current) {
+        if (toolRef.current === 'follow' && mouseRef.current) [ex, ey] = mouseRef.current;
+        else if (toolRef.current === 'orbit') {
           const r = Math.min(canvas.width, canvas.height) * 0.28;
           ex = canvas.width / 2 + Math.cos(t * 1.8) * r;
           ey = canvas.height / 2 + Math.sin(t * 1.8) * r;
@@ -269,8 +290,15 @@ export function Preview() {
           } else {
             fx.setEmitter(ex, ey);
           }
+          // click-to-spawn: fire a one-shot burst on the active emitter, at the
+          // clicked point, this frame (the emitter snaps back next frame).
+          if (sysId === activeSysRef.current && spawnReq.current) {
+            fx.setEmitter(spawnReq.current.x, spawnReq.current.y);
+            fx.spawnBurst(burstCountRef.current);
+          }
           fx.update(dt);
         }
+        spawnReq.current = null;
         acc += dt; frames++;
         if (acc >= 0.5) {
           for (const fx of handles) alive += fx.aliveCount();
@@ -314,12 +342,52 @@ export function Preview() {
     }
   }, [rev]);
 
-  const onMove = (e: React.PointerEvent) => {
+  // client coords → canvas pixels (correct under the CSS zoom transform)
+  const canvasPx = (e: { clientX: number; clientY: number }): [number, number] => {
     const c = canvasRef.current!;
     const r = c.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    mouseRef.current = [(e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr];
+    return [((e.clientX - r.left) / r.width) * c.width, ((e.clientY - r.top) / r.height) * c.height];
   };
+  const onMove = (e: React.PointerEvent) => {
+    if (panRef.current) {
+      setView((v) => ({ ...v, x: panRef.current!.vx + (e.clientX - panRef.current!.cx), y: panRef.current!.vy + (e.clientY - panRef.current!.cy) }));
+      return;
+    }
+    if (toolRef.current === 'follow') mouseRef.current = canvasPx(e);
+  };
+  // spawn `burstCount` on the active emitter at its current position (the button)
+  const spawnActive = () => {
+    const i = fxSysRef.current.indexOf(activeSysRef.current);
+    const h = i >= 0 ? fxRef.current[i] : undefined;
+    if (h) h.spawnBurst(burstCountRef.current);
+    else fxRef.current.forEach((x) => x.spawnBurst(burstCountRef.current));
+  };
+  const onPanDown = (e: React.PointerEvent) => {
+    if (toolRef.current === 'spawn') {
+      const [x, y] = canvasPx(e); // one-shot burst at the click (loop consumes it)
+      spawnReq.current = { x, y };
+      return;
+    }
+    if (toolRef.current !== 'pan') return; // follow/orbit don't drag the view
+    panRef.current = { cx: e.clientX, cy: e.clientY, vx: view.x, vy: view.y };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onPanUp = (e: React.PointerEvent) => {
+    panRef.current = null;
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+  };
+  // scroll always zooms, anchored to the cursor so the point under it stays put
+  const onWheel = (e: React.WheelEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const cx = e.clientX - (r.left + r.width / 2);
+    const cy = e.clientY - (r.top + r.height / 2);
+    setView((v) => {
+      const nz = Math.min(8, Math.max(0.25, v.z * (e.deltaY < 0 ? 1.12 : 0.893)));
+      const k = nz / v.z;
+      return { z: nz, x: cx * (1 - k) + v.x * k, y: cy * (1 - k) + v.y * k };
+    });
+  };
+  const fitView = () => setView({ z: 1, x: 0, y: 0 });
 
   return (
     <div className="flex h-full flex-col">
@@ -337,8 +405,20 @@ export function Preview() {
         </select>
         <span className="min-w-0 flex-1 truncate text-right font-mono text-muted-foreground">{hud}</span>
       </div>
-      <div className="relative min-h-[340px] flex-1 bg-black">
-        <canvas key={backend} ref={canvasRef} className="block h-full w-full" onPointerMove={onMove} onPointerLeave={() => (mouseRef.current = null)} />
+      <div
+        className="relative min-h-[340px] flex-1 overflow-hidden bg-black"
+        style={{ cursor: tool === 'spawn' ? 'crosshair' : tool === 'pan' ? 'grab' : 'default' }}
+        onPointerDown={onPanDown}
+        onPointerMove={onMove}
+        onPointerUp={onPanUp}
+        onPointerLeave={() => { mouseRef.current = null; panRef.current = null; }}
+        onWheel={onWheel}>
+        <canvas
+          key={backend}
+          ref={canvasRef}
+          className="block h-full w-full"
+          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, transformOrigin: 'center' }}
+        />
         <PathOverlay editing={pathEdit} />
         {pathEdit && (
           <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[10px] text-[#c4b5fd]">
@@ -351,34 +431,42 @@ export function Preview() {
           </div>
         )}
       </div>
-      <div className="flex items-center gap-3 border-b border-border px-3 py-2 text-xs">
-        <label className="flex items-center gap-1.5"><input type="checkbox" checked={orbit} onChange={(e) => setOrbit(e.target.checked)} /> orbit</label>
-        <button className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={() => fxRef.current.forEach((h) => h.spawnBurst(400))}>Burst</button>
-        <span className="text-muted-foreground">
-          {backend === 'webgl'
-            ? 'move mouse over canvas'
-            : 'compiled graph · full GPU pipeline'}
-        </span>
-      </div>
-      <div className="flex border-b border-border text-xs">
-        {(['knobs', 'emitter', 'assets'] as const).map((k) => (
-          <button key={k} onClick={() => setTab(k)}
-            className={`flex-1 border-b-2 py-2 capitalize ${tab === k ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
-            {k}
-          </button>
-        ))}
-      </div>
-      <div className="max-h-[42vh] shrink-0 overflow-y-auto p-3">
-        {tab === 'assets' ? (
-          <Assets />
-        ) : tab === 'emitter' ? (
-          <EmitterPanel pathEdit={pathEdit} setPathEdit={setPathEdit} />
-        ) : (
-          <Knobs values={knobs} onSet={(name, v) => {
-            setKnobs((k) => ({ ...k, [name]: v }));
-            fxRef.current.forEach((h) => h.setKnob(name, v));
-          }} />
-        )}
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs">
+        {/* one active pointer tool at a time */}
+        <div className="flex overflow-hidden rounded-md border border-border">
+          {TOOLS.map((tl) => (
+            <button
+              key={tl.id}
+              onClick={() => { setTool(tl.id); if (tl.id !== 'follow') mouseRef.current = null; }}
+              title={`${tl.label} — ${tl.hint}`}
+              className={`px-2 py-1 ${tool === tl.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
+              <span aria-hidden>{tl.icon}</span>
+            </button>
+          ))}
+        </div>
+        <span className="hidden truncate text-muted-foreground sm:inline">{TOOLS.find((t) => t.id === tool)?.hint}</span>
+        <span className="mx-0.5 h-4 w-px bg-border" />
+        {/* fire a burst on the active emitter now (runtime: handle.spawnBurst(n)) */}
+        <input
+          type="number" min={1} value={burstCount}
+          onChange={(e) => setBurstCount(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
+          className="num" style={{ width: 48 }}
+          title="Particles per manual burst" />
+        <button
+          className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="Spawn a burst on the active emitter now — the runtime API is handle.spawnBurst(n)"
+          onClick={spawnActive}>
+          Burst ▸
+        </button>
+        <span className="flex-1" />
+        <span className="font-mono text-[10px] text-muted-foreground">{Math.round(view.z * 100)}%</span>
+        <button
+          className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+          title="Fit — reset zoom & pan"
+          disabled={view.z === 1 && view.x === 0 && view.y === 0}
+          onClick={fitView}>
+          ⛶
+        </button>
       </div>
     </div>
   );

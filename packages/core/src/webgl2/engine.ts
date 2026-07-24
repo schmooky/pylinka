@@ -99,8 +99,13 @@ export class WebGL2CompiledSim {
   private cur = 0;
   private readonly _capacity: number;
   private readonly subParent: WebGL2CompiledSim | null = null;
+  /** parent-slot count (death detection loops these); child pool = parentCap × burstMax. */
+  private parentCap = 0;
+  /** death-burst copies: `max` k-region passes per frame (1 = classic sub-emitter). */
+  private burstMax = 1;
   private subProg: WebGLProgram | null = null;
-  private subVAOs: WebGLVertexArrayObject[][] = [];
+  /** [childCur][parentCur][burstK] — one VAO per ping-pong × burst copy. */
+  private subVAOs: WebGLVertexArrayObject[][][] = [];
   private uSub = new Map<string, WebGLUniformLocation | null>();
 
   private stepProg: WebGLProgram;
@@ -155,9 +160,14 @@ export class WebGL2CompiledSim {
       opts.seed,
     );
 
-    // a sub-emitter mirrors its parent slot-for-slot → shares its capacity
+    // a sub-emitter mirrors its parent slot-for-slot → shares its capacity. A
+    // death-burst spawns up to `max` children per parent death, so the child
+    // pool is parentCapacity × max, laid out in `max` blocked regions; the
+    // sub-step runs one pass per region (see subStep).
     this.subParent = opts.subParent ?? null;
-    const cap = this.subParent ? this.subParent.capacity : system.capacity;
+    this.burstMax = this.subParent ? (this.compiled.burst?.max ?? 1) : 1;
+    this.parentCap = this.subParent ? this.subParent.capacity : system.capacity;
+    const cap = this.subParent ? this.parentCap * this.burstMax : system.capacity;
     this._capacity = cap;
     this.readbackWords = new Uint32Array(cap * FLOATS);
     const zero = new Float32Array(cap * FLOATS);
@@ -198,15 +208,32 @@ export class WebGL2CompiledSim {
       'U.emitterPos', 'U.prevEmitterPos', 'U.emitterVel', 'U.dt', 'U.time',
       'U.frame', 'U.spawnCount', 'U.capacity', 'U.baseSeed', 'V[0]',
     ]) this.uSub.set(n, gl.getUniformLocation(this.subProg, n));
+    if (this.compiled.burst) this.uSub.set('u_burstK', gl.getUniformLocation(this.subProg, 'u_burstK'));
+    const regionBytes = this.parentCap * STRIDE;
     this.subVAOs = [0, 1].map((childCur) =>
       [0, 1].map((parentCur) =>
-        this.makeSubVAO(this.bufs[childCur]!, p.bufferAt(parentCur), p.bufferAt(1 - parentCur)),
+        Array.from({ length: this.burstMax }, (_, k) =>
+          this.makeSubVAO(
+            this.bufs[childCur]!,
+            k * regionBytes,
+            p.bufferAt(parentCur),
+            p.bufferAt(1 - parentCur),
+          ),
+        ),
       ),
     );
   }
 
-  /** VAO for the sub-step: own state + parent current (pos, flags) + parent prev (flags). */
-  private makeSubVAO(child: WebGLBuffer, pCur: WebGLBuffer, pPrev: WebGLBuffer): WebGLVertexArrayObject {
+  /** VAO for the sub-step. Own state is read from the child region for this
+   *  burst copy (`childOff` = k · parentCap · stride), so `max` passes cover the
+   *  whole child pool; parent cur/prev are always read from region 0 (parent
+   *  slot = vertex id). i_pVel feeds velocity inheritance under a burst. */
+  private makeSubVAO(
+    child: WebGLBuffer,
+    childOff: number,
+    pCur: WebGLBuffer,
+    pPrev: WebGLBuffer,
+  ): WebGLVertexArrayObject {
     const gl = this.gl;
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
@@ -215,8 +242,8 @@ export class WebGL2CompiledSim {
       const loc = gl.getAttribLocation(this.subProg!, a.name);
       if (loc < 0) continue;
       gl.enableVertexAttribArray(loc);
-      if (a.type === 'uint') gl.vertexAttribIPointer(loc, a.size, gl.UNSIGNED_INT, STRIDE, a.offsetBytes);
-      else gl.vertexAttribPointer(loc, a.size, gl.FLOAT, false, STRIDE, a.offsetBytes);
+      if (a.type === 'uint') gl.vertexAttribIPointer(loc, a.size, gl.UNSIGNED_INT, STRIDE, childOff + a.offsetBytes);
+      else gl.vertexAttribPointer(loc, a.size, gl.FLOAT, false, STRIDE, childOff + a.offsetBytes);
     }
     const bind = (buf: WebGLBuffer, name: string, size: number, off: number, uint: boolean) => {
       const loc = gl.getAttribLocation(this.subProg!, name);
@@ -227,6 +254,7 @@ export class WebGL2CompiledSim {
       else gl.vertexAttribPointer(loc, size, gl.FLOAT, false, STRIDE, off);
     };
     bind(pCur, 'i_pPos', 2, 0, false); // parent pos (offset 0)
+    bind(pCur, 'i_pVel', 2, 8, false); // parent death-velocity (burst inheritance; absent → skipped)
     bind(pCur, 'i_pFlags', 1, 28, true); // parent flags now (offset 28)
     bind(pPrev, 'i_pFlagsPrev', 1, 28, true); // parent flags prev
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
@@ -429,14 +457,22 @@ export class WebGL2CompiledSim {
     gl.uniform4fv(u.get('V[0]')!, this.valueTable.data);
 
     const dst = 1 - this.cur;
-    gl.bindVertexArray(this.subVAOs[this.cur]![this.subParent!.curIndex]!);
+    const parentCur = this.subParent!.curIndex;
+    const uK = this.uSub.get('u_burstK') ?? null;
+    const regionBytes = this.parentCap * STRIDE;
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, this.tf);
-    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.bufs[dst]!);
     gl.enable(gl.RASTERIZER_DISCARD);
-    gl.beginTransformFeedback(gl.POINTS);
-    gl.drawArrays(gl.POINTS, 0, this.capacity);
-    gl.endTransformFeedback();
+    // one pass per burst copy k: read child region k + parent region 0, write
+    // child region k. Without a burst this is a single whole-buffer pass.
+    for (let k = 0; k < this.burstMax; k++) {
+      if (uK) gl.uniform1i(uK, k);
+      gl.bindVertexArray(this.subVAOs[this.cur]![parentCur]![k]!);
+      gl.bindBufferRange(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.bufs[dst]!, k * regionBytes, regionBytes);
+      gl.beginTransformFeedback(gl.POINTS);
+      gl.drawArrays(gl.POINTS, 0, this.parentCap);
+      gl.endTransformFeedback();
+    }
     gl.disable(gl.RASTERIZER_DISCARD);
     gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null);
     gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, null);
@@ -547,7 +583,7 @@ export class WebGL2CompiledSim {
     gl.deleteTexture(this.tex);
     if (this.maskTex) gl.deleteTexture(this.maskTex);
     if (this.subProg) gl.deleteProgram(this.subProg);
-    for (const row of this.subVAOs) for (const v of row) gl.deleteVertexArray(v);
+    for (const a of this.subVAOs) for (const row of a) for (const v of row) gl.deleteVertexArray(v);
   }
 }
 

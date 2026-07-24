@@ -4,11 +4,18 @@ import type { Literal, PortType } from '@pylinka/graph';
 import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { useEditor } from '../store';
 import { NS_TINT } from '../nsMeta';
+import { EaseControl } from './CurvePicker';
 
 const HEADER_H = 30;
 const ROW_H = 26;
 const STRUCT_H = 30;
+const EASE_H = 56; // taller structural row: the `ease` param draws its curve inline
 const WIDTH = 210;
+
+/** Structural rows are fixed-height except `ease`, which shows a curve plot. */
+const structuralRowH = (key: string) => (key === 'ease' ? EASE_H : STRUCT_H);
+const structuralTotalH = (specs: readonly { key: string }[]) =>
+  specs.reduce((a, s) => a + structuralRowH(s.key), 0);
 
 const typeColor: Record<PortType, string> = {
   f32: 'var(--t-f32)',
@@ -101,6 +108,9 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
   const params = useEditor((s) => s.project.params);
   const setStructural = useEditor((s) => s.setStructural);
   const setValue = useEditor((s) => s.setValue);
+  const textures = useEditor((s) => s.project.textures);
+  const setNodeAsset = useEditor((s) => s.setNodeAsset);
+  const setAssetsOpen = useEditor((s) => s.setAssetsOpen);
   const deleteNode = useEditor((s) => s.deleteNode);
   const promoteValue = useEditor((s) => s.promoteValue);
   const unbindKnob = useEditor((s) => s.unbindKnob);
@@ -122,7 +132,7 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
   const inputs = schema.inputs;
   const structural = schema.structural;
   const outputs = schema.outputs;
-  const bodyH = HEADER_H + inputs.length * ROW_H + structural.length * STRUCT_H + outputs.length * ROW_H + 8;
+  const bodyH = HEADER_H + inputs.length * ROW_H + structuralTotalH(structural) + outputs.length * ROW_H + 8;
 
   const tint = NS_TINT[schema.namespace] ?? '#888';
 
@@ -208,18 +218,48 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
           );
         })}
 
-        {structural.map((s) => (
-          <div key={s.key} className="flex items-center justify-between gap-2" style={{ height: STRUCT_H }}>
-            <span className="text-muted-foreground">{s.key}</span>
-            <select className="nodrag sel" value={node.structural?.[s.key] ?? s.default}
-              onPointerDown={(e) => e.stopPropagation()}
-              onChange={(e) => setStructural(node.id, s.key, e.target.value)}>
-              {(s.key === 'param' ? params.map((pp) => pp.id) : s.options).map((opt) => (
-                <option key={opt} value={opt}>{s.key === 'param' ? (params.find((pp) => pp.id === opt)?.name ?? opt) : opt}</option>
-              ))}
-            </select>
-          </div>
-        ))}
+        {structural.map((s) =>
+          s.key === 'ease' ? (
+            <div key={s.key} className="flex flex-col justify-center" style={{ height: EASE_H }}>
+              <EaseControl
+                value={node.structural?.[s.key] ?? s.default}
+                onChange={(v) => setStructural(node.id, s.key, v)}
+              />
+            </div>
+          ) : s.key === 'asset' ? (
+            <div key={s.key} className="flex items-center gap-1" style={{ height: STRUCT_H }}>
+              <select
+                className="nodrag sel min-w-0 flex-1"
+                value={node.structural?.asset ?? ''}
+                onPointerDown={(e) => e.stopPropagation()}
+                onChange={(e) => setNodeAsset(node.id, e.target.value || null)}>
+                <option value="">None</option>
+                {(textures ?? []).map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              <button
+                className="nodrag shrink-0 rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                style={{ borderColor: 'var(--color-border)' }}
+                title="Open the asset manager"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => setAssetsOpen(true)}>
+                ⋯
+              </button>
+            </div>
+          ) : (
+            <div key={s.key} className="flex items-center justify-between gap-2" style={{ height: STRUCT_H }}>
+              <span className="text-muted-foreground">{s.key}</span>
+              <select className="nodrag sel" value={node.structural?.[s.key] ?? s.default}
+                onPointerDown={(e) => e.stopPropagation()}
+                onChange={(e) => setStructural(node.id, s.key, e.target.value)}>
+                {(s.key === 'param' ? params.map((pp) => pp.id) : s.options).map((opt) => (
+                  <option key={opt} value={opt}>{s.key === 'param' ? (params.find((pp) => pp.id === opt)?.name ?? opt) : opt}</option>
+                ))}
+              </select>
+            </div>
+          ),
+        )}
 
         {outputs.map((p) => (
           <div key={p.id} className="flex items-center justify-end gap-1.5" style={{ height: ROW_H }}>
@@ -235,7 +275,7 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
       ))}
       {outputs.map((p, j) => (
         <Handle key={'out-' + p.id} type="source" position={Position.Right} id={p.id}
-          style={{ top: HEADER_H + inputs.length * ROW_H + structural.length * STRUCT_H + j * ROW_H + ROW_H / 2 + 4, background: typeColor[p.type] }} />
+          style={{ top: HEADER_H + inputs.length * ROW_H + structuralTotalH(structural) + j * ROW_H + ROW_H / 2 + 4, background: typeColor[p.type] }} />
       ))}
     </div>
   );
