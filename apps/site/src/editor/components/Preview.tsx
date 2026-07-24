@@ -430,44 +430,66 @@ export function Preview() {
             {recompiled}
           </div>
         )}
-      </div>
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs">
-        {/* one active pointer tool at a time */}
-        <div className="flex overflow-hidden rounded-md border border-border">
+        {/* vertical tool palette — one active pointer tool at a time */}
+        <div
+          className="absolute left-2 top-1/2 flex -translate-y-1/2 flex-col gap-1 rounded-lg border p-1 shadow-lg"
+          style={{ background: 'color-mix(in oklab, var(--color-card) 85%, transparent)', borderColor: 'var(--color-border)' }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}>
           {TOOLS.map((tl) => (
             <button
               key={tl.id}
               onClick={() => { setTool(tl.id); if (tl.id !== 'follow') mouseRef.current = null; }}
               title={`${tl.label} — ${tl.hint}`}
-              className={`px-2 py-1 ${tool === tl.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
+              aria-label={tl.label}
+              className={`group relative grid h-8 w-8 place-items-center rounded-md text-sm ${tool === tl.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
               <span aria-hidden>{tl.icon}</span>
+              <Tip>
+                <b>{tl.label}</b> · {tl.hint}
+              </Tip>
             </button>
           ))}
+          <span className="my-0.5 h-px w-full bg-border" />
+          <button
+            onClick={fitView}
+            disabled={view.z === 1 && view.x === 0 && view.y === 0}
+            title="Fit — reset zoom & pan"
+            aria-label="Fit"
+            className="group relative grid h-8 w-8 place-items-center rounded-md text-sm text-muted-foreground hover:bg-accent disabled:opacity-40">
+            <span aria-hidden>⛶</span>
+            <Tip><b>Fit</b> · reset zoom &amp; pan · {Math.round(view.z * 100)}%</Tip>
+          </button>
         </div>
-        <span className="hidden truncate text-muted-foreground sm:inline">{TOOLS.find((t) => t.id === tool)?.hint}</span>
-        <span className="mx-0.5 h-4 w-px bg-border" />
+      </div>
+      <div className="flex items-center gap-2 border-t border-border px-3 py-2 text-xs text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate">
+          <b className="text-foreground">{TOOLS.find((t) => t.id === tool)?.label}</b> · {TOOLS.find((t) => t.id === tool)?.hint}
+        </span>
         {/* fire a burst on the active emitter now (runtime: handle.spawnBurst(n)) */}
+        <span>burst</span>
         <input
           type="number" min={1} value={burstCount}
           onChange={(e) => setBurstCount(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
           className="num" style={{ width: 48 }}
           title="Particles per manual burst" />
         <button
-          className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="rounded-md border border-border px-2 py-1 hover:bg-accent hover:text-foreground"
           title="Spawn a burst on the active emitter now — the runtime API is handle.spawnBurst(n)"
           onClick={spawnActive}>
           Burst ▸
         </button>
-        <span className="flex-1" />
-        <span className="font-mono text-[10px] text-muted-foreground">{Math.round(view.z * 100)}%</span>
-        <button
-          className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
-          title="Fit — reset zoom & pan"
-          disabled={view.z === 1 && view.x === 0 && view.y === 0}
-          onClick={fitView}>
-          ⛶
-        </button>
       </div>
     </div>
+  );
+}
+
+/** Hover tooltip for the vertical tool palette — appears to the right of a button. */
+function Tip({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md border px-2 py-1 text-[10px] font-normal shadow-lg group-hover:block group-focus:block"
+      style={{ background: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-foreground)' }}>
+      {children}
+    </span>
   );
 }
