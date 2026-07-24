@@ -24,9 +24,9 @@
     <div id="banner">
       <b>AssetPack → pixi manifest</b><br />
       <code>.assetpack.js</code> processes <code>raw-assets/</code> into
-      <code>public/</code> + a <code>manifest.json</code>. We
-      <code>Assets.init({ manifest })</code> then load each texture by its
-      alias — same particle systems as the Assets.load demo, different pipeline.
+      <code>public/</code> + a <code>manifest.json</code>. We read the manifest
+      to find where each texture was written, then load it — same particle
+      systems as the Assets.load demo, different pipeline.
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

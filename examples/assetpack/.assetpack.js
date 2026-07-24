@@ -11,6 +11,7 @@
 import { pixiManifest } from '@assetpack/core/manifest';
 
 export default {
+  cache: false,
   entry: './raw-assets',
   output: './public',
   pipes: [
