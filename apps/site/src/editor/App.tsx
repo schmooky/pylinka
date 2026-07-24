@@ -17,7 +17,8 @@ import { toFlow, FRAME_PREFIX, NOTE_PREFIX } from './graphAdapter';
 import { nodesBBox } from './annotate';
 import { PylinkaNode } from './components/PylinkaNode';
 import { CommentNode, NoteNode } from './components/AnnotationNodes';
-import { Palette, DND_KIND } from './components/Palette';
+import { DND_KIND } from './components/Palette';
+import { LeftPanel } from './components/LeftPanel';
 import { Preview } from './components/Preview';
 import { Systems } from './components/Systems';
 import { ProjectsMenu } from './components/ProjectsMenu';
@@ -184,7 +185,7 @@ function EditorApp() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <Palette />
+        <LeftPanel />
         <div className="flex min-w-0 flex-1 flex-col">
           <Systems />
           <div className="min-h-0 flex-1">

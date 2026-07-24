@@ -9,10 +9,8 @@ import { createCompiledParticles, type CompiledParticlesHandle } from '@pylinka/
 import { createPathDriver, type PathDriver } from '@pylinka/core';
 import type { System } from '@pylinka/graph';
 import { useEditor } from '../store';
+import { usePreview } from '../previewStore';
 import { frameSize, type EditorProject } from '../types';
-import { Assets } from './Assets';
-import { Knobs } from './Knobs';
-import { EmitterPanel } from './EmitterPanel';
 import { PathOverlay } from './PathOverlay';
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -105,11 +103,10 @@ export function Preview() {
     window.clearTimeout(recompTimer.current);
     recompTimer.current = window.setTimeout(() => setRecompiled(''), 1800);
   };
-  const [knobs, setKnobs] = useState<Record<string, number>>({});
-  const knobsRef = useRef(knobs);
-  knobsRef.current = knobs;
-  const [tab, setTab] = useState<'knobs' | 'emitter' | 'assets'>('knobs');
-  const [pathEdit, setPathEdit] = useState(false);
+  // knobs + pathEdit live in the preview store so the left-panel Knobs/Emitter
+  // tabs can drive them; Preview owns the handles and registers the apply hook.
+  const setKnobsStore = usePreview((s) => s.setKnobs);
+  const pathEdit = usePreview((s) => s.pathEdit);
 
   // (re)create one particle handle per ENABLED system, PARENTS FIRST so a
   // sub-emitter can wire to its parent's live handle. Only the first handle
@@ -197,7 +194,7 @@ export function Preview() {
           h = ch;
         }
         h.autoClear = i === 0;
-        for (const [n, v] of Object.entries(knobsRef.current)) h.setKnob(n, v);
+        for (const [n, v] of Object.entries(usePreview.getState().knobs)) h.setKnob(n, v);
         handles.push(h);
         sysIds.push(sys.id);
       } catch (e) {
@@ -226,9 +223,10 @@ export function Preview() {
 
     const init: Record<string, number> = {};
     for (const p of projRef.current.params) if (p.default.t === 'f32') init[p.name] = p.default.v;
-    const seeded = Object.keys(knobsRef.current).length > 0 ? knobsRef.current : init;
-    setKnobs(seeded);
-    knobsRef.current = seeded;
+    const cur = usePreview.getState().knobs;
+    setKnobsStore(Object.keys(cur).length > 0 ? cur : init);
+    // let the left-panel Knobs tab push live values into the running handles
+    usePreview.getState().setApply((name, v) => fxRef.current.forEach((h) => h.setKnob(name, v)));
     setHud('');
     void recreate();
 
@@ -366,26 +364,6 @@ export function Preview() {
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
           {follow ? 'following cursor' : orbit ? 'orbiting' : 'parked at centre'}
         </span>
-      </div>
-      <div className="flex border-b border-border text-xs">
-        {(['knobs', 'emitter', 'assets'] as const).map((k) => (
-          <button key={k} onClick={() => setTab(k)}
-            className={`flex-1 border-b-2 py-2 capitalize ${tab === k ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
-            {k}
-          </button>
-        ))}
-      </div>
-      <div className="max-h-[42vh] shrink-0 overflow-y-auto p-3">
-        {tab === 'assets' ? (
-          <Assets />
-        ) : tab === 'emitter' ? (
-          <EmitterPanel pathEdit={pathEdit} setPathEdit={setPathEdit} />
-        ) : (
-          <Knobs values={knobs} onSet={(name, v) => {
-            setKnobs((k) => ({ ...k, [name]: v }));
-            fxRef.current.forEach((h) => h.setKnob(name, v));
-          }} />
-        )}
       </div>
     </div>
   );
