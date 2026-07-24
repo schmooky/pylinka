@@ -269,6 +269,22 @@ const outputs: NodeSchema[] = [
   schema({ kind: 'output.writeScale', label: 'Write scale', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('scale', 'f32', f(1))], outputs: [] }),
   schema({ kind: 'output.writeRotation', label: 'Write rotation', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('rot', 'f32', f(0))], outputs: [] }),
   schema({ kind: 'output.initTexIndex', label: 'Init texture index', namespace: 'output', evalTime: 'init', impact: 'low', inputs: [inPort('index', 'f32', f(0))], outputs: [] }),
+  schema({
+    kind: 'output.deathBurst',
+    label: 'Burst on death',
+    namespace: 'output',
+    evalTime: 'init',
+    impact: 'medium',
+    impactNote:
+      'Sub-emitter only: multiplies the child pool by `max` and spawns countMin..countMax particles at each parent death — an explosion where a projectile dies.',
+    inputs: [
+      inPort('countMin', 'f32', f(8)),
+      inPort('countMax', 'f32', f(8)),
+      inPort('inheritVelocity', 'f32', f(0)),
+    ],
+    outputs: [],
+    structural: [{ key: 'max', options: ['1', '2', '4', '8', '16', '32', '64'], default: '8' }],
+  }),
   schema({ kind: 'output.killIf', label: 'Kill if', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('cond', 'bool', boolean(false))], outputs: [] }),
   schema({ kind: 'output.killIfOutOfRect', label: 'Kill if out of rect', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('min', 'vec2', v2(0, 0)), inPort('max', 'vec2', v2(100, 100))], outputs: [] }),
   schema({ kind: 'output.reflectInRect', label: 'Reflect in rect', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('min', 'vec2', v2(0, 0)), inPort('max', 'vec2', v2(100, 100))], outputs: [] }),

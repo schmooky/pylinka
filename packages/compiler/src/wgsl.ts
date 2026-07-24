@@ -108,18 +108,36 @@ ${body}
 }`;
 }
 
+/** Death-burst codegen inputs (from an `output.deathBurst` node). The scalar
+ *  fields are backend-neutral value-table expressions (`V[n].x`) or literals. */
+export interface SubBurst {
+  /** hard per-death cap + child-pool multiplier (structural `max`). */
+  max: number;
+  /** particles per death, uniform in [countMin, countMax], rounded, capped. */
+  countMin: string;
+  countMax: string;
+  /** fraction of the parent's death-velocity added to each child's velocity. */
+  inherit: string;
+}
+
 /**
- * Sub-emitter emit kernel: a child system spawns one particle on each PARENT
+ * Sub-emitter emit kernel: a child system spawns particles on each PARENT
  * particle death, at the parent's position, running the child's own init body.
  * Detection is transition-based and needs no parent cooperation — the child
  * keeps a shadow of each parent slot's alive bit (`prevAlive`, binding 10) and
  * fires when a slot goes alive→dead. Parent hot/meta are read-only (8/9). The
  * child spawns into its own free-list pool, so its normal update kernel is
  * reused unchanged; its clock-driven `emit` is simply not dispatched.
- * Requires the child capacity to equal the parent capacity (1:1 slot index).
+ *
+ * Without a burst config: one child spawn per death (child capacity == parent
+ * capacity, 1:1). With one: each death spawns `countMin..countMax` particles
+ * (up to `max`) by popping that many free-list slots — an explosion where the
+ * projectile died — and can inherit a fraction of the parent's velocity so the
+ * debris flies along its heading. The child pool is sized parentCap × max, and
+ * subEmit dispatches one invocation per PARENT slot (`arrayLength(&prevAlive)`).
  */
-export function subEmitKernel(body: string): string {
-  return `
+export function subEmitKernel(body: string, burst?: SubBurst): string {
+  const head = `
 @group(0) @binding(8) var<storage, read> pHot: array<ParticleHot>;
 @group(0) @binding(9) var<storage, read> pMeta: array<ParticleMeta>;
 @group(0) @binding(10) var<storage, read_write> prevAlive: array<u32>;
@@ -127,12 +145,15 @@ export function subEmitKernel(body: string): string {
 @compute @workgroup_size(64)
 fn subEmit(@builtin(global_invocation_id) gid: vec3u) {
   let i = gid.x;
-  if (i >= U.capacity) { return; }
+  if (i >= arrayLength(&prevAlive)) { return; }
   let aliveNow = pMeta[i].flags & 1u;
   let wasAlive = prevAlive[i];
   prevAlive[i] = aliveNow;
   if (wasAlive != 1u || aliveNow != 0u) { return; }
+`;
 
+  if (burst === undefined) {
+    return `${head}
   let top = atomicSub(&cnt.freeTop, 1);
   if (top <= 0) {
     atomicAdd(&cnt.freeTop, 1);
@@ -153,6 +174,37 @@ ${body}
   pmeta[slot].flags = 1u | (o_texIndex << 8u);
   rnd[slot] = ParticleRnd(0xffffffffu, 1.0, 0.0);
   atomicAdd(&cnt.aliveCount, 1u);
+}`;
+  }
+
+  return `${head}
+  let spawnOrigin = pHot[i].pos;
+  let parentVel = pHot[i].vel;
+  let dseed = hash2(U.baseSeed, hash2(i, U.frame));
+  let burstF = mix(${burst.countMin}, ${burst.countMax}, srand(dseed, 176u));
+  let burstN = min(u32(max(round(burstF), 0.0)), ${burst.max}u);
+  let inheritV = ${burst.inherit};
+  for (var b: u32 = 0u; b < burstN; b = b + 1u) {
+    let top = atomicSub(&cnt.freeTop, 1);
+    if (top <= 0) {
+      atomicAdd(&cnt.freeTop, 1);
+      atomicAdd(&cnt.overflowCount, 1u);
+      break;
+    }
+    let slot = freeList[u32(top - 1)];
+    let seed = hash2(U.baseSeed, hash2(slot, hash2(U.frame, b + 1u)));
+
+${body}
+
+    hot[slot].pos = spawnOrigin + o_spawnLocal;
+    hot[slot].vel = o_initVel + inheritV * parentVel;
+    hot[slot].life = max(o_initLife, 1e-4);
+    hot[slot].age = 0.0;
+    pmeta[slot].seed = seed;
+    pmeta[slot].flags = 1u | (o_texIndex << 8u);
+    rnd[slot] = ParticleRnd(0xffffffffu, 1.0, 0.0);
+    atomicAdd(&cnt.aliveCount, 1u);
+  }
 }`;
 }
 
