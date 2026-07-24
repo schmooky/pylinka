@@ -95,6 +95,18 @@ export function Preview() {
   // preview view transform — a pure CSS zoom/pan of the canvas (no engine cost).
   const [view, setView] = useState({ z: 1, x: 0, y: 0 });
   const panRef = useRef<{ cx: number; cy: number; vx: number; vy: number } | null>(null);
+  // interactive spawn tester — spawn a burst on the ACTIVE emitter on demand
+  // (the runtime API a dev calls: handle.spawnBurst(n)). Optionally at a click.
+  const activeSystemId = useEditor((s) => s.activeSystemId);
+  const activeSysRef = useRef(activeSystemId);
+  activeSysRef.current = activeSystemId;
+  const [burstCount, setBurstCount] = useState(100);
+  const burstCountRef = useRef(burstCount);
+  burstCountRef.current = burstCount;
+  const [spawnClick, setSpawnClick] = useState(false);
+  const spawnClickRef = useRef(spawnClick);
+  spawnClickRef.current = spawnClick;
+  const spawnReq = useRef<{ x: number; y: number } | null>(null);
   const [hud, setHud] = useState('');
   const [backend, setBackend] = useState<BackendChoice>(initialBackend);
   const backendRef = useRef(backend);
@@ -275,8 +287,15 @@ export function Preview() {
           } else {
             fx.setEmitter(ex, ey);
           }
+          // click-to-spawn: fire a one-shot burst on the active emitter, at the
+          // clicked point, this frame (the emitter snaps back next frame).
+          if (sysId === activeSysRef.current && spawnReq.current) {
+            fx.setEmitter(spawnReq.current.x, spawnReq.current.y);
+            fx.spawnBurst(burstCountRef.current);
+          }
           fx.update(dt);
         }
+        spawnReq.current = null;
         acc += dt; frames++;
         if (acc >= 0.5) {
           for (const fx of handles) alive += fx.aliveCount();
@@ -331,7 +350,21 @@ export function Preview() {
     // map client → canvas pixels via the rect, so it's correct under CSS zoom
     mouseRef.current = [((e.clientX - r.left) / r.width) * c.width, ((e.clientY - r.top) / r.height) * c.height];
   };
+  // spawn `burstCount` on the active emitter at its current position (the button)
+  const spawnActive = () => {
+    const i = fxSysRef.current.indexOf(activeSysRef.current);
+    const h = i >= 0 ? fxRef.current[i] : undefined;
+    if (h) h.spawnBurst(burstCountRef.current);
+    else fxRef.current.forEach((x) => x.spawnBurst(burstCountRef.current));
+  };
   const onPanDown = (e: React.PointerEvent) => {
+    if (spawnClickRef.current) {
+      // click-to-spawn: record the point in canvas pixels for the loop to fire
+      const c = canvasRef.current!;
+      const r = c.getBoundingClientRect();
+      spawnReq.current = { x: ((e.clientX - r.left) / r.width) * c.width, y: ((e.clientY - r.top) / r.height) * c.height };
+      return;
+    }
     if (followRef.current) return; // when following, drag/hover drives the emitter
     panRef.current = { cx: e.clientX, cy: e.clientY, vx: view.x, vy: view.y };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -363,7 +396,7 @@ export function Preview() {
       </div>
       <div
         className="relative min-h-[340px] flex-1 overflow-hidden bg-black"
-        style={{ cursor: view.z !== 1 || view.x !== 0 || view.y !== 0 ? 'grab' : 'default' }}
+        style={{ cursor: spawnClick ? 'crosshair' : view.z !== 1 || view.x !== 0 || view.y !== 0 ? 'grab' : 'default' }}
         onPointerDown={onPanDown}
         onPointerMove={onMove}
         onPointerUp={onPanUp}
@@ -392,9 +425,23 @@ export function Preview() {
           <input type="checkbox" checked={follow} onChange={(e) => { setFollow(e.target.checked); if (!e.target.checked) mouseRef.current = null; }} /> follow
         </label>
         <label className="flex items-center gap-1.5" title="Move the emitter on a circle — a quick trail test"><input type="checkbox" checked={orbit} onChange={(e) => setOrbit(e.target.checked)} /> orbit</label>
-        <button className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={() => fxRef.current.forEach((h) => h.spawnBurst(400))}>Burst</button>
+        <span className="mx-1 h-4 w-px bg-border" />
+        <input
+          type="number" min={1} value={burstCount}
+          onChange={(e) => setBurstCount(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
+          className="num" style={{ width: 52 }}
+          title="Particles per manual burst" />
+        <button
+          className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="Spawn a burst on the active emitter now — the runtime API is handle.spawnBurst(n)"
+          onClick={spawnActive}>
+          Burst ▸
+        </button>
+        <label className="flex items-center gap-1.5" title="Click anywhere in the preview to spawn a burst there, on the active emitter">
+          <input type="checkbox" checked={spawnClick} onChange={(e) => setSpawnClick(e.target.checked)} /> click-spawn
+        </label>
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          {follow ? 'following cursor' : orbit ? 'orbiting' : 'parked at centre'}
+          {spawnClick ? 'click to spawn on the active emitter' : follow ? 'following cursor' : orbit ? 'orbiting' : 'parked at centre'}
         </span>
         <span className="font-mono text-[10px] text-muted-foreground">{Math.round(view.z * 100)}%</span>
         <button
