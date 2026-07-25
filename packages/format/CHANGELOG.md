@@ -1,5 +1,12 @@
 # @pylinka/format
 
+## 1.1.0
+
+### Patch Changes
+
+- Updated dependencies [[`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213), [`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213)]:
+  - @pylinka/graph@1.1.0
+
 ## 1.0.0
 
 ### Major Changes

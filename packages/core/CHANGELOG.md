@@ -1,5 +1,49 @@
 # @pylinka/core
 
+## 1.1.0
+
+### Minor Changes
+
+- [#16](https://github.com/schmooky/pylinka/pull/16) [`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Add an official texture/atlas API to the PixiJS runtime
+
+  `createPylinka` / `createParticleSystem` now accept a `textures` map (and single
+  `texture`) so systems render real art instead of the built-in soft disc. A
+  texture can be a URL, a `TexImageSource`, or a pixi `Texture`, and carries atlas
+  options for animated sprite sheets: `cols`/`rows`, `frameW`/`frameH`, `pad`,
+  `fps`, `play` (`loop`|`once`) and `pick` (`per-particle`|`per-spawn`). New
+  `resolveTexture` / `loadImage` / `toTexImageSource` helpers are exported.
+
+- [#16](https://github.com/schmooky/pylinka/pull/16) [`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Add spawn-on-death sub-emitters (`output.deathBurst`)
+
+  A new `output.deathBurst` node bursts a child system when a parent particle
+  dies — RevoltFX-style explosions (e.g. exploding ships). Configurable spawn
+  count (one, many, or a random distribution), a `max` clamp (1–64), and velocity
+  inheritance from the dying parent. Works on all three backends: WebGPU compute,
+  WebGL2 transform-feedback, and the interpreted WebGL runtime.
+
+### Patch Changes
+
+- [#16](https://github.com/schmooky/pylinka/pull/16) [`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Render particles into pixi's current render target (filters, cache-as-texture)
+
+  The particle draw computed its clip-space transform from the screen size, so a
+  system inside a filtered or cached-as-texture container drew off the off-screen
+  FBO and vanished. It now composes pixi's current render-target projection with
+  the view's world transform (identical to the old maths for the screen, so
+  unfiltered rendering is unchanged). A particle view still reports empty bounds —
+  its particles live on the GPU — so to filter/mask-to-texture a container, set its
+  `boundsArea` to the region to capture.
+
+- [#16](https://github.com/schmooky/pylinka/pull/16) [`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Fix PixiJS z-order and `visible` corruption in the render pipe
+
+  Particle views now render at their true position in the scene graph, so they
+  layer correctly against sibling containers, `Graphics`, and `Text` instead of
+  always drawing on top. Toggling a view's `visible` no longer leaks GL state onto
+  other containers. This is what makes pylinka usable inside a real pixi app.
+
+- Updated dependencies [[`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213), [`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213)]:
+  - @pylinka/graph@1.1.0
+  - @pylinka/compiler@1.1.0
+
 ## 1.0.0
 
 ### Major Changes
