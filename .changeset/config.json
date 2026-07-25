@@ -27,6 +27,7 @@
     "@pylinka/example-plain-assets",
     "@pylinka/example-assetpack",
     "@pylinka/example-announcer",
-    "@pylinka/example-interaction-lab"
+    "@pylinka/example-interaction-lab",
+    "@pylinka/example-containers"
   ]
 }
