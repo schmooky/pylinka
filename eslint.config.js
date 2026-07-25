@@ -28,4 +28,11 @@ export default tseslint.config(
       'no-restricted-syntax': 'off',
     },
   },
+  {
+    // Node tooling scripts that also contain browser-context `page.evaluate` callbacks.
+    files: ['**/scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { process: 'readonly', console: 'readonly', window: 'readonly' },
+    },
+  },
 );
