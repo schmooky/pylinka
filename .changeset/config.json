@@ -7,5 +7,13 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@pylinka/site", "@pylinka/atlas-extract", "@pylinka/gen-previews"]
+  "ignore": [
+    "@pylinka/site",
+    "@pylinka/atlas-extract",
+    "@pylinka/gen-previews",
+    "@pylinka/example-shared",
+    "@pylinka/example-plain-assets",
+    "@pylinka/example-assetpack",
+    "@pylinka/example-announcer"
+  ]
 }
