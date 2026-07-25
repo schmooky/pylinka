@@ -39,14 +39,26 @@ function queueStep(q: QueuedStep[], dt: number, ex: number, ey: number): void {
   if (q.length > MAX_QUEUED_STEPS) q.splice(0, q.length - MAX_QUEUED_STEPS);
 }
 
-/** Map a pixi worldTransform (scale/translate; rotation unsupported in v1) +
- *  logical target size onto the §13.8 scaleOffset. */
-function scaleOffset(
-  m: Affine,
-  w: number,
-  h: number,
-): [number, number, number, number] {
-  return [(2 * m.a) / w, (-2 * m.d) / h, (2 * m.tx) / w - 1, 1 - (2 * m.ty) / h];
+/** A 2D affine matrix (pixi `Matrix`): x' = a·x + c·y + tx, y' = b·x + d·y + ty. */
+interface Mat2D {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  tx: number;
+  ty: number;
+}
+
+/** Clip-space scaleOffset (§13.8) for the CURRENT render target: pixi's
+ *  projection matrix (the screen OR a filter / render-texture FBO, with its own
+ *  size, offset and flipY) composed with the view's world transform. Axis-
+ *  aligned only — rotation is unsupported in v1. For the root projection this is
+ *  byte-identical to the old `(2m.a/w, -2m.d/h, 2m.tx/w-1, 1-2m.ty/h)` form, so
+ *  normal (unfiltered) rendering is unchanged; when a container is filtered or
+ *  cached-as-texture, using pixi's own projection makes the particles land in
+ *  the off-screen target instead of the screen. */
+function projScaleOffset(p: Mat2D, m: Affine): [number, number, number, number] {
+  return [p.a * m.a, p.d * m.d, p.a * m.tx + p.tx, p.d * m.ty + p.ty];
 }
 
 class WebGPUSimBackend implements SimBackend {
@@ -120,6 +132,7 @@ class WebGPUSimBackend implements SimBackend {
         mipLevel: number;
         layer: number;
         viewport: { x: number; y: number; width: number; height: number };
+        projectionMatrix: Mat2D;
         adaptor: {
           getDescriptor(
             renderTarget: unknown,
@@ -130,8 +143,6 @@ class WebGPUSimBackend implements SimBackend {
           ): GPURenderPassDescriptor;
         };
       };
-      width: number;
-      height: number;
     };
     const encoder = renderer.encoder;
     const rtSys = renderer.renderTarget;
@@ -146,7 +157,8 @@ class WebGPUSimBackend implements SimBackend {
     const pass = encoder.commandEncoder.beginRenderPass(descriptor);
     const vp = rtSys.viewport;
     pass.setViewport(vp.x, vp.y, vp.width, vp.height, 0, 1);
-    const [sx, sy, ox, oy] = scaleOffset(worldTransform, renderer.width, renderer.height);
+    // pixi's current render-target projection (screen or a filter/cache FBO)
+    const [sx, sy, ox, oy] = projScaleOffset(rtSys.projectionMatrix, worldTransform);
     this.sim.draw(pass, sx, sy, ox, oy, 1);
     pass.end();
     encoder.restoreRenderPass();
@@ -215,7 +227,10 @@ class WebGL2SimBackend implements SimBackend {
   }
 
   draw(worldTransform: Affine): void {
-    const [sx, sy, ox, oy] = scaleOffset(worldTransform, this.renderer.width, this.renderer.height);
+    // use pixi's CURRENT render-target projection so a filtered / cached
+    // container renders the particles into its off-screen FBO, not the screen.
+    const proj = (this.renderer as unknown as { renderTarget: { projectionMatrix: Mat2D } }).renderTarget.projectionMatrix;
+    const [sx, sy, ox, oy] = projScaleOffset(proj, worldTransform);
     this.sim.draw(sx, sy, ox, oy, 1);
     // invalidate exactly the pixi GL caches the raw draw dirtied (program, VAO,
     // blend, texture units). renderer.resetState() would also null the CURRENT
