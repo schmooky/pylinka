@@ -1,5 +1,30 @@
 # @pylinka/compiler
 
+## 1.1.0
+
+### Minor Changes
+
+- [#16](https://github.com/schmooky/pylinka/pull/16) [`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Add spawn-on-death sub-emitters (`output.deathBurst`)
+
+  A new `output.deathBurst` node bursts a child system when a parent particle
+  dies — RevoltFX-style explosions (e.g. exploding ships). Configurable spawn
+  count (one, many, or a random distribution), a `max` clamp (1–64), and velocity
+  inheritance from the dying parent. Works on all three backends: WebGPU compute,
+  WebGL2 transform-feedback, and the interpreted WebGL runtime.
+
+- [#16](https://github.com/schmooky/pylinka/pull/16) [`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Add a standalone `gen.ease` curve node with custom cubic-bezier
+
+  `gen.ease` is a plug-in easing node: wire it into any input to shape a value
+  over life with a named preset or a custom cubic-bezier. It runs on the compiled
+  backends and evaluates identically in the interpreted JS ease sampler, so
+  presets and hand-authored curves match across backends. The node is
+  inferred-time (like `math.*`), so it composes with update-only inputs.
+
+### Patch Changes
+
+- Updated dependencies [[`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213), [`f7b0e65`](https://github.com/schmooky/pylinka/commit/f7b0e656accd8be00504faf5ef0531ffd2de5213)]:
+  - @pylinka/graph@1.1.0
+
 ## 1.0.0
 
 ### Major Changes
