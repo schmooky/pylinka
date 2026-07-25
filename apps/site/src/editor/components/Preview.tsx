@@ -84,6 +84,7 @@ export function Preview() {
   const rev = useEditor((s) => s.rev);
   const texRev = useEditor((s) => s.texRev);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const fxRef = useRef<AnyHandle[]>([]);
   const fxSysRef = useRef<string[]>([]);
   const driversRef = useRef<Map<string, { key: string; drv: PathDriver }>>(new Map());
@@ -376,17 +377,30 @@ export function Preview() {
     panRef.current = null;
     (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
   };
-  // scroll always zooms, anchored to the cursor so the point under it stays put
-  const onWheel = (e: React.WheelEvent) => {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const cx = e.clientX - (r.left + r.width / 2);
-    const cy = e.clientY - (r.top + r.height / 2);
-    setView((v) => {
-      const nz = Math.min(8, Math.max(0.25, v.z * (e.deltaY < 0 ? 1.12 : 0.893)));
-      const k = nz / v.z;
-      return { z: nz, x: cx * (1 - k) + v.x * k, y: cy * (1 - k) + v.y * k };
-    });
-  };
+  // Scroll AND macOS trackpad pinch both zoom the preview, anchored to the
+  // cursor so the point under it stays put. This needs a native, non-passive
+  // listener: React's onWheel is passive so it can't preventDefault — and a
+  // pinch (a wheel event with ctrlKey) would otherwise zoom the whole page.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      const cx = e.clientX - (r.left + r.width / 2);
+      const cy = e.clientY - (r.top + r.height / 2);
+      // pinch sends small continuous deltas; the wheel sends larger steps —
+      // an exponential factor feels right for both.
+      const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));
+      setView((v) => {
+        const nz = Math.min(8, Math.max(0.25, v.z * factor));
+        const k = nz / v.z;
+        return { z: nz, x: cx * (1 - k) + v.x * k, y: cy * (1 - k) + v.y * k };
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
   const fitView = () => setView({ z: 1, x: 0, y: 0 });
 
   return (
@@ -406,13 +420,13 @@ export function Preview() {
         <span className="min-w-0 flex-1 truncate text-right font-mono text-muted-foreground">{hud}</span>
       </div>
       <div
+        ref={wrapRef}
         className="relative min-h-[340px] flex-1 overflow-hidden bg-black"
         style={{ cursor: tool === 'spawn' ? 'crosshair' : tool === 'pan' ? 'grab' : 'default' }}
         onPointerDown={onPanDown}
         onPointerMove={onMove}
         onPointerUp={onPanUp}
-        onPointerLeave={() => { mouseRef.current = null; panRef.current = null; }}
-        onWheel={onWheel}>
+        onPointerLeave={() => { mouseRef.current = null; panRef.current = null; }}>
         <canvas
           key={backend}
           ref={canvasRef}
