@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pylinka × pixi — Container features (zIndex · mask · filter)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #1b2436; overflow: hidden;
+        font-family: 'Fira Code', ui-monospace, monospace; color: #cbd5e1; }
+      canvas { display: block; }
+      #banner { position: fixed; left: 12px; top: 12px; z-index: 2; max-width: 52ch;
+        font-size: 12px; line-height: 1.55; background: #0009; padding: 10px 12px;
+        border: 1px solid #1e293b; border-radius: 8px; }
+      #banner b { color: #a78bfa; font-weight: 600; }
+      /* per-column captions */
+      .col-label { position: fixed; z-index: 1; transform: translateX(-50%);
+        text-align: center; white-space: nowrap; pointer-events: none; text-shadow: 0 1px 3px #000; }
+      .col-label .k { color: #f8fafc; font-weight: 600; font-size: 13px; }
+      .col-label .v { color: #94a3b8; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <div id="banner">
+      <b>pylinka views are real pixi children</b><br />
+      Each emitter lives in its own <code>Container</code>. Left: two systems
+      whose <b>zIndex</b> swaps (front colour flips). Middle: a system clipped by
+      its container's <b>mask</b>. Right: a system through its container's
+      <b>filters</b> (blur + animated hue).
+    </div>
+    <div class="col-label" id="l-z"><div class="k">container.zIndex</div><div class="v" id="v-z">front: —</div></div>
+    <div class="col-label" id="l-m"><div class="k">container.mask</div><div class="v">clipped to a circle</div></div>
+    <div class="col-label" id="l-f"><div class="k">container.filters</div><div class="v">BlurFilter + hue rotate</div></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

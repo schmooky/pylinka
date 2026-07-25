@@ -5,8 +5,9 @@
 import type { Literal, Node, PylinkaProject, System } from '@pylinka/graph';
 import type { EditorProject, EmitterPathData } from '../editor/types';
 import { MASK_BOLT, MASK_HEART, MASK_RING, MASK_STAR, MASK_WIN } from '../editor/maskShapes';
+import { VFX_BY_KEY, type VfxAsset } from './vfxAssets';
 
-export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'swirl' | 'drawn' | 'physics' | 'combo';
+export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'swirl' | 'drawn' | 'physics' | 'combo' | 'vfx';
 
 export interface RecipeAtlas {
   url: string;
@@ -241,10 +242,36 @@ function fx(o: FxOpts): Recipe {
   return { slug: o.slug, title: o.title, group: o.group, oneLiner: o.oneLiner, tags: o.tags, project, ...(o.atlas ? { atlas: o.atlas } : {}) };
 }
 
+/** A `RecipeAtlas` descriptor for a catalog texture. */
+function atlasOf(a: VfxAsset): RecipeAtlas {
+  return { url: a.url, cols: a.cols, rows: a.rows, frameW: a.frameW, frameH: a.frameH, pad: a.pad, fps: a.fps, play: a.play, pick: a.pick };
+}
+
+/** A textured recipe over a Brackeys VFX catalog asset (`key`). The asset's
+ *  atlas + sensible blend (opaque→add, alpha→normal) are wired automatically;
+ *  everything else is plain `fx()`. On fork the atlas seeds an editor texture,
+ *  so the effect's image shows up in the Asset Manager. */
+type VfxRecipeOpts = Omit<FxOpts, 'atlas'> & { key: string };
+function vfx(o: VfxRecipeOpts): Recipe {
+  const a = VFX_BY_KEY[o.key];
+  if (!a) throw new Error(`unknown vfx asset: ${o.key}`);
+  // default `blend` from the asset; the leftover `key` is harmless — fx() only
+  // reads the fields it knows about.
+  const { blend, ...rest } = o;
+  return fx({ ...rest, blend: blend ?? a.blend, atlas: atlasOf(a) });
+}
+
 
 
 /** One emitter in a multi-emitter recipe. */
-type Layer = SysOpts & { name: string; atlas?: RecipeAtlas };
+type Layer = SysOpts & {
+  name: string;
+  atlas?: RecipeAtlas;
+  /** as a sub-emitter child: burst this many particles per parent death, up to
+   *  `max` (also the child-pool multiplier), inheriting a fraction of the
+   *  parent's death velocity. Adds an output.deathBurst node to this system. */
+  burst?: { max: number; countMin: number; countMax: number; inherit: number };
+};
 interface ComboOpts {
   slug: string;
   title: string;
@@ -261,6 +288,21 @@ const PREFIX = 'abcdefgh';
 function combo(o: ComboOpts): Recipe {
   const sysId = (i: number) => `s${i + 1}`;
   const systems = o.layers.map((L, i) => buildSystem(L, sysId(i), PREFIX[i]!, L.name));
+  // death-burst: turn a sub-emitter child into a real explosion (many spawns
+  // per parent death) via an output.deathBurst node.
+  o.layers.forEach((L, i) => {
+    if (!L.burst) return;
+    systems[i]!.graph.nodes.push({
+      id: `${PREFIX[i]!}40`,
+      kind: 'output.deathBurst',
+      structural: { max: String(L.burst.max) },
+      values: {
+        countMin: f(L.burst.countMin),
+        countMax: f(L.burst.countMax),
+        inheritVelocity: f(L.burst.inherit),
+      },
+    });
+  });
   const systemAtlases: Record<string, RecipeAtlas> = {};
   o.layers.forEach((L, i) => { if (L.atlas) systemAtlases[sysId(i)] = L.atlas; });
   const subEmitters: Record<string, string> = {};
@@ -273,7 +315,53 @@ function combo(o: ComboOpts): Recipe {
   };
 }
 
+/** Showcase for the standalone gen.ease node: particle SIZE is driven by an Ease
+ *  node wired from input.ageNormalized → a `back.out` curve that overshoots, so
+ *  motes pop in. (The Ease node runs on the compiled backends; open on WebGPU/
+ *  WebGL2 to see the pop — the interpreted gallery falls back to a plain fade.) */
+function easePop(): Recipe {
+  const nid = (n: number) => `k${n}`;
+  const edge = (i: number, fn: number, fp: string, tn: number, tp: string) => ({
+    id: `ke${i}`, from: { nodeId: nid(fn), portId: fp }, to: { nodeId: nid(tn), portId: tp },
+  });
+  const nodes: Node[] = [
+    { id: nid(1), kind: 'shape.circle', values: { radius: f(70) } },
+    { id: nid(2), kind: 'output.spawnPosition' },
+    { id: nid(3), kind: 'gen.randomRange', values: { min: f(0.9), max: f(1.7) } },
+    { id: nid(4), kind: 'output.initLife' },
+    { id: nid(5), kind: 'gen.randomVec2', values: { min: v2([-12, -12]), max: v2([12, 12]) } },
+    { id: nid(6), kind: 'output.initVelocity' },
+    { id: nid(7), kind: 'input.ageNormalized' },
+    { id: nid(8), kind: 'gen.ease', structural: { ease: 'back.out' } },
+    { id: nid(9), kind: 'output.writeScale' },
+    { id: nid(10), kind: 'gen.colorOverLife', structural: { ease: 'sine.out' }, values: { from: col('#d8c7ffff'), to: col('#6a2ad000') } },
+    { id: nid(11), kind: 'output.writeColor' },
+  ];
+  const graph = {
+    nodes,
+    edges: [
+      edge(1, 1, 'pos', 2, 'pos'),
+      edge(2, 3, 'out', 4, 'life'),
+      edge(3, 5, 'out', 6, 'vel'),
+      edge(4, 7, 'out', 8, 't'),
+      edge(5, 8, 'out', 9, 'scale'),
+      edge(6, 10, 'out', 11, 'color'),
+    ],
+  };
+  const system: System = {
+    id: 's1', name: 'motes', capacity: 1400, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 26 }, graph,
+  };
+  const project: PylinkaProject = { ...META, id: 'ease-pop', name: 'Ease Pop', params: [], assets: [], systems: [system] };
+  return {
+    slug: 'ease-pop', title: 'Ease Pop', group: 'abstract',
+    oneLiner: 'Violet motes that pop in — size driven by a standalone Ease node (back.out) wired from age.',
+    tags: ['ease', 'curve', 'nodes', 'scale'], project,
+  };
+}
+
 export const RECIPES: Recipe[] = [
+  easePop(),
   // ── trails ────────────────────────────────────────────────────────────
   fx({ slug: 'coin-spark-trail', title: 'Coin Spark Trail', group: 'trails', oneLiner: 'Amber sparks that hang and fall behind a flying coin.', tags: ['trail', 'sparks', 'gravity'], capacity: 4000, rate: 420, rod: 1.4, velMin: [-45, -150], velMax: [45, -240], lifeMin: 0.6, lifeMax: 1.3, gravity: [0, 340], colorFrom: '#ffd27aff', colorTo: '#ff3b0000', colorEase: 'power2.out', scaleFrom: 1.6, scaleEase: 'power2.out' }),
   fx({ slug: 'comet-tail', title: 'Comet Tail', group: 'trails', oneLiner: 'A cyan comet streak with drag and no gravity.', tags: ['trail', 'drag', 'additive'], capacity: 4000, rate: 520, rod: 2, velMin: [-15, -15], velMax: [15, 15], lifeMin: 0.8, lifeMax: 1.6, drag: 1.6, colorFrom: '#aee9ffff', colorTo: '#3a86ff00', colorEase: 'power2.out', scaleFrom: 1.2, scaleEase: 'power2.out' }),
@@ -352,6 +440,16 @@ export const RECIPES: Recipe[] = [
     layers: [
       { name: 'rocket', capacity: 520, blend: 'add', rate: 16, velMin: [-60, -640], velMax: [60, -520], lifeMin: 0.7, lifeMax: 1, gravity: [0, 320], colorFrom: '#fff6c8ff', colorTo: '#ffdd8800', colorEase: 'sine.out', scaleFrom: 1, scaleTo: 0.6 },
       { name: 'burst', capacity: 520, blend: 'add', shape: 'circle', radius: 4, velMin: [-300, -300], velMax: [300, 300], lifeMin: 0.7, lifeMax: 1.2, gravity: [0, 260], drag: 1.1, colorFrom: '#fff0a0ff', colorTo: '#ff3ca000', colorEase: 'power2.out', scaleFrom: 1.4, scaleTo: 0 },
+    ],
+    links: [[1, 0]],
+  }),
+  combo({
+    slug: 'exploding-ships', title: 'Exploding Ships', group: 'combo',
+    oneLiner: 'Rockets climb and burst into a shower of shrapnel where each one dies.',
+    tags: ['combo', 'sub-emitter', 'explosion', 'burst', 'death-burst'],
+    layers: [
+      { name: 'ships', capacity: 128, blend: 'add', shape: 'rect', size: [260, 12], rate: 55, velMin: [-70, -280], velMax: [70, -430], lifeMin: 0.75, lifeMax: 1.1, gravity: [0, 380], colorFrom: '#fff2c0ff', colorTo: '#ff9a3cff', colorEase: 'linear', scaleFrom: 1.3, scaleTo: 1 },
+      { name: 'shrapnel', blend: 'add', velMin: [-280, -280], velMax: [280, 280], lifeMin: 0.5, lifeMax: 1.15, gravity: [0, 560], drag: 1.3, colorFrom: '#ffe08aff', colorTo: '#ff3b0000', colorEase: 'power2.out', scaleFrom: 1.6, scaleTo: 0, burst: { max: 20, countMin: 10, countMax: 18, inherit: 0.3 } },
     ],
     links: [[1, 0]],
   }),
@@ -537,4 +635,86 @@ export const RECIPES: Recipe[] = [
     velMin: [-16, -16], velMax: [16, 16], lifeMin: 3.2, lifeMax: 4.6, drag: 0.22,
     obstacle: { radius: 215, strength: 600, softness: 0.9, swirl: 3600, carry: 0 },
     colorFrom: '#ffd8f4cc', colorTo: '#7a3cff00', colorEase: 'sine.inOut', scaleFrom: 0.75, scaleTo: 0.4 }),
+
+  // ── Brackeys VFX (CC0) — textured recipes ─────────────────────────────────
+  // Each binds one catalog image. Opaque sprites use additive blend (they sit
+  // on black), alpha sprites use normal, animated flipbooks play once over the
+  // particle's life. Fork any of these to see its texture in the Asset Manager.
+
+  // magical sparks — opaque, additive
+  vfx({ slug: 'spark-burst', title: 'Spark Burst', group: 'vfx', key: 'spark_03',
+    oneLiner: 'A radial pop of cyan sparks that drag to a stop.', tags: ['spark', 'burst', 'opaque'],
+    capacity: 700, mode: 'burst', burstCount: 110, burstInterval: 1.4, velMin: [-300, -300], velMax: [300, 300],
+    lifeMin: 0.7, lifeMax: 1.3, gravity: [0, 200], drag: 0.7,
+    colorFrom: '#c3f0ffff', colorTo: '#1f6bff00', colorEase: 'sine.in', scaleFrom: 1.8, scaleTo: 0.5 }),
+  vfx({ slug: 'rune-swirl', title: 'Rune Swirl', group: 'vfx', key: 'magic_03',
+    oneLiner: 'Violet glyph-light spun around a caster.', tags: ['magic', 'swirl', 'opaque'],
+    capacity: 800, rate: 130, shape: 'circle', radius: 46, velMin: [-12, -12], velMax: [12, 12],
+    lifeMin: 1.5, lifeMax: 2.4, drag: 0.06, vortex: [1500, 90, 300],
+    colorFrom: '#e0c0ffff', colorTo: '#5a1fd000', colorEase: 'sine.out', scaleFrom: 2.2, scaleTo: 0.9 }),
+  vfx({ slug: 'fae-dust', title: 'Fae Dust', group: 'vfx', key: 'magic_05',
+    oneLiner: 'Teal faerie dust drifting on a breeze.', tags: ['magic', 'ambient', 'opaque'],
+    capacity: 500, rate: 55, shape: 'rect', size: [260, 120], velMin: [-20, -30], velMax: [20, 10],
+    lifeMin: 2, lifeMax: 3.4, wind: [40, 20], colorFrom: '#b8ffe6ff', colorTo: '#1f9bff00', colorEase: 'sine.inOut', scaleFrom: 1.8, scaleTo: 0.9 }),
+  // magical sparks — alpha, normal blend (covers transparent textures)
+
+  // stars
+  vfx({ slug: 'star-fall', title: 'Star Fall', group: 'vfx', key: 'star_01',
+    oneLiner: 'Golden stars raining down and twinkling out.', tags: ['star', 'ui', 'opaque'],
+    capacity: 500, rate: 46, shape: 'rect', size: [420, 8], velMin: [-20, 40], velMax: [20, 150], lifeMin: 1.6, lifeMax: 3,
+    gravity: [0, 60], colorFrom: '#fff4c0ff', colorTo: '#ffcf5a00', colorEase: 'sine.in', scaleFrom: 2.4, scaleTo: 1.4 }),
+  vfx({ slug: 'twinkle-field', title: 'Twinkle Field', group: 'vfx', key: 'star_03',
+    oneLiner: 'A field of stars fading in and out in place.', tags: ['star', 'ambient', 'opaque'],
+    capacity: 260, rate: 22, shape: 'rect', size: [460, 300], velMin: [-4, -4], velMax: [4, 4], lifeMin: 1.4, lifeMax: 2.6,
+    colorFrom: '#ffffffff', colorTo: '#a8c8ff00', colorEase: 'sine.inOut', scaleFrom: 2.2, scaleTo: 0.4 }),
+  vfx({ slug: 'shooting-stars', title: 'Shooting Stars', group: 'vfx', key: 'star_05',
+    oneLiner: 'Bright stars streaking across on a diagonal.', tags: ['star', 'trails', 'opaque'],
+    capacity: 300, rate: 12, shape: 'rect', size: [40, 260], velMin: [220, 90], velMax: [360, 150], lifeMin: 1.2, lifeMax: 2,
+    colorFrom: '#eafaffff', colorTo: '#4aa8ff00', colorEase: 'sine.in', scaleFrom: 2, scaleTo: 0.8 }),
+  vfx({ slug: 'soft-stars', title: 'Soft Stars', group: 'vfx', key: 'star_01_a',
+    oneLiner: 'Alpha stars drifting up — soft, no glow.', tags: ['star', 'alpha', 'normal'],
+    capacity: 300, rate: 30, shape: 'rect', size: [360, 40], velMin: [-14, -60], velMax: [14, -20], lifeMin: 1.6, lifeMax: 2.8,
+    colorFrom: '#ffffffff', colorTo: '#cfe0ff22', colorEase: 'sine.inOut', scaleFrom: 2, scaleTo: 1 }),
+
+  // fire / light
+  vfx({ slug: 'flame-embers', title: 'Flame Embers', group: 'vfx', key: 'flame_02',
+    oneLiner: 'Fat orange embers rising off coals.', tags: ['fire', 'opaque'],
+    capacity: 500, rate: 70, shape: 'rect', size: [120, 10], velMin: [-24, -150], velMax: [24, -80], lifeMin: 0.9, lifeMax: 1.8,
+    wind: [30, -10], colorFrom: '#ffd28aff', colorTo: '#ff2e0000', colorEase: 'sine.in', scaleFrom: 2.6, scaleTo: 1 }),
+  vfx({ slug: 'glow-orbs', title: 'Glow Orbs', group: 'vfx', key: 'circle_02',
+    oneLiner: 'Fat soft orbs bobbing and fading.', tags: ['ambient', 'opaque'],
+    capacity: 260, rate: 30, shape: 'rect', size: [340, 200], velMin: [-10, -22], velMax: [10, 10], lifeMin: 1.6, lifeMax: 3,
+    colorFrom: '#aef0ffff', colorTo: '#2b8cff00', colorEase: 'sine.inOut', scaleFrom: 4, scaleTo: 2 }),
+  vfx({ slug: 'twirl-trails', title: 'Twirl Trails', group: 'vfx', key: 'twirl_01',
+    oneLiner: 'Twirl sprites caught in a slow vortex.', tags: ['swirl', 'opaque'],
+    capacity: 500, rate: 90, shape: 'circle', radius: 30, velMin: [-10, -10], velMax: [10, 10], lifeMin: 1.6, lifeMax: 2.6,
+    drag: 0.05, vortex: [1300, 70, 320], colorFrom: '#d0f0ffff', colorTo: '#2b6cff00', colorEase: 'sine.out', scaleFrom: 2.6, scaleTo: 1 }),
+
+  // smoke — alpha, normal blend (the transparent smokes)
+  vfx({ slug: 'soft-smoke', title: 'Soft Smoke', group: 'vfx', key: 'smoke_01_a',
+    oneLiner: 'Grey smoke billowing up and thinning out.', tags: ['smoke', 'alpha', 'normal'],
+    capacity: 300, rate: 26, shape: 'rect', size: [80, 12], velMin: [-16, -70], velMax: [16, -30], lifeMin: 1.8, lifeMax: 3.2,
+    wind: [24, -8], colorFrom: '#c8c8c8cc', colorTo: '#20202000', colorEase: 'sine.in', scaleFrom: 5, scaleTo: 11 }),
+  vfx({ slug: 'steam-plume', title: 'Steam Plume', group: 'vfx', key: 'smoke_05_a',
+    oneLiner: 'A soft white plume of steam.', tags: ['smoke', 'alpha', 'normal'],
+    capacity: 260, rate: 24, shape: 'rect', size: [60, 10], velMin: [-12, -80], velMax: [12, -40], lifeMin: 1.6, lifeMax: 3,
+    colorFrom: '#f0f0f0cc', colorTo: '#c0c0c000', colorEase: 'sine.in', scaleFrom: 5, scaleTo: 12 }),
+
+  // animated flipbooks — one particle plays the whole sheet
+  vfx({ slug: 'fire-plume-anim', title: 'Fire Plume', group: 'vfx', key: 'fire_01_8x8',
+    oneLiner: 'Animated fire — a rising column of flipbook flame.', tags: ['fire', 'flipbook', 'sheet'],
+    capacity: 60, rate: 8, velMin: [-10, -30], velMax: [10, -10], lifeMin: 1.9, lifeMax: 2.3,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 18, scaleTo: 22 }),
+  vfx({ slug: 'bonfire', title: 'Bonfire', group: 'vfx', key: 'fire_03_8x8',
+    oneLiner: 'A thick animated bonfire flame.', tags: ['fire', 'flipbook', 'sheet'],
+    capacity: 60, rate: 7, velMin: [-8, -24], velMax: [8, -6], lifeMin: 1.9, lifeMax: 2.3,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 20, scaleTo: 24 }),
+  vfx({ slug: 'wispy-smoke-anim', title: 'Wispy Smoke', group: 'vfx', key: 'wispy_smoke_01_8x8',
+    oneLiner: 'A slow animated smoke flipbook drifting up.', tags: ['smoke', 'flipbook', 'sheet'],
+    capacity: 50, rate: 5, velMin: [-14, -34], velMax: [14, -14], lifeMin: 2.4, lifeMax: 2.9, wind: [24, -8],
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 18, scaleTo: 26 }),
+  vfx({ slug: 'cloud-puff', title: 'Cloud Puff', group: 'vfx', key: 'cloud_01_8x8',
+    oneLiner: 'A puff of cloud, born and gone in one loop.', tags: ['smoke', 'flipbook', 'sheet'],
+    capacity: 40, mode: 'burst', burstCount: 2, burstInterval: 2.4, velMin: [-16, -20], velMax: [16, 0], lifeMin: 2.6, lifeMax: 3.1,
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 20, scaleTo: 28 }),
 ];

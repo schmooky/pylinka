@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Edge, Literal, Node, ParamDef, System } from '@pylinka/graph';
+import type { Edge, EmitterSettings, Literal, Node, ParamDef, System } from '@pylinka/graph';
 import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { seedProject } from './seed';
 import { autoLayout } from './layout';
@@ -184,6 +184,8 @@ interface EditorState {
   removeSystem(id: string): void;
   renameSystem(id: string, name: string): void;
   toggleSystem(id: string): void;
+  /** set the active system's blend mode (preview re-creates the engine) */
+  setActiveBlend(mode: System['blendMode']): void;
   /** make `childId` spawn on `parentId`'s particle deaths (null = born at cursor) */
   setSubParent(childId: string, parentId: string | null): void;
   // knobs (project params)
@@ -198,12 +200,23 @@ interface EditorState {
   unbindKnob(nodeId: string, portId: string): void;
   // textures (bound to the active system)
   addTexture(tex: Omit<EditorTexture, 'id'>): void;
+  /** returns the new texture's id, so callers can select it after adding */
+  addTextureId(tex: Omit<EditorTexture, 'id'>): string;
+  updateTexture(id: string, patch: Partial<Omit<EditorTexture, 'id'>>): void;
   removeTexture(id: string): void;
   setActiveTexture(id: string | null): void;
+  /** pick a texture for a tex.* node: sets its structural.asset AND the active
+   *  system's texture (what the runtime actually renders), in one step. */
+  setNodeAsset(nodeId: string, textureId: string | null): void;
+  // asset-manager modal (UI-only state, not part of the project / undo)
+  assetsOpen: boolean;
+  setAssetsOpen(open: boolean): void;
   /** set/clear the painted emission area of the ACTIVE system */
   setMask(mask: EmissionMaskData | null): void;
   /** set/clear the emitter trajectory of the ACTIVE system (preview reads it live) */
   setPath(path: EmitterPathData | null): void;
+  /** patch the ACTIVE system's spawn settings (mode / rate / burst) — applied live */
+  setEmitter(patch: Partial<EmitterSettings>): void;
   // graph annotations (comment frames + sticky notes, active system)
   addFrame(rect?: { x: number; y: number; w: number; h: number }): void;
   updateFrame(id: string, patch: Partial<Omit<CommentFrame, 'id' | 'systemId'>>): void;
@@ -268,6 +281,7 @@ export const useEditor = create<EditorState>((set, get) => {
     selectedNodeId: null,
     rev: 0,
     texRev: 0,
+    assetsOpen: false,
     system: () => activeSysOf(get().project),
     snapshot: () => {
       const out = structuredClone(get().project);
@@ -419,6 +433,10 @@ export const useEditor = create<EditorState>((set, get) => {
       }, true);
     },
 
+    setActiveBlend(mode) {
+      commit((_p, sys) => { sys.blendMode = mode; }, true);
+    },
+
     setSubParent(childId, parentId) {
       commit((p) => {
         const links = { ...(p.subEmitters ?? {}) };
@@ -526,11 +544,37 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     addTexture(tex) {
+      get().addTextureId(tex);
+    },
+
+    addTextureId(tex) {
       const id = crypto.randomUUID();
       commit((p, sys) => {
         p.textures = [...(p.textures ?? []), { ...tex, id }];
         p.systemTextures = { ...(p.systemTextures ?? {}), [sys.id]: id };
       }, true);
+      return id;
+    },
+
+    updateTexture(id, patch) {
+      commit((p) => {
+        p.textures = (p.textures ?? []).map((t) => (t.id === id ? { ...t, ...patch } : t));
+      }, true);
+    },
+
+    setNodeAsset(nodeId, textureId) {
+      commit((p, sys) => {
+        const node = sys.graph.nodes.find((n) => n.id === nodeId);
+        if (node) {
+          node.structural = node.structural ?? {};
+          node.structural.asset = textureId ?? '';
+        }
+        p.systemTextures = { ...(p.systemTextures ?? {}), [sys.id]: textureId };
+      }, true);
+    },
+
+    setAssetsOpen(open) {
+      set({ assetsOpen: open });
     },
 
     removeTexture(id) {
@@ -559,6 +603,14 @@ export const useEditor = create<EditorState>((set, get) => {
       // the preview reads paths live from the project each frame — no re-create
       commit((p, sys) => {
         p.systemPaths = { ...(p.systemPaths ?? {}), [sys.id]: path };
+      });
+    },
+
+    setEmitter(patch) {
+      // rate/mode/burst are runtime clock settings — the preview re-applies them
+      // live (engine.apply → clock.setEmitterSettings), no re-create.
+      commit((_p, sys) => {
+        sys.emitter = { ...sys.emitter, ...patch };
       });
     },
 

@@ -49,7 +49,7 @@ export function Palette() {
   };
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-border">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-b border-border p-2">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search nodes…"
           className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none focus:border-foreground/40" />
@@ -89,6 +89,6 @@ export function Palette() {
       <div className="border-t border-border px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
         Drag a node onto the canvas — or click to drop it at the centre.
       </div>
-    </aside>
+    </div>
   );
 }

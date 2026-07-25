@@ -1,11 +1,33 @@
 {
   "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
-  "changelog": ["@changesets/changelog-github", { "repo": "schmooky/pylinka" }],
+  "changelog": [
+    "@changesets/changelog-github",
+    {
+      "repo": "schmooky/pylinka"
+    }
+  ],
   "commit": false,
   "fixed": [],
-  "linked": [["@pylinka/graph", "@pylinka/compiler", "@pylinka/format", "@pylinka/core"]],
+  "linked": [
+    [
+      "@pylinka/graph",
+      "@pylinka/compiler",
+      "@pylinka/format",
+      "@pylinka/core"
+    ]
+  ],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@pylinka/site", "@pylinka/atlas-extract", "@pylinka/gen-previews"]
+  "ignore": [
+    "@pylinka/site",
+    "@pylinka/atlas-extract",
+    "@pylinka/gen-previews",
+    "@pylinka/example-shared",
+    "@pylinka/example-plain-assets",
+    "@pylinka/example-assetpack",
+    "@pylinka/example-announcer",
+    "@pylinka/example-interaction-lab",
+    "@pylinka/example-containers"
+  ]
 }

@@ -28,6 +28,13 @@ export {
   type PylinkaRuntime,
 } from './runtime.js';
 export {
+  resolveTexture,
+  loadImage,
+  toTexImageSource,
+  type TextureInput,
+  type TextureImage,
+} from './texture.js';
+export {
   registerSimBackend,
   getSimBackendFactory,
   type Affine,

@@ -28,6 +28,8 @@ export const SINGLE_WRITER_OUTPUTS: ReadonlySet<string> = new Set([
   'output.writeAlpha',
   'output.writeScale',
   'output.writeRotation',
+  // sub-emitter death burst — at most one per system (a second is V005)
+  'output.deathBurst',
 ]);
 
 /** Accumulating outputs: multiple writers are legal and add together. */

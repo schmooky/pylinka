@@ -77,6 +77,10 @@ export interface EngineParams {
     /** 1 = geometry is emitter-relative (structural `space: 'emitter'`). */
     relative: 0 | 1;
   }[];
+  /** output.deathBurst — sub-emitter explosion: countMin..countMax spawns per
+   *  parent death, up to `max` (child-pool multiplier + pass count), each
+   *  inheriting `inherit` of the parent's death velocity. */
+  deathBurst?: { max: number; countMin: number; countMax: number; inherit: number };
 }
 
 /** structural `space` → the runtime's emitter-relative flag. */
@@ -294,6 +298,18 @@ export function extractParams(
     p.sizeFrom = fk(scaleNode, 'from', 1) * 8;
     p.sizeTo = fk(scaleNode, 'to', 0) * 8;
     p.sizeEase = EASE_INDEX[scaleNode.structural?.ease ?? 'linear'] ?? 0;
+  }
+
+  const burstNode = byKind('output.deathBurst');
+  if (burstNode) {
+    const raw = Number(burstNode.structural?.max ?? '8');
+    const max = Number.isFinite(raw) ? Math.min(64, Math.max(1, Math.floor(raw))) : 8;
+    p.deathBurst = {
+      max,
+      countMin: fk(burstNode, 'countMin', 1),
+      countMax: fk(burstNode, 'countMax', 1),
+      inherit: fk(burstNode, 'inheritVelocity', 0),
+    };
   }
 
   return p;

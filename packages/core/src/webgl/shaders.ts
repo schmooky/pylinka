@@ -297,7 +297,7 @@ ${ft.colliders
  * parent's death position. There is no cursor-window emitter spawn. All other
  * integration matches UPDATE_VS.
  */
-export const updateVsSub = (ft: ForceFeatures = NO_FEATURES): string => `#version 300 es
+export const updateVsSub = (ft: ForceFeatures = NO_FEATURES, burst = false): string => `#version 300 es
 precision highp float;
 
 in vec2 i_pos;
@@ -313,6 +313,7 @@ in float i_pLife;
 // parent slot i — previous frame
 in float i_pAgePrev;
 in float i_pLifePrev;
+${burst ? 'in vec2 i_pVel;\nuniform int u_burstK; uniform float u_countMin; uniform float u_countMax; uniform float u_inherit;' : ''}
 
 out vec2 o_pos;
 out vec2 o_vel;
@@ -347,13 +348,23 @@ void main() {
   bool pCurrAlive = (i_pLife > 0.0) && (i_pAge < i_pLife);
   bool justDied = pPrevAlive && !pCurrAlive;
 
-  if (justDied) {
-    float s = hash11(id * 7.77 + u_frame * 3.13 + 1.0);
+${
+  burst
+    ? `  // death-burst: this pass writes copy u_burstK; a death fires the first
+  //  burstN copies (keyed off the parent slot only, so copies agree).
+  float dseed = hash11(id * 3.19 + u_frame * 7.53 + 5.0);
+  int burstN = int(max(floor(mix(u_countMin, u_countMax, dseed) + 0.5), 0.0));
+  bool doSpawn = justDied && u_burstK < burstN;`
+    : `  bool doSpawn = justDied;`
+}
+
+  if (doSpawn) {
+    float s = hash11(id * 7.77 + u_frame * 3.13 + ${burst ? 'float(u_burstK) * 2.0 + 1.0' : '1.0'});
     vec2 off = vec2(0.0);
     if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); off = vec2(cos(a), sin(a)) * u_shapeR * sqrt(rnd(s, 9.0)); }
     else if (u_shape == 2) { off = (vec2(rnd(s, 1.0), rnd(s, 2.0)) - 0.5) * u_shapeSize; }
     o_pos  = i_pPos + off;
-    o_vel  = mix(u_velMin, u_velMax, vec2(rnd(s, 3.0), rnd(s, 4.0)));
+    o_vel  = mix(u_velMin, u_velMax, vec2(rnd(s, 3.0), rnd(s, 4.0)))${burst ? ' + u_inherit * i_pVel' : ''};
     o_life = mix(u_lifeMin, u_lifeMax, rnd(s, 5.0));
     o_age  = 0.0;
     o_seed = s;

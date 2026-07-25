@@ -11,11 +11,13 @@ export const ANNOTATION_COLORS = ['#a78bfa', '#22d3ee', '#34d399', '#fbbf24', '#
 
 export const NODE_W = 210;
 
-/** Rendered height of a PylinkaNode (mirror of the component's row constants). */
+/** Rendered height of a PylinkaNode (mirror of the component's row constants;
+ *  the `ease` structural row is taller because it draws its curve inline). */
 export function estimateNodeHeight(kind: string): number {
   const s = getSchema(V1_CATALOG, kind);
   if (!s) return 80;
-  return 30 + s.inputs.length * 26 + s.structural.length * 30 + s.outputs.length * 26 + 8;
+  const structuralH = s.structural.reduce((a, sp) => a + (sp.key === 'ease' ? 56 : 30), 0);
+  return 30 + s.inputs.length * 26 + structuralH + s.outputs.length * 26 + 8;
 }
 
 type XY = { x: number; y: number };

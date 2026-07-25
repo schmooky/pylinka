@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pylinka × pixi — Assets.load</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #1b2436; overflow: hidden;
+        font-family: 'Fira Code', ui-monospace, monospace; }
+      /* explaining text — banner top-left */
+      #banner { position: fixed; left: 12px; top: 12px; z-index: 2; max-width: 44ch;
+        color: #cbd5e1; font-size: 12px; line-height: 1.55; background: #0009;
+        padding: 10px 12px; border: 1px solid #1e293b; border-radius: 8px; }
+      #banner b { color: #a78bfa; font-weight: 500; }
+      #banner .add { color: #38bdf8; }
+      #banner .alpha { color: #f472b6; }
+      /* per-cell captions */
+      .cell-label { position: fixed; z-index: 1; transform: translateX(-50%);
+        color: #94a3b8; font-size: 10px; white-space: nowrap; pointer-events: none;
+        text-shadow: 0 1px 3px #000; }
+    </style>
+  </head>
+  <body>
+    <div id="banner">
+      <b>pixi Assets.load → pylinka</b><br />
+      Each cell loads one Brackeys texture the normal pixi way, then hands it to
+      a particle system. <span class="add">Opaque sprites</span> render additive;
+      <span class="alpha">alpha sprites</span> render with normal blend; the
+      animated cells play an 8×8 flipbook per particle.
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

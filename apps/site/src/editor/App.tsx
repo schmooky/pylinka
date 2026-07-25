@@ -17,10 +17,12 @@ import { toFlow, FRAME_PREFIX, NOTE_PREFIX } from './graphAdapter';
 import { nodesBBox } from './annotate';
 import { PylinkaNode } from './components/PylinkaNode';
 import { CommentNode, NoteNode } from './components/AnnotationNodes';
-import { Palette, DND_KIND } from './components/Palette';
+import { DND_KIND } from './components/Palette';
+import { LeftPanel } from './components/LeftPanel';
 import { Preview } from './components/Preview';
 import { Systems } from './components/Systems';
 import { ProjectsMenu } from './components/ProjectsMenu';
+import { AssetManager } from './components/AssetManager';
 
 const nodeTypes = { pylinka: PylinkaNode, comment: CommentNode, note: NoteNode };
 
@@ -50,6 +52,7 @@ function EditorApp() {
   const updateNote = useEditor((s) => s.updateNote);
   const removeFrame = useEditor((s) => s.removeFrame);
   const removeNote = useEditor((s) => s.removeNote);
+  const setAssetsOpen = useEditor((s) => s.setAssetsOpen);
 
   const exportJson = () => {
     const proj = snapshot();
@@ -175,13 +178,14 @@ function EditorApp() {
           aria-label="Project name"
         />
         <div className="ml-auto flex items-center gap-2 text-xs">
+          <button onClick={() => setAssetsOpen(true)} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground" title="Textures & animated sequences">Assets</button>
           <ProjectsMenu />
           <button onClick={exportJson} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">Export</button>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <Palette />
+        <LeftPanel />
         <div className="flex min-w-0 flex-1 flex-col">
           <Systems />
           <div className="min-h-0 flex-1">
@@ -232,10 +236,11 @@ function EditorApp() {
           </ReactFlow>
           </div>
         </div>
-        <div className="w-[460px] shrink-0 border-l border-border">
+        <div className="w-[42vw] min-w-[480px] max-w-[860px] shrink-0 border-l border-border">
           <Preview />
         </div>
       </div>
+      <AssetManager />
     </div>
   );
 }

@@ -1,0 +1,12 @@
+{
+  "name": "@pylinka/example-shared",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Source-only helpers shared by the pylinka pixi examples (imported by relative path).",
+  "dependencies": {
+    "@pylinka/core": "workspace:*",
+    "@pylinka/graph": "workspace:*",
+    "pixi.js": "^8.19.0"
+  }
+}

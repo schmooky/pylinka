@@ -20,12 +20,66 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
   const path = useEditor((s) => (s.project.systemPaths ?? {})[s.activeSystemId] ?? null);
   const setMask = useEditor((s) => s.setMask);
   const setPath = useEditor((s) => s.setPath);
+  const emitter = useEditor((s) => s.system().emitter);
+  const setEmitter = useEditor((s) => s.setEmitter);
   const [maskOpen, setMaskOpen] = useState(false);
+  const burst = emitter.burst ?? { count: 120, interval: 1.5 };
 
   const patchPath = (patch: Partial<EmitterPathData>) => setPath({ ...(path ?? DEFAULT_PATH), ...patch });
 
   return (
     <div className="text-xs">
+      {/* ---- spawn (how many & how) ---- */}
+      <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        Spawn — “{systemName}”
+      </div>
+      <div className="mb-2 flex overflow-hidden rounded-md border border-border">
+        {(
+          [
+            ['flow', 'automatic'],
+            ['burst', 'burst'],
+            ['once', 'once'],
+          ] as const
+        ).map(([m, label]) => (
+          <button
+            key={m}
+            title={m === 'flow' ? 'continuous stream at a rate' : m === 'burst' ? 'a batch of particles every interval' : 'a single batch at the start'}
+            onClick={() => setEmitter(m === 'flow' ? { mode: 'flow' } : { mode: m, burst })}
+            className={`flex-1 py-1.5 ${emitter.mode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {emitter.mode === 'flow' ? (
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[9px] text-muted-foreground">rate (particles/s)</span>
+            <input className="num" type="number" min={0} value={emitter.rate}
+              onChange={(e) => setEmitter({ rate: Math.max(0, Number(e.target.value) || 0) })} />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[9px] text-muted-foreground">over distance (/px)</span>
+            <input className="num" type="number" min={0} step={0.1} value={emitter.rateOverDistance ?? 0}
+              onChange={(e) => setEmitter({ rateOverDistance: Math.max(0, Number(e.target.value) || 0) })} />
+          </label>
+        </div>
+      ) : (
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[9px] text-muted-foreground">count (per burst)</span>
+            <input className="num" type="number" min={0} value={burst.count}
+              onChange={(e) => setEmitter({ burst: { ...burst, count: Math.max(0, Number(e.target.value) || 0) } })} />
+          </label>
+          {emitter.mode === 'burst' && (
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[9px] text-muted-foreground">every (seconds)</span>
+              <input className="num" type="number" min={0.05} step={0.1} value={burst.interval}
+                onChange={(e) => setEmitter({ burst: { ...burst, interval: Math.max(0.05, Number(e.target.value) || 1) } })} />
+            </label>
+          )}
+        </div>
+      )}
+
       {/* ---- trajectory ---- */}
       <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         Trajectory of “{systemName}”

@@ -31,6 +31,14 @@ export const V1_BINDINGS: BindingLayout = {
   maskTable: 7,
 };
 
+/** Sub-emitter death-burst parameters (from an `output.deathBurst` node). */
+export interface BurstConfig {
+  /** child pool multiplier + hard per-death cap (structural `max`). The child
+   *  pool is sized parentCapacity × max; WebGL2/interpreted run `max` sub-step
+   *  passes (one per burst copy), WebGPU loops up to `max` free-list pops. */
+  max: number;
+}
+
 export interface CompiledSystem {
   graphHash: string;
   backend: Backend;
@@ -47,6 +55,9 @@ export interface CompiledSystem {
   uniforms: UniformLayout;
   bindings: BindingLayout;
   textures: { assetId: string; binding: number }[];
+  /** present when the graph has an `output.deathBurst` node — the runtime sizes
+   *  the child sub-emitter pool and its draw/dispatch loop from this. */
+  burst?: BurstConfig;
   /** warnings only (errors throw) */
   diagnostics: Diagnostic[];
 }

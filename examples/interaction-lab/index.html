@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pylinka — Interaction Lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      :root { --mono: 'Fira Code', ui-monospace, monospace; }
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      #c { display: block; width: 100vw; height: 100vh; }
+      #stage { position: fixed; inset: 0; pointer-events: none; }
+      #floor, #crate, #orb { position: absolute; }
+      #floor { left: 0; right: 0; }
+
+      #panel {
+        position: fixed; left: 16px; top: 16px; width: 15.5rem; user-select: none;
+        border-radius: 8px; border: 1px solid rgba(255,255,255,.1);
+        background: rgba(0,0,0,.55); padding: 12px; backdrop-filter: blur(8px);
+        font: 11px var(--mono); color: #d4d4d8; line-height: 1.5;
+      }
+      #panel .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+      #panel .title { font-weight: 600; color: #f4f4f5; }
+      #panel .sub { color: #71717a; }
+      #panel .blurb { margin-bottom: 8px; color: #a1a1aa; }
+      #panel label { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+      #panel label.block { display: block; margin-top: 4px; }
+      #panel input[type='checkbox'], #panel input[type='range'] { accent-color: #d4d4d8; }
+      #panel input[type='range'] { width: 100%; }
+      #panel .muted { color: #71717a; }
+      #hud { margin-top: 8px; border-top: 1px solid rgba(255,255,255,.1); padding-top: 8px; color: #71717a; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+
+    <!-- overlay: the things the particles are reacting to -->
+    <div id="stage">
+      <div id="floor"></div>
+      <div id="crate"></div>
+      <div id="orb"></div>
+    </div>
+
+    <div id="panel">
+      <div class="row">
+        <span class="title">pylinka</span>
+        <span class="sub">interaction lab</span>
+      </div>
+      <div class="blurb">
+        Move the pointer through the field. The orb is a moving obstacle; the
+        embers collide with the walls, the crate and the orb.
+      </div>
+      <label><input id="t-dust" type="checkbox" checked /> dust field</label>
+      <label><input id="t-orb" type="checkbox" checked /> flying orb</label>
+      <label><input id="t-cursor" type="checkbox" checked /> cursor push</label>
+      <label><input id="t-embers" type="checkbox" checked /> embers + collisions</label>
+      <label class="block">push strength <span id="v-push" class="muted">100%</span>
+        <input id="s-push" type="range" min="0" max="250" value="100" />
+      </label>
+      <div id="hud">–</div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

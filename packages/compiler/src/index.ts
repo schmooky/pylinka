@@ -11,3 +11,14 @@ export type { BindingLayout, CompiledSystem } from './types.js';
 export { WEBGL2_LAYOUT } from './glsl.js';
 export type { Webgl2Attrib, Webgl2Layout } from './glsl.js';
 export { wgslBodyToGlsl, wgslExprToGlsl } from './translate.js';
+// Easing catalog — the single source of truth (§13.9). `sampleEase` lets the
+// editor plot the exact curve the shaders run; presets + custom cubic-bezier.
+export {
+  EASE_BODIES,
+  EASE_KEYS,
+  sampleEase,
+  parseCubicBezier,
+  isCustomEase,
+  easeFnName,
+  type CubicBezier,
+} from './ease.js';

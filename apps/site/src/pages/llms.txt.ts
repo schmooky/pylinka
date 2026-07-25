@@ -27,7 +27,7 @@ Key facts:
 
 ## Examples
 - [Recipes](${b}/recipes): ${RECIPES.length} ready-made particle effects (trails, fire, magic, ambient, UI, abstract, swirl, drawn, physics, combo), each a real Pylinka project you can open in the editor.
-- [Interaction lab](${b}/interactive): a live sandbox where a flying obstacle and the cursor push a particle field around and heavier sparks collide with walls, a crate and the obstacle.
+- Interaction lab: a standalone live sandbox (deployed separately) where a flying obstacle and the cursor push a particle field around and heavier sparks collide with walls, a crate and the obstacle.
 - [Editor](${b}/editor): a node-graph editor with a live WebGL preview that updates on every edit with no recompile.
 `;
   return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });

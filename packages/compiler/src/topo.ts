@@ -16,6 +16,8 @@ const INIT_OUTPUT_KINDS = new Set([
   'output.initVelocity',
   'output.initLife',
   'output.initTexIndex',
+  // spawn-time config; consumed by the sub-emit kernel, ignored by buildInit
+  'output.deathBurst',
 ]);
 
 export type Phase = 'init' | 'update';

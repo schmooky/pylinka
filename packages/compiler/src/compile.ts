@@ -19,7 +19,7 @@ import { easeFnGlsl, GLSL_DISCARD_FS, glslStepShader, glslSubStepShader } from '
 import { naturalCompare, resolveEvalTimes } from './topo.js';
 import { wgslBodyToGlsl } from './translate.js';
 import { CompileError, V1_BINDINGS, type CompiledSystem } from './types.js';
-import { EASE_BODIES, easeFn, easeFnName, emitKernel, preamble, subEmitKernel, updateKernel } from './wgsl.js';
+import { easeFn, emitKernel, preamble, subEmitKernel, updateKernel, type SubBurst } from './wgsl.js';
 
 const INIT_OUTPUT_ORDER = [
   'output.spawnPosition',
@@ -69,6 +69,10 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
   const sorted = (s: Set<string>) => [...s].sort();
   const easeDefsWgsl = (s: Set<string>) => sorted(s).map((e) => '\n' + easeFn(e)).join('');
 
+  // death-burst (sub-emitter explosions): sized/looped from an output.deathBurst
+  // node, if present. null → the classic one-spawn-per-death sub-emitter.
+  const burst = ctx.burstConfig();
+
   let emitSrc: string;
   let updateSrc: string;
   let subSrc: string;
@@ -88,7 +92,7 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
       preamble(slots.layout.slotCount, initFlags) +
       easeDefsWgsl(initEases) +
       '\n' +
-      subEmitKernel(initBody);
+      subEmitKernel(initBody, burst ?? undefined);
   } else {
     // webgl2: ONE fused TF step shader (see glsl.ts header for the mapping), so
     // it needs every ease used by either the init or update body.
@@ -100,12 +104,13 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
         safeNormalize: initFlags.safeNormalize || updateFlags.safeNormalize,
       },
       ...(allEases.length > 0
-        ? { easeSrcs: allEases.map((e) => easeFnGlsl(easeFnName(e), EASE_BODIES[e]!)) }
+        ? { easeSrcs: allEases.map((e) => easeFnGlsl(e)) }
         : {}),
       initBody: wgslBodyToGlsl(initBody, ctx.tempTypes),
       updateBody: wgslBodyToGlsl(body, ctx.tempTypes),
       postIntegrate: wgslBodyToGlsl(postIntegrate, ctx.tempTypes),
       setVelocity,
+      ...(burst ? { burst } : {}),
     };
     emitSrc = glslStepShader(glslOpts);
     updateSrc = GLSL_DISCARD_FS;
@@ -131,6 +136,7 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
     uniforms: slots.layout,
     bindings: V1_BINDINGS,
     textures,
+    ...(burst ? { burst: { max: burst.max } } : {}),
     diagnostics: [...diagnostics, ...evalDiags].filter((d) => d.severity === 'warning'),
   };
 }
@@ -257,6 +263,33 @@ class CompileCtx {
     );
     void INIT_OUTPUT_ORDER;
     return { body: out.join('\n'), eases };
+  }
+
+  /** Death-burst config from an `output.deathBurst` node, or null. Scalars read
+   *  their value slots (constant or knob), which live in the V table available
+   *  to every kernel; a wired/absent port falls back to the schema default (the
+   *  burst runs in a per-death scope the init value nodes don't reach). */
+  burstConfig(): SubBurst | null {
+    const node = this.graph.nodes.find(
+      (n) => resolveKind(this.catalog, n.kind) === 'output.deathBurst',
+    );
+    if (node === undefined) return null;
+    const raw = Number(node.structural?.max ?? '8');
+    const max = Number.isFinite(raw) ? Math.min(64, Math.max(1, Math.floor(raw))) : 8;
+    return {
+      max,
+      countMin: this.burstScalar(node.id, 'countMin', 1),
+      countMax: this.burstScalar(node.id, 'countMax', 1),
+      inherit: this.burstScalar(node.id, 'inheritVelocity', 0),
+    };
+  }
+
+  /** f32 value-slot expression for a burst port, or a literal fallback. */
+  private burstScalar(nodeId: string, portId: string, def: number): string {
+    if (this.slots.portSlot.has(nodeId + ' ' + portId)) {
+      return valueSlotExpr(this.slots, nodeId, portId);
+    }
+    return def.toFixed(1);
   }
 
   buildUpdate(

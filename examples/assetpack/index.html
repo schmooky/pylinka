@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pylinka × pixi — AssetPack</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #1b2436; overflow: hidden;
+        font-family: 'Fira Code', ui-monospace, monospace; }
+      #banner { position: fixed; left: 12px; top: 12px; z-index: 2; max-width: 46ch;
+        color: #cbd5e1; font-size: 12px; line-height: 1.55; background: #0009;
+        padding: 10px 12px; border: 1px solid #1e293b; border-radius: 8px; }
+      #banner b { color: #34d399; font-weight: 500; }
+      #banner code { color: #fbbf24; }
+      .cell-label { position: fixed; z-index: 1; transform: translateX(-50%);
+        color: #94a3b8; font-size: 10px; white-space: nowrap; pointer-events: none;
+        text-shadow: 0 1px 3px #000; }
+    </style>
+  </head>
+  <body>
+    <div id="banner">
+      <b>AssetPack → pixi manifest</b><br />
+      <code>.assetpack.js</code> processes <code>raw-assets/</code> into
+      <code>public/</code> + a <code>manifest.json</code>. We read the manifest
+      to find where each texture was written, then load it — same particle
+      systems as the Assets.load demo, different pipeline.
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
