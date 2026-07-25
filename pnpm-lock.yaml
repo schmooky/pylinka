@@ -166,6 +166,22 @@ importers:
         specifier: ^6.4.3
         version: 6.4.3(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0)
 
+  examples/interaction-lab:
+    dependencies:
+      '@pylinka/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@pylinka/graph':
+        specifier: workspace:*
+        version: link:../../packages/graph
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vite:
+        specifier: ^6.4.3
+        version: 6.4.3(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0)
+
   examples/plain-assets:
     dependencies:
       '@pylinka/core':
