@@ -21,7 +21,9 @@ async function main() {
   registerPylinka();
 
   const app = new Application();
-  await app.init({ background: '#0b0f1a', resizeTo: window, antialias: true, preference: 'webgl' });
+  // Non-black base so the ambient OPAQUE motes read as sprites on a surface; the
+  // dim layer still darkens it when the card shows.
+  await app.init({ background: '#1b2436', resizeTo: window, antialias: true, preference: 'webgl' });
   document.body.appendChild(app.canvas);
 
   // ── 1 · preload textures + the Fira Code face used by the card ─────────────

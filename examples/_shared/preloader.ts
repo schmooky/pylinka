@@ -13,7 +13,7 @@ export function createPreloader(title = 'loading textures'): Preloader {
   const el = document.createElement('div');
   el.style.cssText = `
     position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
-    background: #0b0f1a; color: #cbd5e1; transition: opacity .35s ease;
+    background: #1b2436; color: #cbd5e1; transition: opacity .35s ease;
     font: 13px 'Fira Code', ui-monospace, monospace;`;
   el.innerHTML = `
     <div style="width: min(420px, 82vw)">

@@ -7,7 +7,7 @@
  * file, then load it the normal pixi way and hand it to pylinka by system name.
  * `predev` regenerates the manifest, so `pnpm dev` just works.
  */
-import { Application, Assets, type Texture } from 'pixi.js';
+import { Application, Assets, Graphics, type Texture } from 'pixi.js';
 import { registerPylinka, createPylinka } from '@pylinka/core/pixi';
 import type { TextureInput } from '@pylinka/core/pixi';
 import { SCENES, buildScenes, scenesTextures } from '../../_shared/vfx';
@@ -23,8 +23,14 @@ async function main() {
   registerPylinka();
 
   const app = new Application();
-  await app.init({ background: '#0b0f1a', resizeTo: window, antialias: false, preference: 'webgl' });
+  // Non-black background + per-cell tiles (below) so the OPAQUE textures read as
+  // sprites on a surface, not just light on a void.
+  await app.init({ background: '#1b2436', resizeTo: window, antialias: false, preference: 'webgl' });
   document.body.appendChild(app.canvas);
+
+  // tiles render behind every particle view (added first → lower z-order).
+  const tiles = new Graphics();
+  app.stage.addChild(tiles);
 
   // 1 — read the AssetPack manifest and index every asset by its basename, so
   //     we can find where AssetPack wrote each scene's texture.
@@ -69,9 +75,16 @@ async function main() {
     const rows = Math.ceil(SCENES.length / COLS);
     const cw = window.innerWidth / COLS;
     const ch = window.innerHeight / rows;
+    tiles.clear();
     SCENES.forEach((s, i) => {
-      const cx = (i % COLS) * cw + cw / 2;
-      const cy = Math.floor(i / COLS) * ch + ch * 0.6;
+      const col = i % COLS;
+      const row = Math.floor(i / COLS);
+      const cx = col * cw + cw / 2;
+      const cy = row * ch + ch * 0.6;
+      tiles
+        .roundRect(col * cw + 6, row * ch + 6, cw - 12, ch - 12, 12)
+        .fill({ color: 0x28324a, alpha: 0.55 })
+        .stroke({ color: 0xffffff, alpha: 0.06, width: 1 });
       fx.systems[s.name]!.setEmitterPosition(cx, cy);
       labels[i]!.style.left = `${cx}px`;
       labels[i]!.style.top = `${Math.floor(i / COLS) * ch + ch - 20}px`;
