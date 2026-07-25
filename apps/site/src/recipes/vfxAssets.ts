@@ -60,62 +60,28 @@ function sheet(
   };
 }
 
+// Only the textures a recipe actually uses are shipped — this is also the
+// built-in VFX library the editor's Asset Manager offers.
 export const VFX_ASSETS: VfxAsset[] = [
   // ── opaque particle sprites (additive) ────────────────────────────────────
-  sprite('opaque', 'spark_01', 'Spark 1'),
-  sprite('opaque', 'spark_02', 'Spark 2'),
   sprite('opaque', 'spark_03', 'Spark 3'),
-  sprite('opaque', 'spark_04', 'Spark 4'),
-  sprite('opaque', 'spark_05', 'Spark 5'),
-  sprite('opaque', 'spark_06', 'Spark 6'),
-  sprite('opaque', 'spark_07', 'Spark 7'),
-  sprite('opaque', 'magic_01', 'Magic 1'),
-  sprite('opaque', 'magic_02', 'Magic 2'),
   sprite('opaque', 'magic_03', 'Magic 3'),
-  sprite('opaque', 'magic_04', 'Magic 4'),
   sprite('opaque', 'magic_05', 'Magic 5'),
   sprite('opaque', 'star_01', 'Star 1'),
-  sprite('opaque', 'star_02', 'Star 2'),
   sprite('opaque', 'star_03', 'Star 3'),
-  sprite('opaque', 'star_04', 'Star 4'),
   sprite('opaque', 'star_05', 'Star 5'),
-  sprite('opaque', 'light_01', 'Light 1'),
-  sprite('opaque', 'light_02', 'Light 2'),
-  sprite('opaque', 'flare_01', 'Flare'),
-  sprite('opaque', 'flame_01', 'Flame 1'),
   sprite('opaque', 'flame_02', 'Flame 2'),
-  sprite('opaque', 'flame_03', 'Flame 3'),
   sprite('opaque', 'circle_02', 'Glow Circle'),
   sprite('opaque', 'twirl_01', 'Twirl'),
-  sprite('opaque', 'muzzle_01', 'Muzzle'),
   // ── alpha particle sprites (normal blend) ─────────────────────────────────
-  sprite('alpha', 'spark_01_a', 'Spark (alpha)'),
-  sprite('alpha', 'spark_03_a', 'Spark 3 (alpha)'),
-  sprite('alpha', 'magic_01_a', 'Magic (alpha)'),
   sprite('alpha', 'smoke_01_a', 'Smoke 1 (alpha)'),
-  sprite('alpha', 'smoke_03_a', 'Smoke 3 (alpha)'),
   sprite('alpha', 'smoke_05_a', 'Smoke 5 (alpha)'),
   sprite('alpha', 'star_01_a', 'Star (alpha)'),
-  sprite('alpha', 'dirt_01_a', 'Dirt (alpha)'),
   // ── animated flipbooks (8×8, 64 frames) ───────────────────────────────────
-  sheet('explosion_smoke_01_8x8', 'Magic Blast', 8, 8, 96, { fps: 34 }),
-  sheet('explosion_01_8x8', 'Explosion 1', 8, 8, 96, { fps: 38 }),
-  sheet('explosion_02_8x8', 'Explosion 2', 8, 8, 96, { fps: 38 }),
   sheet('fire_01_8x8', 'Fire Plume 1', 8, 8, 96, { fps: 30 }),
-  sheet('fire_02_8x8', 'Fire Plume 2', 8, 8, 96, { fps: 30 }),
   sheet('fire_03_8x8', 'Fire Plume 3', 8, 8, 96, { fps: 30 }),
-  sheet('fire_04_8x8', 'Fire Plume 4', 8, 8, 96, { fps: 30 }),
   sheet('wispy_smoke_01_8x8', 'Wispy Smoke 1', 8, 8, 96, { fps: 24 }),
-  sheet('wispy_smoke_02_8x8', 'Wispy Smoke 2', 8, 8, 96, { fps: 24 }),
-  sheet('wispy_smoke_03_8x8', 'Wispy Smoke 3', 8, 8, 96, { fps: 24 }),
   sheet('cloud_01_8x8', 'Cloud Puff', 8, 8, 96, { fps: 22 }),
-  // ── pre-drawn sheets ──────────────────────────────────────────────────────
-  sheet('explosion_6x5', 'Cartoon Boom', 6, 5, 128, { fps: 30 }),
-  sheet('star_explosion_6x5', 'Star Burst', 6, 5, 128, { fps: 30 }),
-  sheet('charge_7x6', 'Power Charge', 7, 6, 128, { fps: 34, play: 'loop' }),
-  sheet('vortex_6x5', 'Vortex Portal', 6, 5, 128, { fps: 28, play: 'loop' }),
-  sheet('electric_ring_6x5', 'Shock Ring', 6, 5, 128, { fps: 30 }),
-  sheet('flame_01_16x4', 'Torch Flame', 16, 4, 64, { fps: 30, play: 'loop' }),
 ];
 
 export const VFX_BY_KEY: Record<string, VfxAsset> = Object.fromEntries(
