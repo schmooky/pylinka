@@ -21,8 +21,8 @@ export {
   parseCubicBezier,
   isCustomEase,
   easeFnName,
-  easeCurveKeys,
   curveFromEase,
+  sampleEaseLut,
   type CubicBezier,
 } from './ease.js';
 // Multi-keyframe ease curves — the editor authors these, both compiled
@@ -31,14 +31,12 @@ export {
   CURVE_MAX_KEYS,
   CURVE_MIN_KEYS,
   curveFromBezier,
-  defaultCurve,
   formatCurve,
   isCurveEase,
   normalizeCurve,
   parseCurve,
   removeCurveKey,
   sampleCurve,
-  sampleCurveLut,
   splitCurveAt,
   type CurveKey,
 } from './curve.js';

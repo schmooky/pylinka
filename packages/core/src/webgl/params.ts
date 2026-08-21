@@ -7,7 +7,7 @@
  * life, scale-over-life. Unrecognised nodes are ignored (the effect still runs).
  */
 import type { EmitterSettings, Literal, Node, ParamDef, System } from '@pylinka/graph';
-import { sampleEase } from '@pylinka/compiler';
+import { sampleEaseLut } from '@pylinka/compiler';
 import {
   EASE_CH_ALPHA,
   EASE_CH_COLOR,
@@ -319,9 +319,8 @@ export function extractParams(
     const preset = EASE_INDEX[key];
     if (preset !== undefined) return preset;
     const base = channel * EASE_LUT_N;
-    for (let i = 0; i < EASE_LUT_N; i++) {
-      p.easeLut[base + i] = sampleEase(key, i / (EASE_LUT_N - 1));
-    }
+    const lut = sampleEaseLut(key, EASE_LUT_N);
+    for (let i = 0; i < EASE_LUT_N; i++) p.easeLut[base + i] = lut[i]!;
     return -1;
   };
 

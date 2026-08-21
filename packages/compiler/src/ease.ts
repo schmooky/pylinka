@@ -226,11 +226,17 @@ export function sampleEase(key: string, t: number): number {
   return t;
 }
 
-/** The keyframes behind an ease key, for consumers that need the curve itself
- *  (the editor's point editor) rather than a sampled value. Presets and the
- *  cubic-bezier form have no keyframes of their own; only `curve(...)` does. */
-export function easeCurveKeys(key: string): CurveKey[] | null {
-  return parseCurve(key);
+/**
+ * Sample any ease into `n` evenly spaced values over t∈[0,1].
+ *
+ * For backends that cannot name a curve in their shader — the interpreted
+ * WebGL path runs one fixed program and selects an ease by integer index — a
+ * baked table is the only way a custom curve can reach the GPU at all.
+ */
+export function sampleEaseLut(key: string, n: number): number[] {
+  const out: number[] = new Array<number>(n);
+  for (let i = 0; i < n; i++) out[i] = sampleEase(key, i / (n - 1));
+  return out;
 }
 
 /**

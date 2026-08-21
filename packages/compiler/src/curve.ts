@@ -127,11 +127,6 @@ export function curveFromBezier(c: { x1: number; y1: number; x2: number; y2: num
   ];
 }
 
-/** A straight 0→1 ramp — the seed for a fresh multi-point curve. */
-export function defaultCurve(): CurveKey[] {
-  return curveFromBezier({ x1: 1 / 3, y1: 1 / 3, x2: 2 / 3, y2: 2 / 3 });
-}
-
 // ─────────────────────────── segment control points ────────────────────────
 
 /** The four bezier control points of segment `i`, flattened as [ax,ay,bx,by,cx,cy,dx,dy]. */
@@ -239,13 +234,6 @@ export function removeCurveKey(keys: CurveKey[], index: number): CurveKey[] {
   if (keys.length <= CURVE_MIN_KEYS) return keys;
   if (index <= 0 || index >= keys.length - 1) return keys;
   return normalizeCurve(keys.filter((_, i) => i !== index));
-}
-
-/** Sample a curve into `n` evenly spaced values over t∈[0,1] (LUT builders). */
-export function sampleCurveLut(keys: CurveKey[], n: number): number[] {
-  const out: number[] = [];
-  for (let i = 0; i < n; i++) out.push(sampleCurve(keys, i / (n - 1)));
-  return out;
 }
 
 // ─────────────────────────── WGSL / GLSL emission ──────────────────────────
