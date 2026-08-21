@@ -33,6 +33,8 @@ export {
   curveFromBezier,
   formatCurve,
   isCurveEase,
+  moveCurveHandle,
+  moveCurveKey,
   normalizeCurve,
   parseCurve,
   removeCurveKey,

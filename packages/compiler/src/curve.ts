@@ -50,6 +50,10 @@ const clamp01 = (n: number): number => clamp(n, 0, 1);
  *  -0, which serializes fine but breaks value equality on round-trip. */
 const nz = (n: number): number => (n === 0 ? 0 : n);
 
+/** Smallest gap allowed between neighbouring keys — a zero-width segment has
+ *  no invertible X(s). */
+const MIN_SEGMENT = 1e-3;
+
 // ─────────────────────────────── parse / format ────────────────────────────
 
 /**
@@ -227,6 +231,76 @@ export function splitCurveAt(keys: CurveKey[], t: number): CurveKey[] {
   };
   out.splice(i + 1, 0, inserted);
   return normalizeCurve(out);
+}
+
+/**
+ * Move a keyframe to a point in curve space.
+ *
+ * An ease spans t∈[0,1], so the endpoints keep their x and only travel
+ * vertically — "start at half brightness" is expressible, "start at t=0.2" is
+ * not. Interior keys stay strictly between their neighbours, because two keys
+ * sharing an x would hand the shader a zero-width segment to invert.
+ */
+export function moveCurveKey(keys: CurveKey[], index: number, x: number, y: number): CurveKey[] {
+  const next = keys.map((k) => ({ ...k }));
+  const k = next[index];
+  if (!k) return keys;
+  if (index > 0 && index < next.length - 1) {
+    k.x = clamp(x, next[index - 1]!.x + MIN_SEGMENT, next[index + 1]!.x - MIN_SEGMENT);
+  }
+  k.y = y;
+  return normalizeCurve(next);
+}
+
+/**
+ * Move one bezier handle of a keyframe, to a point in curve space.
+ *
+ * By default the opposite handle mirrors the direction while keeping its own
+ * length, which is what makes a point "smooth" — the curve passes through it
+ * without a corner, and that is the behaviour every animation curve editor
+ * defaults to. `broken` leaves the far handle alone so a deliberate corner is
+ * possible. Endpoints have only one handle, so there is nothing to mirror.
+ */
+export function moveCurveHandle(
+  keys: CurveKey[],
+  index: number,
+  which: 'in' | 'out',
+  x: number,
+  y: number,
+  opts?: { broken?: boolean },
+): CurveKey[] {
+  const next = keys.map((k) => ({ ...k }));
+  const k = next[index];
+  if (!k) return keys;
+  const dx = x - k.x;
+  const dy = y - k.y;
+  if (which === 'in') {
+    k.ix = dx;
+    k.iy = dy;
+  } else {
+    k.ox = dx;
+    k.oy = dy;
+  }
+  const interior = index > 0 && index < next.length - 1;
+  if (interior && !opts?.broken) {
+    // Length is read BEFORE the far handle is overwritten, so mirroring
+    // preserves it rather than copying the dragged handle's length.
+    const farLen =
+      which === 'in' ? Math.hypot(k.ox, k.oy) : Math.hypot(k.ix, k.iy);
+    const mag = Math.hypot(dx, dy);
+    if (mag > 1e-6) {
+      const ux = (-dx / mag) * farLen;
+      const uy = (-dy / mag) * farLen;
+      if (which === 'in') {
+        k.ox = ux;
+        k.oy = uy;
+      } else {
+        k.ix = ux;
+        k.iy = uy;
+      }
+    }
+  }
+  return normalizeCurve(next);
 }
 
 /** Drop a keyframe. Endpoints stay — a curve needs at least its two ends. */

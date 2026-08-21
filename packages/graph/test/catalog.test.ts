@@ -83,3 +83,25 @@ describe('node catalog — §16', () => {
     ]);
   });
 });
+
+describe('deprecated schemas', () => {
+  it('marks gen.curveOverLife superseded but keeps it loadable', () => {
+    const s = V1_CATALOG.schemas.get('gen.curveOverLife');
+    expect(s).toBeDefined();
+    expect(s!.deprecated).toBe(true);
+    // the replacements exist and carry the same shape
+    for (const kind of ['gen.numberOverLife', 'gen.alphaOverLife']) {
+      const n = V1_CATALOG.schemas.get(kind);
+      expect(n, kind).toBeDefined();
+      expect(n!.deprecated).toBeUndefined();
+      expect(n!.inputs.map((p) => p.id)).toEqual(['from', 'to']);
+      expect(n!.outputs.map((p) => p.id)).toEqual(['out']);
+      expect(n!.structural.map((p) => p.key)).toEqual(['ease']);
+    }
+  });
+
+  it('leaves every other schema offerable', () => {
+    const dep = [...V1_CATALOG.schemas.values()].filter((s) => s.deprecated).map((s) => s.kind);
+    expect(dep).toEqual(['gen.curveOverLife']);
+  });
+});

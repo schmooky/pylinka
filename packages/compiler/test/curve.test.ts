@@ -15,6 +15,8 @@ import {
   isCustomEase,
   normalizeCurve,
   parseCurve,
+  moveCurveHandle,
+  moveCurveKey,
   removeCurveKey,
   splitCurveAt,
   sampleCurve,
@@ -286,5 +288,94 @@ describe('removeCurveKey', () => {
     expect(removeCurveKey(base, 0)).toBe(base);
     expect(removeCurveKey(base, 2)).toBe(base);
     expect(removeCurveKey(removeCurveKey(base, 1), 0)).toHaveLength(2);
+  });
+});
+
+describe('moveCurveKey — dragging a point', () => {
+  const base = parseCurve('curve(0,0,0,0,0.2,0.2;0.5,0.5,-0.2,-0.2,0.2,0.2;1,1,-0.2,-0.2,0,0)')!;
+
+  it('lets an interior key move freely between its neighbours', () => {
+    const out = moveCurveKey(base, 1, 0.7, 0.25);
+    expect(out[1]!.x).toBeCloseTo(0.7, 6);
+    expect(out[1]!.y).toBeCloseTo(0.25, 6);
+  });
+
+  it('never lets a key cross a neighbour, in either direction', () => {
+    const four = splitCurveAt(base, 0.75);
+    expect(four).toHaveLength(4);
+    const pushedRight = moveCurveKey(four, 1, 5, 0.5);
+    expect(pushedRight[1]!.x).toBeLessThan(pushedRight[2]!.x);
+    const pushedLeft = moveCurveKey(four, 2, -5, 0.5);
+    expect(pushedLeft[2]!.x).toBeGreaterThan(pushedLeft[1]!.x);
+    // and the order is still strictly increasing, so no zero-width segment
+    for (const keys of [pushedRight, pushedLeft]) {
+      for (let i = 1; i < keys.length; i++) expect(keys[i]!.x).toBeGreaterThan(keys[i - 1]!.x);
+    }
+  });
+
+  it('pins the endpoints in x but lets them move in y', () => {
+    const first = moveCurveKey(base, 0, 0.4, 0.6);
+    expect(first[0]!.x).toBe(0);
+    expect(first[0]!.y).toBeCloseTo(0.6, 6);
+    const last = moveCurveKey(base, base.length - 1, 0.4, -0.2);
+    expect(last[last.length - 1]!.x).toBe(1);
+    expect(last[last.length - 1]!.y).toBeCloseTo(-0.2, 6);
+  });
+
+  it('ignores an out-of-range index rather than corrupting the curve', () => {
+    expect(moveCurveKey(base, 9, 0.5, 0.5)).toBe(base);
+  });
+});
+
+describe('moveCurveHandle — shaping a point', () => {
+  const base = parseCurve('curve(0,0,0,0,0.2,0.2;0.5,0.5,-0.2,-0.1,0.15,0.3;1,1,-0.2,-0.2,0,0)')!;
+
+  it('mirrors the opposite handle, preserving its own length', () => {
+    const before = base[1]!;
+    const farLen = Math.hypot(before.ix, before.iy);
+    const out = moveCurveHandle(base, 1, 'out', base[1]!.x + 0.3, base[1]!.y + 0.1);
+    const k = out[1]!;
+    // dragged handle landed where asked
+    expect(k.ox).toBeCloseTo(0.3, 6);
+    expect(k.oy).toBeCloseTo(0.1, 6);
+    // opposite handle kept its length…
+    expect(Math.hypot(k.ix, k.iy)).toBeCloseTo(farLen, 6);
+    // …and points the opposite way (unit vectors sum to zero)
+    const uo = [k.ox / Math.hypot(k.ox, k.oy), k.oy / Math.hypot(k.ox, k.oy)];
+    const ui = [k.ix / Math.hypot(k.ix, k.iy), k.iy / Math.hypot(k.ix, k.iy)];
+    expect(uo[0]! + ui[0]!).toBeCloseTo(0, 6);
+    expect(uo[1]! + ui[1]!).toBeCloseTo(0, 6);
+  });
+
+  it('leaves the opposite handle alone when broken', () => {
+    const before = base[1]!;
+    const out = moveCurveHandle(base, 1, 'out', base[1]!.x + 0.3, base[1]!.y + 0.1, { broken: true });
+    expect(out[1]!.ix).toBeCloseTo(before.ix, 6);
+    expect(out[1]!.iy).toBeCloseTo(before.iy, 6);
+  });
+
+  it('does not mirror on the endpoints — they only have one handle', () => {
+    const out = moveCurveHandle(base, 0, 'out', 0.4, 0.5);
+    expect(out[0]!.ox).toBeCloseTo(0.4, 6);
+    expect(out[0]!.ix).toBe(0);
+    const last = base.length - 1;
+    const out2 = moveCurveHandle(base, last, 'in', 0.6, 0.5);
+    expect(out2[last]!.ox).toBe(0);
+  });
+
+  it('clamps a handle into its own segment, keeping X(s) invertible', () => {
+    // Reach far past the next key; x must stop at the segment boundary.
+    const out = moveCurveHandle(base, 1, 'out', 9, 0.5, { broken: true });
+    expect(out[1]!.ox).toBeCloseTo(base[2]!.x - base[1]!.x, 6);
+    // Dragging an out-handle backwards is not allowed either.
+    const back = moveCurveHandle(base, 1, 'out', base[1]!.x - 1, 0.5, { broken: true });
+    expect(back[1]!.ox).toBe(0);
+  });
+
+  it('survives a zero-length drag onto the point itself', () => {
+    const out = moveCurveHandle(base, 1, 'out', base[1]!.x, base[1]!.y);
+    expect(Number.isFinite(out[1]!.ix)).toBe(true);
+    expect(Number.isFinite(out[1]!.ox)).toBe(true);
+    for (let i = 0; i <= 32; i++) expect(Number.isFinite(sampleCurve(out, i / 32))).toBe(true);
   });
 });

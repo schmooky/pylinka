@@ -227,3 +227,67 @@ describe('compile — node coverage', () => {
     expect(c.emitSrc).not.toMatch(/\blet\s/);
   });
 });
+
+describe('compile — over-life generators with a multi-keyframe curve', () => {
+  const CURVE = 'curve(0,1,0,0,0.12,-0.05;0.4,0.55,-0.18,0.1,0.2,-0.11;1,0,-0.35,0.1,0,0)';
+
+  /** A whole effect: number-over-life drives scale, alpha-over-life drives
+   *  alpha, and both run off the same authored curve. */
+  const graph: Graph = {
+    nodes: [
+      { id: 'n1', kind: 'shape.circle', values: { radius: { t: 'f32', v: 40 } } },
+      { id: 'n2', kind: 'output.spawnPosition' },
+      { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 2 } } },
+      { id: 'n4', kind: 'gen.numberOverLife', structural: { ease: CURVE }, values: { from: { t: 'f32', v: 1.4 }, to: { t: 'f32', v: 0 } } },
+      { id: 'n5', kind: 'output.writeScale' },
+      { id: 'n6', kind: 'gen.alphaOverLife', structural: { ease: CURVE }, values: { from: { t: 'f32', v: 1 }, to: { t: 'f32', v: 0 } } },
+      { id: 'n7', kind: 'output.writeAlpha' },
+    ],
+    edges: [
+      { id: 'e1', from: { nodeId: 'n1', portId: 'pos' }, to: { nodeId: 'n2', portId: 'pos' } },
+      { id: 'e2', from: { nodeId: 'n4', portId: 'out' }, to: { nodeId: 'n5', portId: 'scale' } },
+      { id: 'e3', from: { nodeId: 'n6', portId: 'out' }, to: { nodeId: 'n7', portId: 'alpha' } },
+    ],
+  };
+
+  // The two backends put these writes in different kernels (webgpu in the
+  // update pass, webgl2 in the emit pass), so assert against everything
+  // emitted rather than pinning a layout this test does not care about.
+  const allSrc = (c: { emitSrc: string; updateSrc: string; subSrc?: string }) =>
+    [c.emitSrc, c.updateSrc, c.subSrc ?? ''].join('\n');
+
+  for (const target of ['webgpu', 'webgl2'] as const) {
+    it(`compiles on ${target}, writing both scale and alpha`, () => {
+      const src = allSrc(compile(bundle(graph), V1_CATALOG, target));
+      expect(src).toContain('outSize =');
+      expect(src).toContain('outColor.a =');
+      // the authored curve reached the shader as a real function, not a preset
+      expect(src).toMatch(/easeSel_cv_[0-9a-f]{8}/);
+      // and it is driven by particle age, i.e. it really is over-life
+      expect(src).toMatch(/easeSel_cv_[0-9a-f]{8}\(ageN\)/);
+    });
+  }
+
+  it('emits one function per distinct curve, however many nodes share it', () => {
+    const c = compile(bundle(graph), V1_CATALOG, 'webgpu');
+    const src = allSrc(c);
+    // both nodes use the same curve → one definition, two call sites
+    const defs = src.match(/fn easeSel_cv_[0-9a-f]{8}\(t: f32\)/g) ?? [];
+    const calls = src.match(/easeSel_cv_[0-9a-f]{8}\(ageN\)/g) ?? [];
+    expect(defs).toHaveLength(1);
+    expect(calls).toHaveLength(2);
+    // 3 keys → 2 segments → exactly one branch overwriting segment 0's constants
+    expect(src.match(/if \(t >= /g) ?? []).toHaveLength(1);
+  });
+
+  it('gives a different curve its own function', () => {
+    const other = 'curve(0,0,0,0,0.3,0.9;1,1,-0.3,-0.9,0,0)';
+    const two: Graph = {
+      ...graph,
+      nodes: graph.nodes.map((n) => (n.id === 'n6' ? { ...n, structural: { ease: other } } : n)),
+    };
+    const src = allSrc(compile(bundle(two), V1_CATALOG, 'webgpu'));
+    const names = new Set(src.match(/easeSel_cv_[0-9a-f]{8}/g) ?? []);
+    expect(names.size).toBe(2);
+  });
+});

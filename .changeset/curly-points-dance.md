@@ -28,7 +28,15 @@ cannot name into a 32-sample LUT uniform across three channels (size, colour,
 alpha); presets keep their exact analytic path. That backend also gains alpha
 ramp support, which it previously had no representation for at all.
 
-`@pylinka/graph` adds `gen.numberOverLife` and `gen.alphaOverLife`.
+`@pylinka/compiler` also exports `moveCurveKey` and `moveCurveHandle`, the
+shaping rules a point editor needs (endpoint pinning, neighbour clamping, and
+smooth-point handle mirroring with an opt-out for corners).
+
+`@pylinka/graph` adds `gen.numberOverLife` and `gen.alphaOverLife`, and a
+`deprecated` flag on `NodeSchema`. `gen.curveOverLife` carries that flag: it is
+the same node as `gen.numberOverLife` under a name nobody searched for, so it
+still loads, validates and compiles unchanged but editors should stop offering
+it in a palette.
 
 Fixes `SpawnScheduler` being replaced rather than retargeted on `apply()`. It
 carries fractional spawn debt, so re-reading an edited project every frame — what

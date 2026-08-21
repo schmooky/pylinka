@@ -29,6 +29,8 @@ import {
   EASE_KEYS,
   formatCurve,
   isCustomEase,
+  moveCurveHandle,
+  moveCurveKey,
   normalizeCurve,
   parseCurve,
   removeCurveKey,
@@ -199,46 +201,14 @@ export function CurveEditor({
       setGhost(insertPoint(px, py));
       return;
     }
-    setKeys((prev) => {
-      const next = prev.map((k) => ({ ...k }));
-      const k = next[d.index]!;
-      if (d.kind === 'key') {
-        // Endpoints own their x; interior keys may not cross their neighbours.
-        if (d.index > 0 && d.index < next.length - 1) {
-          k.x = clamp(x, next[d.index - 1]!.x + 1e-3, next[d.index + 1]!.x - 1e-3);
-        }
-        k.y = y;
-      } else {
-        const dx = x - k.x;
-        const dy = y - k.y;
-        if (d.kind === 'in') {
-          k.ix = dx;
-          k.iy = dy;
-        } else {
-          k.ox = dx;
-          k.oy = dy;
-        }
-        // Mirror the far handle unless Alt asks for a corner.
-        const interior = d.index > 0 && d.index < next.length - 1;
-        if (interior && !e.altKey) {
-          const far = d.kind === 'in' ? ([k.ox, k.oy] as const) : ([k.ix, k.iy] as const);
-          const len = Math.hypot(far[0], far[1]);
-          const mag = Math.hypot(dx, dy);
-          if (mag > 1e-6) {
-            const ux = (-dx / mag) * len;
-            const uy = (-dy / mag) * len;
-            if (d.kind === 'in') {
-              k.ox = ux;
-              k.oy = uy;
-            } else {
-              k.ix = ux;
-              k.iy = uy;
-            }
-          }
-        }
-      }
-      return normalizeCurve(next);
-    });
+    // The shaping rules (endpoint pinning, neighbour clamping, handle
+    // mirroring) live with the curve model, where they are unit-tested, rather
+    // than inside a pointer handler where they are not.
+    setKeys((prev) =>
+      d.kind === 'key'
+        ? moveCurveKey(prev, d.index, x, y)
+        : moveCurveHandle(prev, d.index, d.kind, x, y, { broken: e.altKey }),
+    );
   };
 
   const end = (e: React.PointerEvent) => {

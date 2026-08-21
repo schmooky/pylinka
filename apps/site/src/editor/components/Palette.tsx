@@ -18,6 +18,8 @@ export function Palette() {
     const query = q.trim().toLowerCase();
     const by = new Map<string, { kind: string; label: string }[]>();
     for (const s of V1_SCHEMAS) {
+      // superseded nodes still load and compile, they just aren't offered
+      if (s.deprecated) continue;
       if (
         query &&
         !s.kind.toLowerCase().includes(query) &&

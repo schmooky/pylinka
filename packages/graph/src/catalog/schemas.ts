@@ -123,10 +123,14 @@ const gens: NodeSchema[] = [
     outputs: [outPort('out', 'vec2')],
   }),
   schema({ kind: 'gen.frameRandom', label: 'Frame random', namespace: 'gen', evalTime: 'update', impact: 'low', rngClass: 'frame', inputs: [], outputs: [outPort('out', 'f32')] }),
+  // Superseded by gen.numberOverLife, which is the same node under the name
+  // artists actually look for. Existing documents keep working; new graphs
+  // should not gain a third way to spell the same thing.
   schema({
     kind: 'gen.curveOverLife',
     label: 'Curve over life',
     namespace: 'gen',
+    deprecated: true,
     evalTime: 'update',
     impact: 'low',
     inputs: [inPort('from', 'f32', f(0)), inPort('to', 'f32', f(1))],

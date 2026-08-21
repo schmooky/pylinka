@@ -173,6 +173,12 @@ export interface NodeSchema {
   outputs: PortSpec[];
   structural: StructuralSpec[];
   codegen: NodeCodegen;
+  /**
+   * Kept for documents that already reference it, but not offered in an
+   * editor's palette — a node superseded by a better-named equivalent. It
+   * still loads, validates and compiles exactly as before.
+   */
+  deprecated?: true;
 }
 
 export interface NodeCatalog {
