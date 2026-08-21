@@ -97,3 +97,61 @@ describe('frame time — §7.2', () => {
     expect(() => new FixedStepDriver(0)).toThrow();
   });
 });
+
+describe('SpawnScheduler.setEmitter — live-edit retargeting', () => {
+  const flow = (rate: number): EmitterSettings => ({ mode: 'flow', rate });
+
+  it('keeps the fractional spawn debt, so a low-rate emitter survives re-applies', () => {
+    // 30/s at 60fps is 0.5 particles per frame: it only ever spawns because the
+    // remainder carries. Re-applying every frame used to floor it to zero.
+    const s = new SpawnScheduler(flow(30), 1000);
+    let total = 0;
+    for (let i = 0; i < 120; i++) {
+      s.setEmitter(flow(30));
+      total += s.tick(1 / 60, 0);
+    }
+    expect(total).toBe(60); // 2 seconds at 30/s
+  });
+
+  it('a fresh scheduler each frame is what the old code did — and it spawns nothing', () => {
+    let total = 0;
+    for (let i = 0; i < 120; i++) total += new SpawnScheduler(flow(30), 1000).tick(1 / 60, 0);
+    expect(total).toBe(0);
+  });
+
+  it('keeps the burst clock running across re-applies', () => {
+    const burst: EmitterSettings = { mode: 'burst', rate: 0, burst: { count: 10, interval: 0.5 } };
+    const run = (retarget: boolean) => {
+      let s = new SpawnScheduler(burst, 1000);
+      let total = 0;
+      for (let i = 0; i < 120; i++) {
+        if (retarget) s.setEmitter(burst);
+        else s = new SpawnScheduler(burst, 1000);
+        total += s.tick(1 / 60, 0);
+      }
+      return total;
+    };
+    // 120 frames of 1/60 land a hair under 2.0s, so 3 bursts of 10 fire.
+    expect(run(true)).toBe(30);
+    // Replacing the scheduler each frame — the old apply() — fires none.
+    expect(run(false)).toBe(0);
+  });
+
+  it('does not re-fire a one-shot on every re-apply', () => {
+    const once: EmitterSettings = { mode: 'once', rate: 25 };
+    const s = new SpawnScheduler(once, 1000);
+    let total = 0;
+    for (let i = 0; i < 60; i++) {
+      s.setEmitter(once);
+      total += s.tick(1 / 60, 0);
+    }
+    expect(total).toBe(25);
+  });
+
+  it('re-arms a one-shot when the mode changes into once', () => {
+    const s = new SpawnScheduler(flow(0), 1000);
+    s.tick(1 / 60, 0);
+    s.setEmitter({ mode: 'once', rate: 12 });
+    expect(s.tick(1 / 60, 0)).toBe(12);
+  });
+});

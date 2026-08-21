@@ -22,6 +22,7 @@ export {
   isCustomEase,
   easeFnName,
   easeCurveKeys,
+  curveFromEase,
   type CubicBezier,
 } from './ease.js';
 // Multi-keyframe ease curves — the editor authors these, both compiled
@@ -35,7 +36,9 @@ export {
   isCurveEase,
   normalizeCurve,
   parseCurve,
+  removeCurveKey,
   sampleCurve,
   sampleCurveLut,
+  splitCurveAt,
   type CurveKey,
 } from './curve.js';

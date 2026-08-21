@@ -143,16 +143,18 @@ function segment(keys: CurveKey[], i: number): number[] {
 
 // ─────────────────────────────── JS sampler ────────────────────────────────
 
-/** Evaluate a parsed curve at `t`. Mirrors the emitted shader bodies exactly. */
-export function sampleCurve(keys: CurveKey[], t: number): number {
+/** Index of the segment containing `t` (clamped to the valid range). */
+function segmentIndexAt(keys: CurveKey[], t: number): number {
   const last = keys.length - 1;
-  if (t <= 0) return keys[0]!.y;
-  if (t >= 1) return keys[last]!.y;
   let i = 0;
   while (i < last - 1 && t >= keys[i + 1]!.x) i++;
-  const [ax, ay, bx, by, cx, cy, dx, dy] = segment(keys, i) as [
-    number, number, number, number, number, number, number, number,
-  ];
+  return i;
+}
+
+/** Invert X(s) = t on one segment by Newton — the shared step of every
+ *  evaluation. Handles were clamped into the segment so X is monotone. */
+function solveS(seg: number[], t: number): number {
+  const [ax, , bx, , cx, , dx] = seg as [number, number, number, number, number, number, number, number];
   let s = (t - ax) / Math.max(dx - ax, 1e-5);
   for (let k = 0; k < CURVE_ITERS; k++) {
     const s1 = 1 - s;
@@ -160,9 +162,83 @@ export function sampleCurve(keys: CurveKey[], t: number): number {
     const ds = 3 * s1 * s1 * (bx - ax) + 6 * s1 * s * (cx - bx) + 3 * s * s * (dx - cx);
     s = s - x / Math.max(ds, 1e-5);
   }
-  s = clamp01(s);
+  return clamp01(s);
+}
+
+/** Evaluate a parsed curve at `t`. Mirrors the emitted shader bodies exactly. */
+export function sampleCurve(keys: CurveKey[], t: number): number {
+  const last = keys.length - 1;
+  if (t <= 0) return keys[0]!.y;
+  if (t >= 1) return keys[last]!.y;
+  const seg = segment(keys, segmentIndexAt(keys, t));
+  const [, ay, , by, , cy, , dy] = seg as [
+    number, number, number, number, number, number, number, number,
+  ];
+  const s = solveS(seg, t);
   const s1 = 1 - s;
   return s1 * s1 * s1 * ay + 3 * s1 * s1 * s * by + 3 * s1 * s * s * cy + s * s * s * dy;
+}
+
+const lerp2 = (a: number[], b: number[], s: number): number[] => [
+  a[0]! + (b[0]! - a[0]!) * s,
+  a[1]! + (b[1]! - a[1]!) * s,
+];
+
+/**
+ * Insert a keyframe at `t` without changing the curve's shape.
+ *
+ * "Add a point here" has to be shape-preserving, or every added point nudges
+ * the effect and the artist spends the next minute putting it back. De
+ * Casteljau subdivision splits the containing segment into two segments that
+ * together reproduce it exactly, so the only thing that changes is how much
+ * control there now is. Returns the keys unchanged when the curve is already
+ * at CURVE_MAX_KEYS or `t` lands on an existing key.
+ */
+export function splitCurveAt(keys: CurveKey[], t: number): CurveKey[] {
+  if (keys.length >= CURVE_MAX_KEYS) return keys;
+  if (!(t > 0 && t < 1)) return keys;
+  const EPS = 1e-3;
+  if (keys.some((k) => Math.abs(k.x - t) < EPS)) return keys;
+
+  const i = segmentIndexAt(keys, t);
+  const seg = segment(keys, i);
+  const p0 = [seg[0]!, seg[1]!];
+  const p1 = [seg[2]!, seg[3]!];
+  const p2 = [seg[4]!, seg[5]!];
+  const p3 = [seg[6]!, seg[7]!];
+  const s = solveS(seg, t);
+
+  const q1 = lerp2(p0, p1, s);
+  const r = lerp2(p1, p2, s);
+  const s2 = lerp2(p2, p3, s);
+  const q2 = lerp2(q1, r, s);
+  const s1 = lerp2(r, s2, s);
+  const mid = lerp2(q2, s1, s);
+
+  const out = keys.map((k) => ({ ...k }));
+  const a = out[i]!;
+  const b = out[i + 1]!;
+  a.ox = q1[0]! - a.x;
+  a.oy = q1[1]! - a.y;
+  b.ix = s2[0]! - b.x;
+  b.iy = s2[1]! - b.y;
+  const inserted: CurveKey = {
+    x: mid[0]!,
+    y: mid[1]!,
+    ix: q2[0]! - mid[0]!,
+    iy: q2[1]! - mid[1]!,
+    ox: s1[0]! - mid[0]!,
+    oy: s1[1]! - mid[1]!,
+  };
+  out.splice(i + 1, 0, inserted);
+  return normalizeCurve(out);
+}
+
+/** Drop a keyframe. Endpoints stay — a curve needs at least its two ends. */
+export function removeCurveKey(keys: CurveKey[], index: number): CurveKey[] {
+  if (keys.length <= CURVE_MIN_KEYS) return keys;
+  if (index <= 0 || index >= keys.length - 1) return keys;
+  return normalizeCurve(keys.filter((_, i) => i !== index));
 }
 
 /** Sample a curve into `n` evenly spaced values over t∈[0,1] (LUT builders). */

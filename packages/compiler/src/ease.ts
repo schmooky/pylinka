@@ -17,9 +17,12 @@
  * translation of (1). Add a curve here and nowhere else.
  */
 import {
+  CURVE_MAX_KEYS,
   curveFnGlsl,
   curveFnWgsl,
+  curveFromBezier,
   hashCurve,
+  normalizeCurve,
   parseCurve,
   sampleCurve,
   type CurveKey,
@@ -227,4 +230,76 @@ export function sampleEase(key: string, t: number): number {
  *  cubic-bezier form have no keyframes of their own; only `curve(...)` does. */
 export function easeCurveKeys(key: string): CurveKey[] | null {
   return parseCurve(key);
+}
+
+/**
+ * Any ease as editable keyframes — what the editor calls when you take a
+ * preset into the point editor. A `curve(...)` is returned as-is and a
+ * `cubic-bezier(...)` converts exactly, so neither round-trip changes an
+ * effect. A preset has no keyframes of its own and is *fitted*: sampled at
+ * `n` points with tangents from central differences, which tracks the smooth
+ * §13.9 curves closely enough that the plot does not visibly jump when you
+ * start editing. Fitting is deliberately one-way — the result is a new curve
+ * the artist now owns, not a claim that it equals the preset.
+ */
+export function curveFromEase(key: string, n = 5): CurveKey[] {
+  const existing = parseCurve(key);
+  if (existing) return existing;
+  const c = parseCubicBezier(key);
+  if (c) return curveFromBezier(c);
+
+  const count = Math.max(3, Math.min(n, CURVE_MAX_KEYS));
+  const xs = fitSampleXs(key, count);
+  const ys = xs.map((x) => sampleEase(key, x));
+  const keys: CurveKey[] = xs.map((x, i) => {
+    // Central difference, one-sided at the ends — the slope the handles follow.
+    const lo = Math.max(0, i - 1);
+    const hi = Math.min(count - 1, i + 1);
+    const m = (ys[hi]! - ys[lo]!) / (xs[hi]! - xs[lo]!);
+    const prev = i > 0 ? x - xs[i - 1]! : 0;
+    const next = i < count - 1 ? xs[i + 1]! - x : 0;
+    // A third of the span is the standard Catmull-Rom → bezier handle length.
+    return { x, y: ys[i]!, ix: -prev / 3, iy: (-prev / 3) * m, ox: next / 3, oy: (next / 3) * m };
+  });
+  return normalizeCurve(keys);
+}
+
+/**
+ * Where to place the keys when fitting an ease. Evenly in x is the obvious
+ * choice and the wrong one: `expo.out` covers a third of its range in the
+ * first 5% of x, so evenly spaced keys straddle the steep part and the fit
+ * visibly cuts the corner. Spacing them by arc length instead puts keys where
+ * the curve actually moves and leaves flat stretches sparse.
+ */
+function fitSampleXs(key: string, count: number): number[] {
+  const DENSE = 256;
+  const cum: number[] = [0];
+  let prevX = 0;
+  let prevY = sampleEase(key, 0);
+  for (let i = 1; i <= DENSE; i++) {
+    const x = i / DENSE;
+    const y = sampleEase(key, x);
+    cum.push(cum[i - 1]! + Math.hypot(x - prevX, y - prevY));
+    prevX = x;
+    prevY = y;
+  }
+  const total = cum[DENSE]!;
+  if (!(total > 0)) return Array.from({ length: count }, (_, i) => i / (count - 1));
+
+  const xs = [0];
+  let j = 1;
+  for (let k = 1; k < count - 1; k++) {
+    const target = (total * k) / (count - 1);
+    while (j < DENSE && cum[j]! < target) j++;
+    // Linear interpolation inside the dense step that crossed the target.
+    const lo = cum[j - 1]!;
+    const hi = cum[j]!;
+    const frac = hi > lo ? (target - lo) / (hi - lo) : 0;
+    const x = (j - 1 + frac) / DENSE;
+    // Never let two keys collapse onto the same x — normalizeCurve would then
+    // hand the shader a zero-width segment.
+    xs.push(Math.max(x, xs[k - 1]! + 1e-3));
+  }
+  xs.push(1);
+  return xs;
 }

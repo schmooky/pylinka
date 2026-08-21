@@ -14,9 +14,27 @@ export class SpawnScheduler {
   private startedOnce = false;
 
   constructor(
-    private readonly emitter: EmitterSettings,
+    private emitter: EmitterSettings,
     private readonly capacity: number,
   ) {}
+
+  /**
+   * Swap the emitter settings while keeping the accumulators.
+   *
+   * Live editing re-reads the project on every change, and a fresh scheduler
+   * would drop the fractional spawn debt each time — a 30/s flow emitter puts
+   * 0.5 particles in `acc` per frame, so restarting it every frame floors to
+   * zero forever and the effect silently dies while you drag a slider. Burst
+   * emitters lose `burstClock` the same way and stop firing. Keeping the
+   * accumulators is what makes a live-edit preview behave.
+   *
+   * Switching *into* `once` mode is the one thing that should re-arm: the user
+   * asked for a one-shot they have not seen yet.
+   */
+  setEmitter(next: EmitterSettings): void {
+    if (next.mode === 'once' && this.emitter.mode !== 'once') this.startedOnce = false;
+    this.emitter = next;
+  }
 
   /** Advance one frame; returns the spawn count (clamped to capacity). */
   tick(dt: number, emitterDist: number): number {

@@ -7,12 +7,15 @@ import { describe, expect, it } from 'vitest';
 import {
   CURVE_MAX_KEYS,
   curveFromBezier,
+  curveFromEase,
   easeFnName,
   formatCurve,
   isCurveEase,
   isCustomEase,
   normalizeCurve,
   parseCurve,
+  removeCurveKey,
+  splitCurveAt,
   sampleCurve,
   sampleEase,
   type CurveKey,
@@ -141,5 +144,111 @@ describe('shader emission', () => {
     expect(wgsl).toContain(`ax: f32 = ${k[0]!.x.toFixed(1)}`);
     expect(wgsl).toContain(`dy: f32 = ${k[1]!.y}`);
     expect(wgsl).toContain(`bx: f32 = ${k[0]!.x + k[0]!.ox}`);
+  });
+});
+
+describe('curveFromEase — taking an existing ease into the point editor', () => {
+  it('returns a curve unchanged', () => {
+    const key = 'curve(0,0,0,0,0.2,0.4;0.5,0.8,-0.1,0.1,0.1,-0.1;1,0,-0.3,0,0,0)';
+    expect(formatCurve(curveFromEase(key))).toBe(formatCurve(parseCurve(key)!));
+  });
+
+  it('converts a cubic-bezier exactly, so promoting one never shifts the effect', () => {
+    const bez = 'cubic-bezier(0.17,0.67,0.83,0.67)';
+    const keys = curveFromEase(bez);
+    expect(keys).toHaveLength(2);
+    for (const t of SAMPLES) {
+      expect(sampleCurve(keys, t)).toBeCloseTo(sampleEase(bez, t), 6);
+    }
+  });
+
+  it('fits a preset closely enough not to visibly jump', () => {
+    // expo.out is the hard case: a third of its range lives in the first 5% of
+    // x. Arc-length key placement holds every preset inside 2% of full scale.
+    for (const preset of ['power2.out', 'sine.inOut', 'power1.in', 'back.out', 'expo.out']) {
+      const keys = curveFromEase(preset, 7);
+      let worst = 0;
+      for (let i = 0; i <= 100; i++) {
+        const t = i / 100;
+        worst = Math.max(worst, Math.abs(sampleCurve(keys, t) - sampleEase(preset, t)));
+      }
+      expect(worst, `${preset} fit error`).toBeLessThan(0.02);
+    }
+  });
+
+  it('places fit keys where the curve moves, not evenly in x', () => {
+    const keys = curveFromEase('expo.out', 7);
+    // half the keys should land in the steep first fifth
+    const early = keys.filter((k) => k.x < 0.2).length;
+    expect(early).toBeGreaterThanOrEqual(3);
+    // and x stays strictly increasing, so no zero-width segment reaches a shader
+    for (let i = 1; i < keys.length; i++) expect(keys[i]!.x).toBeGreaterThan(keys[i - 1]!.x);
+  });
+
+  it('respects the key cap when asked for more', () => {
+    expect(curveFromEase('sine.out', 99).length).toBeLessThanOrEqual(CURVE_MAX_KEYS);
+  });
+});
+
+describe('splitCurveAt — inserting a keyframe by clicking the curve', () => {
+  const base = 'curve(0,0,0,0,0.2,0.5;0.55,0.85,-0.2,0,0.2,0;1,0.2,-0.3,0.3,0,0)';
+
+  it('does not change the curve it splits', () => {
+    const before = parseCurve(base)!;
+    for (const t of [0.12, 0.3, 0.56, 0.7, 0.93]) {
+      const after = splitCurveAt(before, t);
+      expect(after.length).toBe(before.length + 1);
+      for (let i = 0; i <= 200; i++) {
+        const u = i / 200;
+        expect(sampleCurve(after, u)).toBeCloseTo(sampleCurve(before, u), 6);
+      }
+    }
+  });
+
+  it('puts the new key on the curve, in x order', () => {
+    const before = parseCurve(base)!;
+    const after = splitCurveAt(before, 0.3);
+    const added = after.find((k) => Math.abs(k.x - 0.3) < 0.02)!;
+    expect(added).toBeDefined();
+    expect(added.y).toBeCloseTo(sampleCurve(before, added.x), 6);
+    for (let i = 1; i < after.length; i++) expect(after[i]!.x).toBeGreaterThan(after[i - 1]!.x);
+  });
+
+  it('refuses to split at an endpoint, on an existing key, or past the cap', () => {
+    const before = parseCurve(base)!;
+    expect(splitCurveAt(before, 0)).toBe(before);
+    expect(splitCurveAt(before, 1)).toBe(before);
+    expect(splitCurveAt(before, 0.55)).toBe(before); // an existing key sits here
+    let full = before;
+    while (full.length < CURVE_MAX_KEYS) full = splitCurveAt(full, Math.random() * 0.9 + 0.05);
+    expect(full).toHaveLength(CURVE_MAX_KEYS);
+    expect(splitCurveAt(full, 0.42)).toBe(full);
+  });
+
+  it('survives a split-then-split of the same region', () => {
+    const before = parseCurve(base)!;
+    const twice = splitCurveAt(splitCurveAt(before, 0.3), 0.15);
+    expect(twice).toHaveLength(before.length + 2);
+    for (let i = 0; i <= 100; i++) {
+      const u = i / 100;
+      expect(sampleCurve(twice, u)).toBeCloseTo(sampleCurve(before, u), 5);
+    }
+  });
+});
+
+describe('removeCurveKey', () => {
+  const base = parseCurve('curve(0,0,0,0,0.2,0.5;0.55,0.85,-0.2,0,0.2,0;1,0.2,-0.3,0.3,0,0)')!;
+
+  it('drops an interior key', () => {
+    const out = removeCurveKey(base, 1);
+    expect(out).toHaveLength(2);
+    expect(out[0]!.x).toBe(0);
+    expect(out[1]!.x).toBe(1);
+  });
+
+  it('never removes an endpoint or goes below two keys', () => {
+    expect(removeCurveKey(base, 0)).toBe(base);
+    expect(removeCurveKey(base, 2)).toBe(base);
+    expect(removeCurveKey(removeCurveKey(base, 1), 0)).toHaveLength(2);
   });
 });
