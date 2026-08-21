@@ -340,7 +340,9 @@ export function createParticles(
       curSystem = sys;
       curParams = next.params;
       Object.assign(params, np);
-      scheduler = new SpawnScheduler(sys.emitter, params.capacity);
+      // Retarget rather than replace — a new scheduler would reset the spawn
+      // accumulators on every live edit and stall the emitter mid-drag.
+      scheduler.setEmitter(sys.emitter);
       recomputeWind();
       return true;
     },

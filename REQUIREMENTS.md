@@ -925,6 +925,30 @@ fn fs(in: VSOut) -> @location(0) vec4f {
 | `expo.out` | `t>=1 ? 1 : 1-exp2(-10*t)` |
 | `back.out` | `1+2.70158*(t-1)^3+1.70158*(t-1)^2` |
 
+Besides a preset name, the `ease` param accepts two authored forms:
+
+| form | meaning |
+|---|---|
+| `cubic-bezier(x1,y1,x2,y2)` | CSS syntax; the control points of a P0=(0,0)…P3=(1,1) Bézier |
+| `curve(x,y,ix,iy,ox,oy; …)` | 2..12 keyframes, ordered by x |
+
+A `curve(...)` group is a keyframe's position in curve space followed by the
+offsets of its incoming and outgoing Bézier handles; the first key's in-handle
+and the last key's out-handle are unused but still serialized so every group
+has the same arity. Consecutive keys are joined by a cubic Bézier with control
+points `key + out` and `next + nextIn`, so a 2-key curve is exactly the
+equivalent `cubic-bezier(...)`. Parsing normalizes: keys sort by x, the
+endpoints pin to x=0 and x=1, and handle x-offsets clamp into their own segment
+so X(s) stays monotone for the Newton inversion.
+
+Both authored forms are structural, so the compiled backends inline them like
+any preset — one emitted function per distinct curve, named by a hash so
+identical curves dedupe. The interpreted WebGL backend runs one fixed program
+and selects an ease by integer index, so it cannot name a custom curve: it
+samples any non-preset ease into a 32-entry LUT uniform (three channels: size,
+colour, alpha) and reads it back with linear interpolation. Presets keep their
+exact analytic path there and never pay for the upload.
+
 ### 13.10 Guarded math
 
 ```wgsl

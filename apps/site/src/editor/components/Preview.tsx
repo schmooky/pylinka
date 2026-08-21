@@ -22,7 +22,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-async function buildAtlas(proj: EditorProject, sys: System): Promise<AtlasOptions | undefined> {
+export async function buildAtlas(proj: EditorProject, sys: System): Promise<AtlasOptions | undefined> {
   const texId = (proj.systemTextures ?? {})[sys.id];
   const t = texId ? (proj.textures ?? []).find((x) => x.id === texId) : undefined;
   if (!t) return undefined;
@@ -31,7 +31,7 @@ async function buildAtlas(proj: EditorProject, sys: System): Promise<AtlasOption
   return { image, width: t.width, height: t.height, cols: t.cols, rows: t.rows, frameW, frameH, pad: t.pad, fps: t.fps, play: t.play, pick: t.pick };
 }
 
-async function buildMask(proj: EditorProject, sys: System): Promise<EmissionMaskOptions | undefined> {
+export async function buildMask(proj: EditorProject, sys: System): Promise<EmissionMaskOptions | undefined> {
   const m = (proj.systemMasks ?? {})[sys.id];
   if (!m) return undefined;
   const image = await loadImage(m.src);
@@ -39,7 +39,7 @@ async function buildMask(proj: EditorProject, sys: System): Promise<EmissionMask
 }
 
 /** The project the SIM sees: muted nodes (and their edges) stripped out. */
-function effective(proj: EditorProject): EditorProject {
+export function effective(proj: EditorProject): EditorProject {
   const off = new Set(proj.disabledNodes ?? []);
   if (off.size === 0) return proj;
   return {

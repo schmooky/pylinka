@@ -7,7 +7,15 @@
  * life, scale-over-life. Unrecognised nodes are ignored (the effect still runs).
  */
 import type { EmitterSettings, Literal, Node, ParamDef, System } from '@pylinka/graph';
-import { EASE_INDEX } from './shaders.js';
+import { sampleEaseLut } from '@pylinka/compiler';
+import {
+  EASE_CH_ALPHA,
+  EASE_CH_COLOR,
+  EASE_CH_SIZE,
+  EASE_INDEX,
+  EASE_LUT_CHANNELS,
+  EASE_LUT_N,
+} from './shaders.js';
 
 export interface EngineParams {
   capacity: number;
@@ -33,6 +41,17 @@ export interface EngineParams {
   sizeFrom: number;
   sizeTo: number;
   sizeEase: number;
+  /** Alpha ramp (gen.alphaOverLife). 1→1 with ease 0 is the no-op default. */
+  alphaFrom: number;
+  alphaTo: number;
+  alphaEase: number;
+  /**
+   * Flattened ease LUT, `EASE_LUT_CHANNELS × EASE_LUT_N` samples in channel
+   * order size, colour, alpha. Only the channels whose ease index is -1 (i.e.
+   * a custom curve the fixed shader cannot name) are meaningful; the rest are
+   * left as the identity ramp.
+   */
+  easeLut: number[];
   /**
    * Up to 4 point fields (field.vortex / field.radial). tangential = swirl
    * px/s² (sign = direction), pull = inward suction (+) / push (−), radius =
@@ -169,6 +188,10 @@ export function extractParams(
     sizeFrom: 8,
     sizeTo: 0,
     sizeEase: 0,
+    alphaFrom: 1,
+    alphaTo: 1,
+    alphaEase: 0,
+    easeLut: identityLut(),
     pointFields: [],
     turbulence: [0, 120, 1],
     obstacles: [],
@@ -286,18 +309,55 @@ export function extractParams(
     }
   }
 
+  /**
+   * Resolve a node's ease into this backend's two-track scheme: a preset index
+   * when the shader can name the curve, or -1 plus a baked LUT when it cannot.
+   * Returns the index and writes into `p.easeLut` as a side effect.
+   */
+  const easeFor = (node: Node | undefined, channel: number): number => {
+    const key = node?.structural?.ease ?? 'linear';
+    const preset = EASE_INDEX[key];
+    if (preset !== undefined) return preset;
+    const base = channel * EASE_LUT_N;
+    const lut = sampleEaseLut(key, EASE_LUT_N);
+    for (let i = 0; i < EASE_LUT_N; i++) p.easeLut[base + i] = lut[i]!;
+    return -1;
+  };
+
   const colorNode = byKind('gen.colorOverLife');
   if (colorNode) {
     p.colorFrom = parseColor(colorNode.values?.from, p.colorFrom);
     p.colorTo = parseColor(colorNode.values?.to, p.colorTo);
-    p.colorEase = EASE_INDEX[colorNode.structural?.ease ?? 'linear'] ?? 0;
+    p.colorEase = easeFor(colorNode, EASE_CH_COLOR);
   }
 
-  const scaleNode = byKind('gen.scaleOverLife');
+  // Size comes from gen.scaleOverLife, or from whatever generic ramp the graph
+  // actually wired into output.writeScale (gen.numberOverLife is the same node
+  // under an artist-facing name, so it has to drive size here too).
+  const wiredScale = source(byKind('output.writeScale')?.id, 'scale');
+  const scaleNode =
+    byKind('gen.scaleOverLife') ??
+    (wiredScale?.kind === 'gen.numberOverLife' || wiredScale?.kind === 'gen.curveOverLife'
+      ? wiredScale
+      : undefined);
   if (scaleNode) {
     p.sizeFrom = fk(scaleNode, 'from', 1) * 8;
     p.sizeTo = fk(scaleNode, 'to', 0) * 8;
-    p.sizeEase = EASE_INDEX[scaleNode.structural?.ease ?? 'linear'] ?? 0;
+    p.sizeEase = easeFor(scaleNode, EASE_CH_SIZE);
+  }
+
+  // Alpha ramp: gen.alphaOverLife anywhere, else whatever ramp feeds
+  // output.writeAlpha. Left at 1→1 (a no-op multiply) when the graph has none.
+  const wiredAlpha = source(byKind('output.writeAlpha')?.id, 'alpha');
+  const alphaNode =
+    byKind('gen.alphaOverLife') ??
+    (wiredAlpha?.kind === 'gen.numberOverLife' || wiredAlpha?.kind === 'gen.curveOverLife'
+      ? wiredAlpha
+      : undefined);
+  if (alphaNode) {
+    p.alphaFrom = fk(alphaNode, 'from', 1);
+    p.alphaTo = fk(alphaNode, 'to', 0);
+    p.alphaEase = easeFor(alphaNode, EASE_CH_ALPHA);
   }
 
   const burstNode = byKind('output.deathBurst');
@@ -329,4 +389,13 @@ function resolveKnob(
   }
   const bound = node.knobBindings?.[portId];
   return bound !== undefined ? paramById.get(bound)?.name : undefined;
+}
+
+/** A flat identity ramp for every LUT channel — what an unused channel reads. */
+function identityLut(): number[] {
+  const lut: number[] = [];
+  for (let c = 0; c < EASE_LUT_CHANNELS; c++) {
+    for (let i = 0; i < EASE_LUT_N; i++) lut.push(i / (EASE_LUT_N - 1));
+  }
+  return lut;
 }

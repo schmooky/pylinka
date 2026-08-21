@@ -6,6 +6,8 @@
  *   • a named GSAP preset (`'power2.out'`, `'sine.inOut'`, …) — see EASE_BODIES.
  *   • a custom cubic-bezier: `'cubic-bezier(x1,y1,x2,y2)'` (CSS syntax) — the
  *     control points of a P0=(0,0)…P3=(1,1) Bézier, solved per §cubic below.
+ *   • a multi-keyframe `'curve(x,y,ix,iy,ox,oy; …)'` — see ./curve.ts, which
+ *     owns its parsing and its own three renderings. This module only routes.
  *
  * This module owns THREE parallel renderings of that catalog, kept in lockstep:
  *   1. `EASE_BODIES` / `bezierBodyWgsl` — WGSL function bodies (WebGPU backend).
@@ -14,6 +16,18 @@
  * `ease.sampler.test.ts` pins (1)↔(3) at sample points; (2) is a mechanical
  * translation of (1). Add a curve here and nowhere else.
  */
+import {
+  CURVE_MAX_KEYS,
+  CURVE_MIN_KEYS,
+  curveFnGlsl,
+  curveFnWgsl,
+  curveFromBezier,
+  hashCurve,
+  normalizeCurve,
+  parseCurve,
+  sampleCurve,
+  type CurveKey,
+} from './curve.js';
 
 /** WGSL bodies for the §13.9 preset set. `t ∈ [0,1]`. */
 export const EASE_BODIES: Record<string, string> = {
@@ -64,9 +78,10 @@ export function parseCubicBezier(key: string): CubicBezier | null {
   };
 }
 
-/** True when the key is a custom cubic-bezier rather than a named preset. */
+/** True when the key is user-authored (bezier or multi-keyframe curve) rather
+ *  than a named preset. */
 export function isCustomEase(key: string): boolean {
-  return parseCubicBezier(key) !== null;
+  return parseCubicBezier(key) !== null || parseCurve(key) !== null;
 }
 
 function clamp01(n: number): number {
@@ -99,6 +114,8 @@ function bezierAt(c: CubicBezier, t: number): number {
 export function easeFnName(key: string): string {
   const c = parseCubicBezier(key);
   if (c) return 'easeSel_cb_' + hashBezier(c);
+  const k = parseCurve(key);
+  if (k) return 'easeSel_cv_' + hashCurve(k);
   return 'easeSel_' + key.replace(/\./g, '_');
 }
 
@@ -124,6 +141,8 @@ function f32lit(n: number): string {
 export function easeFn(key: string): string {
   const c = parseCubicBezier(key);
   if (c) return bezierBodyWgsl(easeFnName(key), c);
+  const k = parseCurve(key);
+  if (k) return curveFnWgsl(easeFnName(key), k);
   const body = EASE_BODIES[key];
   if (body === undefined) throw new Error(`Unknown ease "${key}"`);
   return `fn ${easeFnName(key)}(t: f32) -> f32 { ${body} }`;
@@ -134,6 +153,8 @@ export function easeFnGlsl(key: string): string {
   const name = easeFnName(key);
   const c = parseCubicBezier(key);
   if (c) return bezierBodyGlsl(name, c);
+  const k = parseCurve(key);
+  if (k) return curveFnGlsl(name, k);
   const body = EASE_BODIES[key];
   if (body === undefined) throw new Error(`Unknown ease "${key}"`);
   // preset bodies only ever declare `let u` (an f32) — mechanical WGSL→GLSL.
@@ -200,5 +221,164 @@ export function sampleEase(key: string, t: number): number {
   if (preset) return preset(t);
   const c = parseCubicBezier(key);
   if (c) return bezierAt(c, t);
+  const k = parseCurve(key);
+  if (k) return sampleCurve(k, t);
   return t;
+}
+
+/**
+ * Sample any ease into `n` evenly spaced values over t∈[0,1].
+ *
+ * For backends that cannot name a curve in their shader — the interpreted
+ * WebGL path runs one fixed program and selects an ease by integer index — a
+ * baked table is the only way a custom curve can reach the GPU at all.
+ */
+export function sampleEaseLut(key: string, n: number): number[] {
+  const out: number[] = new Array<number>(n);
+  for (let i = 0; i < n; i++) out[i] = sampleEase(key, i / (n - 1));
+  return out;
+}
+
+/**
+ * Largest error, as a fraction of full scale, that a fitted preset may have.
+ * Below this the refit is invisible against the original curve.
+ */
+const FIT_TOLERANCE = 0.004;
+
+/**
+ * Any ease as editable keyframes — what the editor calls when you take a
+ * preset into the point editor.
+ *
+ * A `curve(...)` is returned as-is and a `cubic-bezier(...)` converts exactly,
+ * so neither round-trip changes an effect. A preset has no keyframes of its
+ * own and is fitted, using the FEWEST keys that stay inside FIT_TOLERANCE.
+ * That matters: most of the §13.9 set is exactly one cubic bezier — `linear`,
+ * the whole `power1`/`power2` family and `back.out` are all degree ≤ 3 in the
+ * bezier's own parameter — so they come back as two points, which is what an
+ * artist expects to see and the least there is to push around. Only the
+ * genuinely transcendental ones (`sine.*`, `expo.out`) and the piecewise
+ * `inOut` pair need more.
+ */
+export function curveFromEase(key: string, maxKeys = CURVE_MAX_KEYS): CurveKey[] {
+  const existing = parseCurve(key);
+  if (existing) return existing;
+  const c = parseCubicBezier(key);
+  if (c) return curveFromBezier(c);
+
+  const cap = Math.max(CURVE_MIN_KEYS, Math.min(maxKeys, CURVE_MAX_KEYS));
+  let fallback: CurveKey[] | null = null;
+  for (let n = CURVE_MIN_KEYS; n <= cap; n++) {
+    const keys = fitKeys(key, n);
+    fallback = keys;
+    if (fitError(keys, key) <= FIT_TOLERANCE) return keys;
+  }
+  return fallback ?? curveFromBezier({ x1: 1 / 3, y1: 1 / 3, x2: 2 / 3, y2: 2 / 3 });
+}
+
+/** Largest absolute deviation of a fitted curve from the ease it approximates. */
+function fitError(keys: CurveKey[], key: string): number {
+  let worst = 0;
+  for (let i = 0; i <= 128; i++) {
+    const t = i / 128;
+    worst = Math.max(worst, Math.abs(sampleCurve(keys, t) - sampleEase(key, t)));
+  }
+  return worst;
+}
+
+/**
+ * Fit `n` keyframes to an ease.
+ *
+ * Keys sit ON the target curve at arc-length-spaced positions, and each
+ * segment's handles are placed at a third of its span in x. Pinning the
+ * control points' x that way makes X(s) affine — x and the bezier parameter
+ * become the same thing — which in turn makes the segment's y a *linear*
+ * function of its two control heights. So the best handles are a two-unknown
+ * least-squares solve per segment, in closed form, rather than a search.
+ */
+function fitKeys(key: string, n: number): CurveKey[] {
+  const xs = fitSampleXs(key, n);
+  const ys = xs.map((x) => sampleEase(key, x));
+  const keys: CurveKey[] = xs.map((x, i) => ({ x, y: ys[i]!, ix: 0, iy: 0, ox: 0, oy: 0 }));
+
+  for (let i = 0; i < n - 1; i++) {
+    const x0 = xs[i]!;
+    const x1 = xs[i + 1]!;
+    const span = x1 - x0;
+    const y0 = ys[i]!;
+    const y1 = ys[i + 1]!;
+    // Normal equations for the two control heights over this segment.
+    let a11 = 0;
+    let a12 = 0;
+    let a22 = 0;
+    let b1 = 0;
+    let b2 = 0;
+    const STEPS = 24;
+    for (let j = 0; j <= STEPS; j++) {
+      const s = j / STEPS;
+      const u = 1 - s;
+      const A1 = 3 * u * u * s;
+      const A2 = 3 * u * s * s;
+      const fixed = y0 * u * u * u + y1 * s * s * s;
+      const target = sampleEase(key, x0 + span * s) - fixed;
+      a11 += A1 * A1;
+      a12 += A1 * A2;
+      a22 += A2 * A2;
+      b1 += A1 * target;
+      b2 += A2 * target;
+    }
+    const det = a11 * a22 - a12 * a12;
+    // A degenerate segment (zero width) falls back to a straight join.
+    let c1 = y0 + (y1 - y0) / 3;
+    let c2 = y0 + (2 * (y1 - y0)) / 3;
+    if (Math.abs(det) > 1e-12) {
+      c1 = (b1 * a22 - b2 * a12) / det;
+      c2 = (a11 * b2 - a12 * b1) / det;
+    }
+    keys[i]!.ox = span / 3;
+    keys[i]!.oy = c1 - y0;
+    keys[i + 1]!.ix = -span / 3;
+    keys[i + 1]!.iy = c2 - y1;
+  }
+  return normalizeCurve(keys);
+}
+
+/**
+ * Where to place the keys when fitting an ease. Evenly in x is the obvious
+ * choice and the wrong one: `expo.out` covers a third of its range in the
+ * first 5% of x, so evenly spaced keys straddle the steep part and the fit
+ * visibly cuts the corner. Spacing them by arc length instead puts keys where
+ * the curve actually moves and leaves flat stretches sparse.
+ */
+function fitSampleXs(key: string, count: number): number[] {
+  if (count <= 2) return [0, 1];
+  const DENSE = 256;
+  const cum: number[] = [0];
+  let prevX = 0;
+  let prevY = sampleEase(key, 0);
+  for (let i = 1; i <= DENSE; i++) {
+    const x = i / DENSE;
+    const y = sampleEase(key, x);
+    cum.push(cum[i - 1]! + Math.hypot(x - prevX, y - prevY));
+    prevX = x;
+    prevY = y;
+  }
+  const total = cum[DENSE]!;
+  if (!(total > 0)) return Array.from({ length: count }, (_, i) => i / (count - 1));
+
+  const xs = [0];
+  let j = 1;
+  for (let k = 1; k < count - 1; k++) {
+    const target = (total * k) / (count - 1);
+    while (j < DENSE && cum[j]! < target) j++;
+    // Linear interpolation inside the dense step that crossed the target.
+    const lo = cum[j - 1]!;
+    const hi = cum[j]!;
+    const frac = hi > lo ? (target - lo) / (hi - lo) : 0;
+    const x = (j - 1 + frac) / DENSE;
+    // Never let two keys collapse onto the same x — normalizeCurve would then
+    // hand the shader a zero-width segment.
+    xs.push(Math.max(x, xs[k - 1]! + 1e-3));
+  }
+  xs.push(1);
+  return xs;
 }

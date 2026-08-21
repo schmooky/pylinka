@@ -21,6 +21,38 @@ float easeSel(int e, float t) {
   return t;                                              // linear
 }`;
 
+/**
+ * Samples per curve in the ease LUT, and the three curves it holds (size,
+ * colour, alpha — in that order).
+ *
+ * The integer selector above can only name the presets it was compiled with,
+ * so a custom `cubic-bezier(...)` or multi-keyframe `curve(...)` used to fall
+ * back to linear on this backend — the editor's default preview showed the
+ * wrong motion. Rather than grow the selector (this shader is fixed-function
+ * and cannot be recompiled per curve, unlike the compiled backends), any
+ * non-preset ease is sampled on the CPU into this LUT and read back with
+ * linear interpolation. Presets keep their exact analytic path.
+ */
+export const EASE_LUT_N = 32;
+export const EASE_LUT_CHANNELS = 3;
+
+/** Ease dispatch: `e >= 0` selects a preset, `e < 0` reads channel `ch`'s LUT. */
+const EASE_LUT_GLSL = `
+uniform float u_easeLut[${EASE_LUT_N * EASE_LUT_CHANNELS}];
+float easeCh(int e, int ch, float t) {
+  if (e >= 0) return easeSel(e, t);
+  float f = clamp(t, 0.0, 1.0) * float(${EASE_LUT_N - 1});
+  int i0 = int(floor(f));
+  int i1 = min(i0 + 1, ${EASE_LUT_N - 1});
+  int base = ch * ${EASE_LUT_N};
+  return mix(u_easeLut[base + i0], u_easeLut[base + i1], f - float(i0));
+}`;
+
+/** LUT channel order — mirrored by EngineParams.easeLut. */
+export const EASE_CH_SIZE = 0;
+export const EASE_CH_COLOR = 1;
+export const EASE_CH_ALPHA = 2;
+
 /** Ease name → shader index (mirror of EASE_GLSL). */
 export const EASE_INDEX: Record<string, number> = {
   linear: 0,
@@ -429,12 +461,16 @@ uniform float u_seqRow;      // fixed row when u_pick == 1
 
 out vec2 v_uv;
 out vec4 v_color;
+uniform float u_alphaFrom;   // alpha ramp (gen.alphaOverLife); 1→1 = no-op
+uniform float u_alphaTo;
+uniform int   u_alphaEase;
 ${EASE_GLSL}
+${EASE_LUT_GLSL}
 
 void main() {
   float alive = step(0.00001, a_life) * step(a_age, a_life);
   float tN = clamp(a_age / max(a_life, 1e-4), 0.0, 1.0);
-  float size = mix(u_sizeFrom, u_sizeTo, easeSel(u_sizeEase, tN)) * alive;
+  float size = mix(u_sizeFrom, u_sizeTo, easeCh(u_sizeEase, ${EASE_CH_SIZE}, tN)) * alive;
 
   vec2 world = a_pos + a_corner * size;
   vec2 clip = vec2(world.x / u_resolution.x * 2.0 - 1.0, 1.0 - world.y / u_resolution.y * 2.0);
@@ -451,7 +487,10 @@ void main() {
   } else {
     v_uv = a_corner + 0.5;
   }
-  v_color = mix(u_colorFrom, u_colorTo, easeSel(u_colorEase, tN));
+  v_color = mix(u_colorFrom, u_colorTo, easeCh(u_colorEase, ${EASE_CH_COLOR}, tN));
+  // Alpha ramp multiplies the colour's own alpha, so colour-over-life and
+  // alpha-over-life compose instead of one silently winning.
+  v_color.a *= mix(u_alphaFrom, u_alphaTo, easeCh(u_alphaEase, ${EASE_CH_ALPHA}, tN));
 }`;
 
 /** Render fragment shader — soft radial sprite, or textured atlas cell. */

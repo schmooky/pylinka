@@ -534,6 +534,14 @@ export class WebGL2Engine {
     gl.uniform1f(u.get('u_sizeTo')!, p.sizeTo * this.sizeScale);
     gl.uniform1i(u.get('u_colorEase')!, p.colorEase);
     gl.uniform1i(u.get('u_sizeEase')!, p.sizeEase);
+    gl.uniform1f(u.get('u_alphaFrom')!, p.alphaFrom);
+    gl.uniform1f(u.get('u_alphaTo')!, p.alphaTo);
+    gl.uniform1i(u.get('u_alphaEase')!, p.alphaEase);
+    // Only uploaded when some channel actually needs it — a graph on stock
+    // presets never pays for the array.
+    if (p.colorEase < 0 || p.sizeEase < 0 || p.alphaEase < 0) {
+      gl.uniform1fv(u.get('u_easeLut')!, p.easeLut);
+    }
 
     const a = this.atlas;
     gl.uniform1f(u.get('u_textured')!, a ? 1 : 0);
@@ -651,6 +659,10 @@ const RENDER_UNIFORMS = [
   'u_sizeTo',
   'u_colorEase',
   'u_sizeEase',
+  'u_alphaFrom',
+  'u_alphaTo',
+  'u_alphaEase',
+  'u_easeLut',
   'u_textured',
   'u_atlas',
   'u_atlasSize',

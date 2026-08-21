@@ -160,3 +160,78 @@ describe('extractParams — interaction nodes', () => {
     expect(p.colliders[2]!.radius).toBe(90);
   });
 });
+
+describe('extractParams — custom ease curves on the interpreted backend', () => {
+  const CURVE = 'curve(0,0,0,0,0.2,0.5;0.6,0.9,-0.2,0,0.2,0;1,0.1,-0.3,0.2,0,0)';
+
+  const sys = (nodes: System['graph']['nodes'], edges: System['graph']['edges'] = []): System => ({
+    id: 's1', name: 's', capacity: 256, blendMode: 'normal', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 },
+    graph: { nodes, edges },
+  });
+
+  it('keeps a preset on the analytic path (no LUT)', () => {
+    const p = extractParams(
+      sys([{ id: 'a', kind: 'gen.scaleOverLife', structural: { ease: 'sine.out' }, values: {} }]),
+      [], {},
+    );
+    expect(p.sizeEase).toBe(6); // EASE_INDEX['sine.out']
+  });
+
+  it('bakes a multi-keyframe curve into the LUT and flags it with -1', () => {
+    const p = extractParams(
+      sys([{ id: 'a', kind: 'gen.scaleOverLife', structural: { ease: CURVE }, values: {} }]),
+      [], {},
+    );
+    expect(p.sizeEase).toBe(-1);
+    const lut = p.easeLut.slice(0, 32); // channel 0 = size
+    expect(lut[0]).toBeCloseTo(0, 5);
+    expect(lut[31]).toBeCloseTo(0.1, 3); // last keyframe's y
+    // the curve peaks in the middle — an identity ramp never would
+    expect(Math.max(...lut)).toBeGreaterThan(0.85);
+    // untouched channels stay the identity ramp
+    expect(p.easeLut.slice(32, 64)[31]).toBeCloseTo(1, 5);
+  });
+
+  it('a cubic-bezier also reaches the LUT (it used to render as linear)', () => {
+    const p = extractParams(
+      sys([{ id: 'a', kind: 'gen.colorOverLife', structural: { ease: 'cubic-bezier(0.9,0,1,0.2)' }, values: {} }]),
+      [], {},
+    );
+    expect(p.colorEase).toBe(-1);
+    const lut = p.easeLut.slice(32, 64);
+    expect(lut[16]).toBeLessThan(0.25); // heavily eased-in: still low at t=0.5
+  });
+
+  it('picks up gen.alphaOverLife', () => {
+    const p = extractParams(
+      sys([{ id: 'a', kind: 'gen.alphaOverLife', structural: { ease: 'power2.out' }, values: { from: { t: 'f32', v: 0.8 }, to: { t: 'f32', v: 0 } } }]),
+      [], {},
+    );
+    expect(p.alphaFrom).toBe(0.8);
+    expect(p.alphaTo).toBe(0);
+    expect(p.alphaEase).toBe(4);
+  });
+
+  it('defaults the alpha ramp to a no-op when the graph has none', () => {
+    const p = extractParams(sys([{ id: 'a', kind: 'output.writeAlpha' }]), [], {});
+    expect(p.alphaFrom).toBe(1);
+    expect(p.alphaTo).toBe(1);
+  });
+
+  it('follows a gen.numberOverLife wired into output.writeAlpha', () => {
+    const p = extractParams(
+      sys(
+        [
+          { id: 'g', kind: 'gen.numberOverLife', structural: { ease: 'sine.in' }, values: { from: { t: 'f32', v: 0.25 }, to: { t: 'f32', v: 1 } } },
+          { id: 'w', kind: 'output.writeAlpha' },
+        ],
+        [{ id: 'e1', from: { nodeId: 'g', portId: 'out' }, to: { nodeId: 'w', portId: 'alpha' } }],
+      ),
+      [], {},
+    );
+    expect(p.alphaFrom).toBe(0.25);
+    expect(p.alphaTo).toBe(1);
+    expect(p.alphaEase).toBe(5);
+  });
+});

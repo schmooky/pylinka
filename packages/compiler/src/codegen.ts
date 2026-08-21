@@ -231,6 +231,10 @@ export const NODE_CODEGEN: Record<string, NodeCodegen> = {
     one(`mix(${i.from}, ${i.to}, ${ctx.ease(s.ease)}(${ctx.consts.AGE_N}))`),
   'gen.scaleOverLife': (ctx, i, s) =>
     one(`mix(${i.from}, ${i.to}, ${ctx.ease(s.ease)}(${ctx.consts.AGE_N}))`),
+  'gen.numberOverLife': (ctx, i, s) =>
+    one(`mix(${i.from}, ${i.to}, ${ctx.ease(s.ease)}(${ctx.consts.AGE_N}))`),
+  'gen.alphaOverLife': (ctx, i, s) =>
+    one(`mix(${i.from}, ${i.to}, ${ctx.ease(s.ease)}(${ctx.consts.AGE_N}))`),
   // Standalone reshaper: run any 0..1 value through the chosen ease. Wire e.g.
   // input.ageNormalized (or a knob) into `t`, pick a preset/custom bezier, then
   // wire `out` into anything. The `t` clamp keeps overshoot-free presets sane.

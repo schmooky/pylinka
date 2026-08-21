@@ -55,8 +55,11 @@ export class SystemClock {
   }
 
   /** Swap emitter settings without losing position (apply()). */
-  setEmitterSettings(emitter: EmitterSettings, capacity: number): void {
-    this.scheduler = new SpawnScheduler(emitter, capacity);
+  setEmitterSettings(emitter: EmitterSettings, _capacity: number): void {
+    // Retarget rather than replace: a fresh scheduler drops the fractional
+    // spawn debt, which stalls low-rate flow and burst emitters under the
+    // repeated apply() calls a live-edit preview makes. See setEmitter.
+    this.scheduler.setEmitter(emitter);
   }
 
   reset(): void {
