@@ -8,6 +8,7 @@ import {
   CURVE_MAX_KEYS,
   curveFromBezier,
   curveFromEase,
+  EASE_KEYS,
   easeFnName,
   formatCurve,
   isCurveEase,
@@ -162,26 +163,61 @@ describe('curveFromEase — taking an existing ease into the point editor', () =
     }
   });
 
-  it('fits a preset closely enough not to visibly jump', () => {
-    // expo.out is the hard case: a third of its range lives in the first 5% of
-    // x. Arc-length key placement holds every preset inside 2% of full scale.
-    for (const preset of ['power2.out', 'sine.inOut', 'power1.in', 'back.out', 'expo.out']) {
-      const keys = curveFromEase(preset, 7);
+  it('fits every preset with two points where two points can express it', () => {
+    // These are all degree <= 3 in the bezier's own parameter, so a single
+    // segment reproduces them outright — an artist opening `power2.out` should
+    // see the two points that curve actually has, not a sampled approximation.
+    for (const preset of ['linear', 'power1.in', 'power1.out', 'power2.in', 'power2.out', 'back.out']) {
+      const keys = curveFromEase(preset);
+      expect(keys, preset).toHaveLength(2);
+      for (let i = 0; i <= 64; i++) {
+        const t = i / 64;
+        expect(sampleCurve(keys, t), `${preset} @ ${t}`).toBeCloseTo(sampleEase(preset, t), 9);
+      }
+    }
+  });
+
+  it('spends a third point only on the piecewise eases, and lands them exactly', () => {
+    for (const preset of ['power1.inOut', 'power2.inOut']) {
+      const keys = curveFromEase(preset);
+      expect(keys, preset).toHaveLength(3);
+      // the extra key is the seam at the half-way point
+      expect(keys[1]!.x).toBeCloseTo(0.5, 2);
+      for (let i = 0; i <= 64; i++) {
+        const t = i / 64;
+        expect(sampleCurve(keys, t), `${preset} @ ${t}`).toBeCloseTo(sampleEase(preset, t), 9);
+      }
+    }
+  });
+
+  it('uses the fewest keys that stay inside the tolerance, never the cap', () => {
+    for (const preset of EASE_KEYS) {
+      const keys = curveFromEase(preset);
       let worst = 0;
-      for (let i = 0; i <= 100; i++) {
-        const t = i / 100;
+      for (let i = 0; i <= 200; i++) {
+        const t = i / 200;
         worst = Math.max(worst, Math.abs(sampleCurve(keys, t) - sampleEase(preset, t)));
       }
-      expect(worst, `${preset} fit error`).toBeLessThan(0.02);
+      expect(worst, `${preset} fit error`).toBeLessThan(0.004);
+      expect(keys.length, `${preset} key count`).toBeLessThanOrEqual(4);
+      // and dropping a key would have missed the bound — the fit is minimal
+      if (keys.length > 2) {
+        const fewer = curveFromEase(preset, keys.length - 1);
+        let w2 = 0;
+        for (let i = 0; i <= 200; i++) {
+          const t = i / 200;
+          w2 = Math.max(w2, Math.abs(sampleCurve(fewer, t) - sampleEase(preset, t)));
+        }
+        expect(w2, `${preset} with one key fewer`).toBeGreaterThan(0.004);
+      }
     }
   });
 
   it('places fit keys where the curve moves, not evenly in x', () => {
-    const keys = curveFromEase('expo.out', 7);
-    // half the keys should land in the steep first fifth
-    const early = keys.filter((k) => k.x < 0.2).length;
-    expect(early).toBeGreaterThanOrEqual(3);
-    // and x stays strictly increasing, so no zero-width segment reaches a shader
+    // expo.out is the hard case: a third of its range lives in the first 5%.
+    const keys = curveFromEase('expo.out');
+    expect(keys.length).toBeGreaterThan(2);
+    expect(keys[1]!.x).toBeLessThan(0.25);
     for (let i = 1; i < keys.length; i++) expect(keys[i]!.x).toBeGreaterThan(keys[i - 1]!.x);
   });
 

@@ -18,6 +18,7 @@
  */
 import {
   CURVE_MAX_KEYS,
+  CURVE_MIN_KEYS,
   curveFnGlsl,
   curveFnWgsl,
   curveFromBezier,
@@ -233,34 +234,105 @@ export function easeCurveKeys(key: string): CurveKey[] | null {
 }
 
 /**
- * Any ease as editable keyframes — what the editor calls when you take a
- * preset into the point editor. A `curve(...)` is returned as-is and a
- * `cubic-bezier(...)` converts exactly, so neither round-trip changes an
- * effect. A preset has no keyframes of its own and is *fitted*: sampled at
- * `n` points with tangents from central differences, which tracks the smooth
- * §13.9 curves closely enough that the plot does not visibly jump when you
- * start editing. Fitting is deliberately one-way — the result is a new curve
- * the artist now owns, not a claim that it equals the preset.
+ * Largest error, as a fraction of full scale, that a fitted preset may have.
+ * Below this the refit is invisible against the original curve.
  */
-export function curveFromEase(key: string, n = 5): CurveKey[] {
+const FIT_TOLERANCE = 0.004;
+
+/**
+ * Any ease as editable keyframes — what the editor calls when you take a
+ * preset into the point editor.
+ *
+ * A `curve(...)` is returned as-is and a `cubic-bezier(...)` converts exactly,
+ * so neither round-trip changes an effect. A preset has no keyframes of its
+ * own and is fitted, using the FEWEST keys that stay inside FIT_TOLERANCE.
+ * That matters: most of the §13.9 set is exactly one cubic bezier — `linear`,
+ * the whole `power1`/`power2` family and `back.out` are all degree ≤ 3 in the
+ * bezier's own parameter — so they come back as two points, which is what an
+ * artist expects to see and the least there is to push around. Only the
+ * genuinely transcendental ones (`sine.*`, `expo.out`) and the piecewise
+ * `inOut` pair need more.
+ */
+export function curveFromEase(key: string, maxKeys = CURVE_MAX_KEYS): CurveKey[] {
   const existing = parseCurve(key);
   if (existing) return existing;
   const c = parseCubicBezier(key);
   if (c) return curveFromBezier(c);
 
-  const count = Math.max(3, Math.min(n, CURVE_MAX_KEYS));
-  const xs = fitSampleXs(key, count);
+  const cap = Math.max(CURVE_MIN_KEYS, Math.min(maxKeys, CURVE_MAX_KEYS));
+  let fallback: CurveKey[] | null = null;
+  for (let n = CURVE_MIN_KEYS; n <= cap; n++) {
+    const keys = fitKeys(key, n);
+    fallback = keys;
+    if (fitError(keys, key) <= FIT_TOLERANCE) return keys;
+  }
+  return fallback ?? curveFromBezier({ x1: 1 / 3, y1: 1 / 3, x2: 2 / 3, y2: 2 / 3 });
+}
+
+/** Largest absolute deviation of a fitted curve from the ease it approximates. */
+function fitError(keys: CurveKey[], key: string): number {
+  let worst = 0;
+  for (let i = 0; i <= 128; i++) {
+    const t = i / 128;
+    worst = Math.max(worst, Math.abs(sampleCurve(keys, t) - sampleEase(key, t)));
+  }
+  return worst;
+}
+
+/**
+ * Fit `n` keyframes to an ease.
+ *
+ * Keys sit ON the target curve at arc-length-spaced positions, and each
+ * segment's handles are placed at a third of its span in x. Pinning the
+ * control points' x that way makes X(s) affine — x and the bezier parameter
+ * become the same thing — which in turn makes the segment's y a *linear*
+ * function of its two control heights. So the best handles are a two-unknown
+ * least-squares solve per segment, in closed form, rather than a search.
+ */
+function fitKeys(key: string, n: number): CurveKey[] {
+  const xs = fitSampleXs(key, n);
   const ys = xs.map((x) => sampleEase(key, x));
-  const keys: CurveKey[] = xs.map((x, i) => {
-    // Central difference, one-sided at the ends — the slope the handles follow.
-    const lo = Math.max(0, i - 1);
-    const hi = Math.min(count - 1, i + 1);
-    const m = (ys[hi]! - ys[lo]!) / (xs[hi]! - xs[lo]!);
-    const prev = i > 0 ? x - xs[i - 1]! : 0;
-    const next = i < count - 1 ? xs[i + 1]! - x : 0;
-    // A third of the span is the standard Catmull-Rom → bezier handle length.
-    return { x, y: ys[i]!, ix: -prev / 3, iy: (-prev / 3) * m, ox: next / 3, oy: (next / 3) * m };
-  });
+  const keys: CurveKey[] = xs.map((x, i) => ({ x, y: ys[i]!, ix: 0, iy: 0, ox: 0, oy: 0 }));
+
+  for (let i = 0; i < n - 1; i++) {
+    const x0 = xs[i]!;
+    const x1 = xs[i + 1]!;
+    const span = x1 - x0;
+    const y0 = ys[i]!;
+    const y1 = ys[i + 1]!;
+    // Normal equations for the two control heights over this segment.
+    let a11 = 0;
+    let a12 = 0;
+    let a22 = 0;
+    let b1 = 0;
+    let b2 = 0;
+    const STEPS = 24;
+    for (let j = 0; j <= STEPS; j++) {
+      const s = j / STEPS;
+      const u = 1 - s;
+      const A1 = 3 * u * u * s;
+      const A2 = 3 * u * s * s;
+      const fixed = y0 * u * u * u + y1 * s * s * s;
+      const target = sampleEase(key, x0 + span * s) - fixed;
+      a11 += A1 * A1;
+      a12 += A1 * A2;
+      a22 += A2 * A2;
+      b1 += A1 * target;
+      b2 += A2 * target;
+    }
+    const det = a11 * a22 - a12 * a12;
+    // A degenerate segment (zero width) falls back to a straight join.
+    let c1 = y0 + (y1 - y0) / 3;
+    let c2 = y0 + (2 * (y1 - y0)) / 3;
+    if (Math.abs(det) > 1e-12) {
+      c1 = (b1 * a22 - b2 * a12) / det;
+      c2 = (a11 * b2 - a12 * b1) / det;
+    }
+    keys[i]!.ox = span / 3;
+    keys[i]!.oy = c1 - y0;
+    keys[i + 1]!.ix = -span / 3;
+    keys[i + 1]!.iy = c2 - y1;
+  }
   return normalizeCurve(keys);
 }
 
@@ -272,6 +344,7 @@ export function curveFromEase(key: string, n = 5): CurveKey[] {
  * the curve actually moves and leaves flat stretches sparse.
  */
 function fitSampleXs(key: string, count: number): number[] {
+  if (count <= 2) return [0, 1];
   const DENSE = 256;
   const cum: number[] = [0];
   let prevX = 0;

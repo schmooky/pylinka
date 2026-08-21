@@ -22,6 +22,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { CurveModal } from './CurveModal';
 import {
   CURVE_MAX_KEYS,
   curveFromEase,
@@ -51,7 +52,7 @@ const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const clamp = (n: number, lo: number, hi: number) => (n < lo ? lo : n > hi ? hi : n);
 
 /** Short human label for an ease key. */
-function easeLabel(key: string): string {
+export function easeLabel(key: string): string {
   const keys = parseCurve(key);
   if (keys) return `custom · ${keys.length} pts`;
   return isCustomEase(key) ? 'custom' : key;
@@ -118,7 +119,21 @@ const W = 384;
 const H = 292;
 const PAD = 26;
 
-function CurveEditor({ seed, onCommit }: { seed: string; onCommit(key: string): void }) {
+export function CurveEditor({
+  seed,
+  onCommit,
+  onPreview,
+  width = W,
+  height = H,
+}: {
+  seed: string;
+  /** Structural write — recompiles, so this fires on pointer-up only. */
+  onCommit(key: string): void;
+  /** Every intermediate value, for a live preview that can take them cheaply. */
+  onPreview?: (key: string) => void;
+  width?: number;
+  height?: number;
+}) {
   const [keys, setKeys] = useState<CurveKey[]>(() => curveFromEase(seed));
   const [sel, setSel] = useState<number | null>(null);
   const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
@@ -139,7 +154,15 @@ function CurveEditor({ seed, onCommit }: { seed: string; onCommit(key: string): 
   const svgRef = useRef<SVGSVGElement>(null);
   const padRef = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
-  const m = makeMap(W, H, PAD);
+  const m = makeMap(width, height, PAD);
+
+  // Push every in-progress shape outwards. Held in a ref so a caller passing an
+  // inline arrow does not re-fire the effect on each render.
+  const previewRef = useRef(onPreview);
+  previewRef.current = onPreview;
+  useEffect(() => {
+    previewRef.current?.(formatCurve(keys));
+  }, [keys]);
 
   const commit = (next: CurveKey[]) => {
     const key = formatCurve(next);
@@ -303,8 +326,8 @@ function CurveEditor({ seed, onCommit }: { seed: string; onCommit(key: string): 
       }}>
       <svg
         ref={svgRef}
-        width={W}
-        height={H}
+        width={width}
+        height={height}
         style={{
           display: 'block',
           touchAction: 'none',
@@ -554,11 +577,55 @@ function Grid({ m }: { m: ReturnType<typeof makeMap> }) {
   );
 }
 
+/** The §13.9 preset set as live thumbnails. */
+export function PresetGrid({
+  value,
+  onChange,
+  cols,
+}: {
+  value: string;
+  onChange(key: string): void;
+  cols: number;
+}) {
+  return (
+    <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+      {EASE_KEYS.map((k) => {
+        const active = k === value;
+        return (
+          <button
+            key={k}
+            className="flex flex-col items-center gap-0.5 rounded-md border p-1 hover:bg-black/20"
+            style={{
+              borderColor: active ? ACCENT : 'var(--color-border)',
+              background: active ? 'color-mix(in oklab, #a78bfa 16%, transparent)' : 'transparent',
+            }}
+            title={k}
+            onClick={() => onChange(k)}>
+            <CurvePlot easeKey={k} w={50} h={32} stroke={active ? ACCENT : 'var(--color-muted-foreground)'} faint={!active} />
+            <span className="w-full truncate text-center text-[8px] leading-tight text-muted-foreground">{k}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ──────────────────────────── node control + panel ─────────────────────────
 
 /** The on-node ease control: a drawn curve you click to open the picker. */
-export function EaseControl({ value, onChange }: { value: string; onChange(key: string): void }) {
+export function EaseControl({
+  value,
+  onChange,
+  nodeId,
+  nodeLabel,
+}: {
+  value: string;
+  onChange(key: string): void;
+  nodeId: string;
+  nodeLabel: string;
+}) {
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [rect, setRect] = useState<DOMRect | null>(null);
 
@@ -584,7 +651,25 @@ export function EaseControl({ value, onChange }: { value: string; onChange(key: 
         <span className="ml-auto text-[9px] text-muted-foreground">▸</span>
       </button>
       {open && rect && (
-        <CurvePickerPopover anchor={rect} value={value} onChange={onChange} onClose={() => setOpen(false)} />
+        <CurvePickerPopover
+          anchor={rect}
+          value={value}
+          onChange={onChange}
+          onClose={() => setOpen(false)}
+          onExpand={() => {
+            setOpen(false);
+            setExpanded(true);
+          }}
+        />
+      )}
+      {expanded && (
+        <CurveModal
+          nodeId={nodeId}
+          nodeLabel={nodeLabel}
+          value={value}
+          onChange={onChange}
+          onClose={() => setExpanded(false)}
+        />
       )}
     </>
   );
@@ -595,11 +680,13 @@ function CurvePickerPopover({
   value,
   onChange,
   onClose,
+  onExpand,
 }: {
   anchor: DOMRect;
   value: string;
   onChange(key: string): void;
   onClose(): void;
+  onExpand(): void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: anchor.right + 8, top: anchor.top });
@@ -660,30 +747,21 @@ function CurvePickerPopover({
         <span className="min-w-0 flex-1 truncate text-right text-[10px] text-muted-foreground">
           {easeLabel(value)}
         </span>
+        <button
+          className="rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+          style={{ borderColor: 'var(--color-border)' }}
+          onClick={onExpand}
+          title="Open the full editor with a live preview of the effect">
+          ⤢ live
+        </button>
         <button className="text-muted-foreground hover:text-foreground" onClick={onClose} title="Close">
           ✕
         </button>
       </div>
 
       {showPresets && (
-        <div className="mb-3 grid grid-cols-5 gap-1.5">
-          {EASE_KEYS.map((k) => {
-            const active = k === value;
-            return (
-              <button
-                key={k}
-                className="flex flex-col items-center gap-0.5 rounded-md border p-1 hover:bg-black/20"
-                style={{
-                  borderColor: active ? ACCENT : 'var(--color-border)',
-                  background: active ? 'color-mix(in oklab, #a78bfa 16%, transparent)' : 'transparent',
-                }}
-                title={k}
-                onClick={() => onChange(k)}>
-                <CurvePlot easeKey={k} w={54} h={34} stroke={active ? ACCENT : 'var(--color-muted-foreground)'} faint={!active} />
-                <span className="w-full truncate text-center text-[8px] leading-tight text-muted-foreground">{k}</span>
-              </button>
-            );
-          })}
+        <div className="mb-3">
+          <PresetGrid value={value} onChange={onChange} cols={5} />
         </div>
       )}
 

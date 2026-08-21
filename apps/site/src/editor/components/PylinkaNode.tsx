@@ -224,6 +224,8 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
               <EaseControl
                 value={node.structural?.[s.key] ?? s.default}
                 onChange={(v) => setStructural(node.id, s.key, v)}
+                nodeId={node.id}
+                nodeLabel={schema?.label ?? node.kind}
               />
             </div>
           ) : s.key === 'asset' ? (
