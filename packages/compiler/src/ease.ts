@@ -6,6 +6,8 @@
  *   • a named GSAP preset (`'power2.out'`, `'sine.inOut'`, …) — see EASE_BODIES.
  *   • a custom cubic-bezier: `'cubic-bezier(x1,y1,x2,y2)'` (CSS syntax) — the
  *     control points of a P0=(0,0)…P3=(1,1) Bézier, solved per §cubic below.
+ *   • a multi-keyframe `'curve(x,y,ix,iy,ox,oy; …)'` — see ./curve.ts, which
+ *     owns its parsing and its own three renderings. This module only routes.
  *
  * This module owns THREE parallel renderings of that catalog, kept in lockstep:
  *   1. `EASE_BODIES` / `bezierBodyWgsl` — WGSL function bodies (WebGPU backend).
@@ -14,6 +16,14 @@
  * `ease.sampler.test.ts` pins (1)↔(3) at sample points; (2) is a mechanical
  * translation of (1). Add a curve here and nowhere else.
  */
+import {
+  curveFnGlsl,
+  curveFnWgsl,
+  hashCurve,
+  parseCurve,
+  sampleCurve,
+  type CurveKey,
+} from './curve.js';
 
 /** WGSL bodies for the §13.9 preset set. `t ∈ [0,1]`. */
 export const EASE_BODIES: Record<string, string> = {
@@ -64,9 +74,10 @@ export function parseCubicBezier(key: string): CubicBezier | null {
   };
 }
 
-/** True when the key is a custom cubic-bezier rather than a named preset. */
+/** True when the key is user-authored (bezier or multi-keyframe curve) rather
+ *  than a named preset. */
 export function isCustomEase(key: string): boolean {
-  return parseCubicBezier(key) !== null;
+  return parseCubicBezier(key) !== null || parseCurve(key) !== null;
 }
 
 function clamp01(n: number): number {
@@ -99,6 +110,8 @@ function bezierAt(c: CubicBezier, t: number): number {
 export function easeFnName(key: string): string {
   const c = parseCubicBezier(key);
   if (c) return 'easeSel_cb_' + hashBezier(c);
+  const k = parseCurve(key);
+  if (k) return 'easeSel_cv_' + hashCurve(k);
   return 'easeSel_' + key.replace(/\./g, '_');
 }
 
@@ -124,6 +137,8 @@ function f32lit(n: number): string {
 export function easeFn(key: string): string {
   const c = parseCubicBezier(key);
   if (c) return bezierBodyWgsl(easeFnName(key), c);
+  const k = parseCurve(key);
+  if (k) return curveFnWgsl(easeFnName(key), k);
   const body = EASE_BODIES[key];
   if (body === undefined) throw new Error(`Unknown ease "${key}"`);
   return `fn ${easeFnName(key)}(t: f32) -> f32 { ${body} }`;
@@ -134,6 +149,8 @@ export function easeFnGlsl(key: string): string {
   const name = easeFnName(key);
   const c = parseCubicBezier(key);
   if (c) return bezierBodyGlsl(name, c);
+  const k = parseCurve(key);
+  if (k) return curveFnGlsl(name, k);
   const body = EASE_BODIES[key];
   if (body === undefined) throw new Error(`Unknown ease "${key}"`);
   // preset bodies only ever declare `let u` (an f32) — mechanical WGSL→GLSL.
@@ -200,5 +217,14 @@ export function sampleEase(key: string, t: number): number {
   if (preset) return preset(t);
   const c = parseCubicBezier(key);
   if (c) return bezierAt(c, t);
+  const k = parseCurve(key);
+  if (k) return sampleCurve(k, t);
   return t;
+}
+
+/** The keyframes behind an ease key, for consumers that need the curve itself
+ *  (the editor's point editor) rather than a sampled value. Presets and the
+ *  cubic-bezier form have no keyframes of their own; only `curve(...)` does. */
+export function easeCurveKeys(key: string): CurveKey[] | null {
+  return parseCurve(key);
 }

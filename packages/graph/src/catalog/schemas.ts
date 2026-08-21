@@ -153,6 +153,31 @@ const gens: NodeSchema[] = [
     outputs: [outPort('out', 'f32')],
     structural: [{ key: 'ease', options: EASE_OPTIONS, default: 'linear' }],
   }),
+  // `numberOverLife` / `alphaOverLife` are `curveOverLife` with the label and
+  // defaults an artist looks for. Naming is the whole point: "Scale over life"
+  // was findable and the equivalent for alpha was not, so people wired scale
+  // into alpha or gave up. Distinct kinds also let the interpreted WebGL
+  // backend recognise an alpha ramp without guessing from a wire.
+  schema({
+    kind: 'gen.numberOverLife',
+    label: 'Number over life',
+    namespace: 'gen',
+    evalTime: 'update',
+    impact: 'low',
+    inputs: [inPort('from', 'f32', f(0)), inPort('to', 'f32', f(1))],
+    outputs: [outPort('out', 'f32')],
+    structural: [{ key: 'ease', options: EASE_OPTIONS, default: 'linear' }],
+  }),
+  schema({
+    kind: 'gen.alphaOverLife',
+    label: 'Alpha over life',
+    namespace: 'gen',
+    evalTime: 'update',
+    impact: 'low',
+    inputs: [inPort('from', 'f32', f(1)), inPort('to', 'f32', f(0))],
+    outputs: [outPort('out', 'f32')],
+    structural: [{ key: 'ease', options: EASE_OPTIONS, default: 'linear' }],
+  }),
   schema({
     kind: 'gen.ease',
     label: 'Ease',

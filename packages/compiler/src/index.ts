@@ -12,7 +12,8 @@ export { WEBGL2_LAYOUT } from './glsl.js';
 export type { Webgl2Attrib, Webgl2Layout } from './glsl.js';
 export { wgslBodyToGlsl, wgslExprToGlsl } from './translate.js';
 // Easing catalog — the single source of truth (§13.9). `sampleEase` lets the
-// editor plot the exact curve the shaders run; presets + custom cubic-bezier.
+// editor plot the exact curve the shaders run; presets, custom cubic-bezier,
+// and multi-keyframe `curve(...)`.
 export {
   EASE_BODIES,
   EASE_KEYS,
@@ -20,5 +21,21 @@ export {
   parseCubicBezier,
   isCustomEase,
   easeFnName,
+  easeCurveKeys,
   type CubicBezier,
 } from './ease.js';
+// Multi-keyframe ease curves — the editor authors these, both compiled
+// backends and the interpreted WebGL path consume them.
+export {
+  CURVE_MAX_KEYS,
+  CURVE_MIN_KEYS,
+  curveFromBezier,
+  defaultCurve,
+  formatCurve,
+  isCurveEase,
+  normalizeCurve,
+  parseCurve,
+  sampleCurve,
+  sampleCurveLut,
+  type CurveKey,
+} from './curve.js';
