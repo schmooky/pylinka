@@ -107,6 +107,45 @@ import DocsLayout from '../layouts/DocsLayout.astro';
     actually holds those nodes.
   </p>
 
+  <h2>Rotation</h2>
+  <p>
+    A sprite&rsquo;s angle is three independent terms that add up, and picking the wrong one is the
+    usual reason rotation looks broken. <code>output.writeRotation</code> sets an ANGLE. Wiring a
+    constant into it pins every particle at that angle forever, which is not turning &mdash; it is
+    just a different still frame.
+  </p>
+  <ul>
+    <li>
+      <strong>Angle at birth</strong> &mdash; <code>output.initRotation</code>. Feed it a
+      <code>gen.randomRange</code> so each particle starts somewhere different, or a literal to pin
+      them all. Without this every particle spawns at zero, so even a working spin stays in phase
+      across a burst and the whole thing reads as one rigid object.
+    </li>
+    <li>
+      <strong>Spin while alive</strong> &mdash; <code>gen.spin</code> into
+      <code>output.writeRotation</code>. Its <code>rate</code> is an angular VELOCITY in radians per
+      second, integrated over the particle&rsquo;s own age. A negative rate turns the other way, and
+      a <code>gen.randomRange</code> on <code>rate</code> gives every shard its own tumble.
+    </li>
+    <li>
+      <strong>An exact sweep</strong> &mdash; <code>gen.rotationOverLife</code>, which eases from one
+      angle to another across the lifetime. This is the one for a tile that turns exactly ninety
+      degrees as it falls and then stops.
+    </li>
+  </ul>
+  <p>
+    Every angle port in the catalog is radians, because that is what the trigonometry takes. Drop a
+    <code>math.radians</code> node in front of one to author in degrees instead &mdash; the
+    <a href="/recipes">rotation recipes</a> are all wired that way, so forking one gives you the
+    pattern to copy.
+  </p>
+  <p>
+    Rotation turns the sprite quad, not the texture lookup, so an animated atlas cell rotates as a
+    whole instead of shearing. The default untextured particle is a soft radial dot and is
+    symmetric under rotation &mdash; if nothing appears to turn, check that the system has a
+    texture with a visible orientation.
+  </p>
+
   <h2>Pools and lifetime</h2>
   <p>
     Each system pre-allocates a fixed <code>capacity</code> of particle slots. A particle dies on
