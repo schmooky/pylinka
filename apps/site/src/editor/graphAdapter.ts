@@ -23,6 +23,10 @@ export function toFlow(
       type: 'comment',
       position: { x: f.x, y: f.y },
       zIndex: -10,
+      // a locked annotation stays visible and editable but cannot be dragged
+      // off its nodes or swept away with the delete key
+      draggable: !f.locked,
+      deletable: !f.locked,
       data: { annId: f.id },
     });
   }
@@ -42,6 +46,8 @@ export function toFlow(
       type: 'note',
       position: { x: st.x, y: st.y },
       zIndex: 5,
+      draggable: !st.locked,
+      deletable: !st.locked,
       data: { annId: st.id },
     });
   }

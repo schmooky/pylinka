@@ -12,6 +12,7 @@ import { RECIPES, type RecipeGroup } from './data';
 /** Curated display order. Groups outside this list still appear, at the end. */
 const GROUP_ORDER: readonly string[] = [
   'vfx',
+  'rotation',
   'trails',
   'fire',
   'magic',
@@ -27,6 +28,7 @@ const GROUP_ORDER: readonly string[] = [
 /** How each group reads inside a sentence. */
 const GROUP_PROSE: Record<string, string> = {
   vfx: 'textured VFX (Brackeys CC0)',
+  rotation: 'spinning and tumbling sprites',
   trails: 'trails',
   fire: 'fire',
   magic: 'magic',
