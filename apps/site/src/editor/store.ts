@@ -4,7 +4,8 @@ import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { seedProject } from './seed';
 import { autoLayout } from './layout';
 import { RECIPES, type RecipeAtlas } from '../recipes/data';
-import type { CommentFrame, EditorProject, EditorTexture, EmissionMaskData, EmitterPathData, StickyNote } from './types';
+import type { CommentFrame, EditorProject, EditorTexture, EmissionMaskData, EmitterPathData, ReferenceImage, ReferenceSettings, StickyNote } from './types';
+import { DEFAULT_REFERENCE } from './types';
 import { generateAnnotations } from './annotate';
 
 const KEY = 'pylinka.editor.project';
@@ -224,6 +225,15 @@ interface EditorState {
   addNote(at?: { x: number; y: number }): void;
   updateNote(id: string, patch: Partial<Omit<StickyNote, 'id' | 'systemId'>>): void;
   removeNote(id: string): void;
+  /** lock/unlock EVERY annotation on the active system in one go */
+  lockAnnotations(locked: boolean): void;
+  // scene reference (project-level asset library + how it sits under the preview)
+  /** add a reference image to the library and show it; returns its id */
+  addReferenceId(ref: Omit<ReferenceImage, 'id'>): string;
+  removeReference(id: string): void;
+  renameReference(id: string, name: string): void;
+  /** patch how the active reference is displayed (opacity, scale, offset, …) */
+  setReference(patch: Partial<ReferenceSettings>): void;
   reset(): void;
   newProject(): void;
   importProject(obj: unknown): void;
@@ -669,6 +679,41 @@ export const useEditor = create<EditorState>((set, get) => {
     removeNote(id) {
       commit((p) => {
         if (p.annotations) p.annotations.notes = p.annotations.notes.filter((x) => x.id !== id);
+      });
+    },
+
+    lockAnnotations(locked) {
+      commit((p, sys) => {
+        for (const f of p.annotations?.frames ?? []) if (f.systemId === sys.id) f.locked = locked;
+        for (const n of p.annotations?.notes ?? []) if (n.systemId === sys.id) n.locked = locked;
+      });
+    },
+
+    addReferenceId(ref) {
+      const id = crypto.randomUUID();
+      commit((p) => {
+        p.references = [...(p.references ?? []), { ...ref, id }];
+        p.reference = { ...DEFAULT_REFERENCE, ...(p.reference ?? {}), id, visible: true };
+      });
+      return id;
+    },
+
+    removeReference(id) {
+      commit((p) => {
+        p.references = (p.references ?? []).filter((r) => r.id !== id);
+        if (p.reference?.id === id) p.reference = { ...p.reference, id: null };
+      });
+    },
+
+    renameReference(id, name) {
+      commit((p) => {
+        p.references = (p.references ?? []).map((r) => (r.id === id ? { ...r, name } : r));
+      });
+    },
+
+    setReference(patch) {
+      commit((p) => {
+        p.reference = { ...DEFAULT_REFERENCE, ...(p.reference ?? {}), ...patch };
       });
     },
 

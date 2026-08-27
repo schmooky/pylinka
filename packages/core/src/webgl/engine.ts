@@ -537,9 +537,14 @@ export class WebGL2Engine {
     gl.uniform1f(u.get('u_alphaFrom')!, p.alphaFrom);
     gl.uniform1f(u.get('u_alphaTo')!, p.alphaTo);
     gl.uniform1i(u.get('u_alphaEase')!, p.alphaEase);
+    gl.uniform2f(u.get('u_rotStart')!, p.rotStart[0], p.rotStart[1]);
+    gl.uniform2f(u.get('u_spin')!, p.spin[0], p.spin[1]);
+    gl.uniform1f(u.get('u_rotFrom')!, p.rotFrom);
+    gl.uniform1f(u.get('u_rotTo')!, p.rotTo);
+    gl.uniform1i(u.get('u_rotEase')!, p.rotEase);
     // Only uploaded when some channel actually needs it — a graph on stock
     // presets never pays for the array.
-    if (p.colorEase < 0 || p.sizeEase < 0 || p.alphaEase < 0) {
+    if (p.colorEase < 0 || p.sizeEase < 0 || p.alphaEase < 0 || p.rotEase < 0) {
       gl.uniform1fv(u.get('u_easeLut')!, p.easeLut);
     }
 
@@ -662,6 +667,11 @@ const RENDER_UNIFORMS = [
   'u_alphaFrom',
   'u_alphaTo',
   'u_alphaEase',
+  'u_rotStart',
+  'u_spin',
+  'u_rotFrom',
+  'u_rotTo',
+  'u_rotEase',
   'u_easeLut',
   'u_textured',
   'u_atlas',

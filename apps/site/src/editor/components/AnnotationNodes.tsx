@@ -8,6 +8,12 @@ import { ANNOTATION_COLORS } from '../annotate';
  * behind the graph nodes, and a Miro-style STICKY NOTE. Both are draggable
  * (whole node), rename/retext on double-click, recolor when selected, and
  * resize via the bottom-right grip.
+ *
+ * Both can also be LOCKED. They cover a large area under the nodes, so while
+ * wiring a graph you catch them constantly — and one stray drag rearranges the
+ * canvas, one stray delete takes the frame with it. Locked, they stay visible
+ * and still rename/recolor, but React Flow no longer drags or deletes them
+ * (see graphAdapter) and the resize grip is withdrawn.
  */
 
 /** Corner grip that live-resizes locally and commits once on release. */
@@ -59,6 +65,21 @@ function ResizeGrip({
         onCommit(nw, nh);
       }}
     />
+  );
+}
+
+/** Padlock toggle. Always visible once locked, so a pinned frame reads as pinned. */
+function LockToggle({ locked, color, onToggle }: { locked: boolean; color: string; onToggle(): void }) {
+  return (
+    <button
+      className={`nodrag shrink-0 text-[11px] leading-none ${locked ? 'opacity-90' : 'hidden opacity-60 hover:opacity-100 group-hover/fr:block group-hover/note:block'}`}
+      style={{ color }}
+      title={locked ? 'Locked — click to unlock' : 'Lock in place'}
+      aria-label={locked ? 'Unlock' : 'Lock'}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={onToggle}>
+      {locked ? '🔒' : '🔓'}
+    </button>
   );
 }
 
@@ -128,20 +149,28 @@ function CommentNodeInner({ data, selected }: NodeProps) {
             {frame.title}
           </span>
         )}
-        <button
-          className="nodrag hidden shrink-0 text-[11px] opacity-70 hover:opacity-100 group-hover/fr:block"
-          style={{ color: frame.color }}
-          title="Delete frame"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => removeFrame(frame.id)}>
-          ✕
-        </button>
+        <LockToggle
+          locked={frame.locked === true}
+          color={frame.color}
+          onToggle={() => updateFrame(frame.id, { locked: !frame.locked })}
+        />
+        {frame.locked !== true && (
+          <button
+            className="nodrag hidden shrink-0 text-[11px] opacity-70 hover:opacity-100 group-hover/fr:block"
+            style={{ color: frame.color }}
+            title="Delete frame"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => removeFrame(frame.id)}>
+            ✕
+          </button>
+        )}
       </div>
       {selected && (
         <div className="absolute -top-6 left-2">
           <Swatches current={frame.color} onPick={(c) => updateFrame(frame.id, { color: c })} />
         </div>
       )}
+      {frame.locked !== true && (
       <ResizeGrip
         w={frame.w}
         h={frame.h}
@@ -152,6 +181,7 @@ function CommentNodeInner({ data, selected }: NodeProps) {
           updateFrame(frame.id, { w: nw, h: nh });
         }}
       />
+      )}
     </div>
   );
 }
@@ -183,13 +213,22 @@ function NoteNodeInner({ data, selected }: NodeProps) {
       <div className="flex items-center gap-2 px-2 pt-1.5">
         <span className="text-[9px] font-medium uppercase tracking-wider opacity-70">note</span>
         {selected && <Swatches current={note.color} onPick={(c) => updateNote(note.id, { color: c })} />}
-        <button
-          className="nodrag ml-auto hidden text-[11px] opacity-70 hover:opacity-100 group-hover/note:block"
-          title="Delete note"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => removeNote(note.id)}>
-          ✕
-        </button>
+        <span className="ml-auto flex items-center gap-1">
+          <LockToggle
+            locked={note.locked === true}
+            color={note.color}
+            onToggle={() => updateNote(note.id, { locked: !note.locked })}
+          />
+          {note.locked !== true && (
+            <button
+              className="nodrag hidden text-[11px] opacity-70 hover:opacity-100 group-hover/note:block"
+              title="Delete note"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => removeNote(note.id)}>
+              ✕
+            </button>
+          )}
+        </span>
       </div>
       {editing ? (
         <textarea
@@ -213,6 +252,7 @@ function NoteNodeInner({ data, selected }: NodeProps) {
           {note.text}
         </div>
       )}
+      {note.locked !== true && (
       <ResizeGrip
         w={note.w}
         h={note.h}
@@ -223,6 +263,7 @@ function NoteNodeInner({ data, selected }: NodeProps) {
           updateNote(note.id, { w: nw, h: nh });
         }}
       />
+      )}
     </div>
   );
 }

@@ -53,6 +53,7 @@ function EditorApp() {
   const removeFrame = useEditor((s) => s.removeFrame);
   const removeNote = useEditor((s) => s.removeNote);
   const setAssetsOpen = useEditor((s) => s.setAssetsOpen);
+  const lockAnnotations = useEditor((s) => s.lockAnnotations);
 
   const exportJson = () => {
     const proj = snapshot();
@@ -123,9 +124,11 @@ function EditorApp() {
       n: g.nodes.map((n) => [n.id, n.kind]),
       e: g.edges.map((e) => [e.id, e.from.nodeId, e.from.portId, e.to.nodeId, e.to.portId]),
       p: project.params.map((p) => p.id),
+      // lock state is part of the STRUCTURE here: it decides React Flow's
+      // draggable/deletable flags, which are only read when the graph rebuilds
       a: [
-        ...(project.annotations?.frames ?? []).map((f) => f.id),
-        ...(project.annotations?.notes ?? []).map((n) => n.id),
+        ...(project.annotations?.frames ?? []).map((f) => [f.id, f.locked === true]),
+        ...(project.annotations?.notes ?? []).map((n) => [n.id, n.locked === true]),
       ],
     });
   }, [project, activeSystemId]);
@@ -149,6 +152,14 @@ function EditorApp() {
     const c = paneCenter();
     addNote({ x: c.x - 110, y: c.y - 75 });
   };
+
+  // one switch for the whole canvas — the point of locking is to stop catching
+  // annotations while wiring, and doing that frame-by-frame defeats it
+  const sysAnnotations = [
+    ...(project.annotations?.frames ?? []).filter((f) => f.systemId === activeSystemId),
+    ...(project.annotations?.notes ?? []).filter((n) => n.systemId === activeSystemId),
+  ];
+  const allLocked = sysAnnotations.length > 0 && sysAnnotations.every((a) => a.locked === true);
 
   useEffect(() => {
     const f = toFlow(project, useEditor.getState().positions, useEditor.getState().selectedNodeId, activeSystemId);
@@ -231,6 +242,17 @@ function EditorApp() {
                 title="Add a sticky note"
                 className="rounded-md border border-border bg-card px-2.5 py-1.5 text-muted-foreground shadow hover:bg-accent hover:text-foreground">
                 🗒 Note
+              </button>
+              <button
+                onClick={() => lockAnnotations(!allLocked)}
+                disabled={sysAnnotations.length === 0}
+                title={
+                  allLocked
+                    ? 'Unlock every frame & note on this canvas'
+                    : 'Lock every frame & note on this canvas — they stay visible and editable, but stop moving when you catch them'
+                }
+                className={`rounded-md border border-border px-2.5 py-1.5 shadow hover:bg-accent hover:text-foreground disabled:opacity-40 ${allLocked ? 'bg-accent text-foreground' : 'bg-card text-muted-foreground'}`}>
+                {allLocked ? '🔒 Locked' : '🔓 Lock'}
               </button>
             </Panel>
           </ReactFlow>

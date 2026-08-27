@@ -61,6 +61,7 @@ fn emit(@builtin(global_invocation_id) gid: vec3u) {
   let o_initLife: f32 = t_n3;
   let o_initVel: vec2f = t_n5;
   let o_texIndex: u32 = 0u;
+  let o_initRot: f32 = 0.0;
 
   var spawnLocal = o_spawnLocal;
   let maskN = u32(maskTbl[0].x);
@@ -74,6 +75,6 @@ fn emit(@builtin(global_invocation_id) gid: vec3u) {
   hot[slot].age = U.dt * (1.0 - f);
   pmeta[slot].seed = seed;
   pmeta[slot].flags = 1u | (o_texIndex << 8u);
-  rnd[slot] = ParticleRnd(0xffffffffu, 1.0, 0.0);
+  rnd[slot] = ParticleRnd(0xffffffffu, 1.0, o_initRot);
   atomicAdd(&cnt.aliveCount, 1u);
 }

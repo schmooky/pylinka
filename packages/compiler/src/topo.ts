@@ -16,6 +16,7 @@ const INIT_OUTPUT_KINDS = new Set([
   'output.initVelocity',
   'output.initLife',
   'output.initTexIndex',
+  'output.initRotation',
   // spawn-time config; consumed by the sub-emit kernel, ignored by buildInit
   'output.deathBurst',
 ]);

@@ -235,3 +235,127 @@ describe('extractParams — custom ease curves on the interpreted backend', () =
     expect(p.alphaEase).toBe(5);
   });
 });
+
+describe('extractParams — rotation', () => {
+  const sys = (nodes: System['graph']['nodes'], edges: System['graph']['edges'] = []): System => ({
+    id: 's1', name: 's', capacity: 256, blendMode: 'normal', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 },
+    graph: { nodes, edges },
+  });
+
+  it('defaults to no rotation at all', () => {
+    const p = extractParams(sys([{ id: 'a', kind: 'output.writeRotation' }]), [], {});
+    expect(p.rotStart).toEqual([0, 0]);
+    expect(p.spin).toEqual([0, 0]);
+    expect(p.rotFrom).toBe(0);
+    expect(p.rotTo).toBe(0);
+  });
+
+  it('reads a constant birth angle off output.initRotation', () => {
+    const p = extractParams(
+      sys([{ id: 'r', kind: 'output.initRotation', values: { rot: { t: 'f32', v: 0.75 } } }]),
+      [], {},
+    );
+    expect(p.rotStart).toEqual([0.75, 0.75]);
+  });
+
+  it('reads a random birth angle off the gen.randomRange behind it', () => {
+    const p = extractParams(
+      sys(
+        [
+          { id: 'g', kind: 'gen.randomRange', values: { min: { t: 'f32', v: -1 }, max: { t: 'f32', v: 2 } } },
+          { id: 'r', kind: 'output.initRotation' },
+        ],
+        [{ id: 'e1', from: { nodeId: 'g', portId: 'out' }, to: { nodeId: 'r', portId: 'rot' } }],
+      ),
+      [], {},
+    );
+    expect(p.rotStart).toEqual([-1, 2]);
+  });
+
+  it('converts degrees through a math.radians hop', () => {
+    const p = extractParams(
+      sys(
+        [
+          { id: 'g', kind: 'gen.randomRange', values: { min: { t: 'f32', v: 0 }, max: { t: 'f32', v: 360 } } },
+          { id: 'd', kind: 'math.radians' },
+          { id: 'r', kind: 'output.initRotation' },
+        ],
+        [
+          { id: 'e1', from: { nodeId: 'g', portId: 'out' }, to: { nodeId: 'd', portId: 'degrees' } },
+          { id: 'e2', from: { nodeId: 'd', portId: 'out' }, to: { nodeId: 'r', portId: 'rot' } },
+        ],
+      ),
+      [], {},
+    );
+    expect(p.rotStart[0]).toBe(0);
+    expect(p.rotStart[1]).toBeCloseTo(Math.PI * 2, 6);
+  });
+
+  it('reads gen.spin as an angular-velocity range', () => {
+    const p = extractParams(
+      sys(
+        [
+          { id: 'g', kind: 'gen.randomRange', values: { min: { t: 'f32', v: -6 }, max: { t: 'f32', v: 6 } } },
+          { id: 's', kind: 'gen.spin' },
+        ],
+        [{ id: 'e1', from: { nodeId: 'g', portId: 'out' }, to: { nodeId: 's', portId: 'rate' } }],
+      ),
+      [], {},
+    );
+    expect(p.spin).toEqual([-6, 6]);
+  });
+
+  it('a bare gen.spin spins at its own literal rate', () => {
+    const p = extractParams(
+      sys([{ id: 's', kind: 'gen.spin', values: { rate: { t: 'f32', v: 2 } } }]),
+      [], {},
+    );
+    expect(p.spin).toEqual([2, 2]);
+  });
+
+  it('reads gen.rotationOverLife as an eased ramp', () => {
+    const p = extractParams(
+      sys([
+        {
+          id: 'g',
+          kind: 'gen.rotationOverLife',
+          structural: { ease: 'power2.out' },
+          values: { from: { t: 'f32', v: 0 }, to: { t: 'f32', v: 1.5 } },
+        },
+      ]),
+      [], {},
+    );
+    expect(p.rotFrom).toBe(0);
+    expect(p.rotTo).toBe(1.5);
+    expect(p.rotEase).toBe(4); // EASE_INDEX['power2.out']
+  });
+
+  it('follows a gen.numberOverLife wired into output.writeRotation', () => {
+    const p = extractParams(
+      sys(
+        [
+          { id: 'g', kind: 'gen.numberOverLife', values: { from: { t: 'f32', v: 0 }, to: { t: 'f32', v: 3 } } },
+          { id: 'w', kind: 'output.writeRotation' },
+        ],
+        [{ id: 'e1', from: { nodeId: 'g', portId: 'out' }, to: { nodeId: 'w', portId: 'rot' } }],
+      ),
+      [], {},
+    );
+    expect(p.rotTo).toBe(3);
+  });
+
+  it('bakes a custom rotation curve into its own LUT channel', () => {
+    const p = extractParams(
+      sys([
+        { id: 'g', kind: 'gen.rotationOverLife', structural: { ease: 'cubic-bezier(0.9,0,1,0.2)' }, values: {} },
+      ]),
+      [], {},
+    );
+    expect(p.rotEase).toBe(-1);
+    // channel 3 of 4 — the alpha channel above it must stay the identity ramp
+    expect(p.easeLut).toHaveLength(32 * 4);
+    expect(p.easeLut.slice(96, 128)[16]).toBeLessThan(0.25);
+    expect(p.easeLut.slice(64, 96)[16]).toBeCloseTo(16 / 31, 6);
+  });
+});

@@ -38,6 +38,44 @@ export interface EmitterPathData {
   closed: boolean;
 }
 
+/**
+ * A scene reference: the artwork the effect has to sit on top of. Kept in the
+ * project's asset library (not bound to a system) so the same background can be
+ * reused across every effect authored for that screen.
+ */
+export interface ReferenceImage {
+  id: string;
+  name: string;
+  /** data URL or served path */
+  src: string;
+  width: number;
+  height: number;
+}
+
+/** How the active reference is laid under (or over) the preview. */
+export interface ReferenceSettings {
+  /** which library image is shown; null = none */
+  id: string | null;
+  visible: boolean;
+  /** 0..1 */
+  opacity: number;
+  /** multiplier on the contain-fit size */
+  scale: number;
+  /** px offset from the preview centre, in canvas CSS space */
+  offset: [number, number];
+  /** draw ABOVE the particles — for checking what the effect has to read through */
+  front: boolean;
+}
+
+export const DEFAULT_REFERENCE: ReferenceSettings = {
+  id: null,
+  visible: true,
+  opacity: 0.6,
+  scale: 1,
+  offset: [0, 0],
+  front: false,
+};
+
 /** A named, colored comment frame around an area of a system's graph (à la UE Blueprints). */
 export interface CommentFrame {
   id: string;
@@ -48,6 +86,8 @@ export interface CommentFrame {
   h: number;
   title: string;
   color: string; // hex accent
+  /** pinned: cannot be dragged or deleted from the canvas (see StickyNote.locked) */
+  locked?: boolean;
 }
 
 /** A free-floating sticky note on a system's canvas (à la Miro). */
@@ -60,6 +100,13 @@ export interface StickyNote {
   h: number;
   text: string;
   color: string;
+  /**
+   * Pinned. Annotations sit UNDER the graph nodes and cover a large area, so
+   * they are easy to grab by accident while wiring — and a stray drag silently
+   * rearranges (or, with a delete key, destroys) work that took real effort.
+   * Locking leaves them visible and editable but immovable.
+   */
+  locked?: boolean;
 }
 
 /** Graph annotations. Exported with the project (a consumer ignores them); strippable on export. */
@@ -88,6 +135,10 @@ export interface EditorProject extends PylinkaProject {
   annotations?: Annotations;
   /** muted node ids — kept in the graph but excluded from the running sim */
   disabledNodes?: string[];
+  /** scene reference artwork available to any system */
+  references?: ReferenceImage[];
+  /** which reference is shown behind the preview, and how */
+  reference?: ReferenceSettings;
 }
 
 /** Per-frame atlas dims from a uniform grid (matches the runtime's tools). */

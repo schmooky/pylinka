@@ -12,6 +12,7 @@ import { useEditor } from '../store';
 import { usePreview } from '../previewStore';
 import { frameSize, type EditorProject } from '../types';
 import { PathOverlay } from './PathOverlay';
+import { ReferenceLayer, ReferencePanel } from './ReferenceLayer';
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
@@ -112,6 +113,9 @@ export function Preview() {
   burstCountRef.current = burstCount;
   const spawnReq = useRef<{ x: number; y: number } | null>(null);
   const [hud, setHud] = useState('');
+  // scene reference: open panel = the image takes the pointer so it can be
+  // dragged into place; closed = inert, and pan/spawn behave as before
+  const [refOpen, setRefOpen] = useState(false);
   const [backend, setBackend] = useState<BackendChoice>(initialBackend);
   const backendRef = useRef(backend);
   backendRef.current = backend;
@@ -427,12 +431,14 @@ export function Preview() {
         onPointerMove={onMove}
         onPointerUp={onPanUp}
         onPointerLeave={() => { mouseRef.current = null; panRef.current = null; }}>
+        <ReferenceLayer view={view} draggable={refOpen} />
         <canvas
           key={backend}
           ref={canvasRef}
-          className="block h-full w-full"
+          className="relative z-[1] block h-full w-full"
           style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, transformOrigin: 'center' }}
         />
+        {refOpen && <ReferencePanel onClose={() => setRefOpen(false)} />}
         <PathOverlay editing={pathEdit} />
         {pathEdit && (
           <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[10px] text-[#c4b5fd]">
@@ -464,6 +470,16 @@ export function Preview() {
             </button>
           ))}
           <span className="my-0.5 h-px w-full bg-border" />
+          <button
+            onClick={() => setRefOpen((v) => !v)}
+            title="Scene reference — drop the artwork this effect sits on under the preview"
+            aria-label="Scene reference"
+            className={`group relative grid h-8 w-8 place-items-center rounded-md text-sm ${refOpen ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
+            <span aria-hidden>🖼</span>
+            <Tip>
+              <b>Reference</b> · lay the real screen art under the effect · drag to place it
+            </Tip>
+          </button>
           <button
             onClick={fitView}
             disabled={view.z === 1 && view.x === 0 && view.y === 0}

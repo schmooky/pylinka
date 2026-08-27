@@ -103,7 +103,7 @@ ${body}
   hot[slot].age = U.dt * (1.0 - f);
   pmeta[slot].seed = seed;
   pmeta[slot].flags = 1u | (o_texIndex << 8u);
-  rnd[slot] = ParticleRnd(0xffffffffu, 1.0, 0.0);
+  rnd[slot] = ParticleRnd(0xffffffffu, 1.0, o_initRot);
   atomicAdd(&cnt.aliveCount, 1u);
 }`;
 }
@@ -172,7 +172,7 @@ ${body}
   hot[slot].age = 0.0;
   pmeta[slot].seed = seed;
   pmeta[slot].flags = 1u | (o_texIndex << 8u);
-  rnd[slot] = ParticleRnd(0xffffffffu, 1.0, 0.0);
+  rnd[slot] = ParticleRnd(0xffffffffu, 1.0, o_initRot);
   atomicAdd(&cnt.aliveCount, 1u);
 }`;
   }
@@ -202,7 +202,7 @@ ${body}
     hot[slot].age = 0.0;
     pmeta[slot].seed = seed;
     pmeta[slot].flags = 1u | (o_texIndex << 8u);
-    rnd[slot] = ParticleRnd(0xffffffffu, 1.0, 0.0);
+    rnd[slot] = ParticleRnd(0xffffffffu, 1.0, o_initRot);
     atomicAdd(&cnt.aliveCount, 1u);
   }
 }`;

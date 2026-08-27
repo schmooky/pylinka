@@ -7,7 +7,7 @@ import type { EditorProject, EmitterPathData } from '../editor/types';
 import { MASK_BOLT, MASK_HEART, MASK_RING, MASK_STAR, MASK_WIN } from '../editor/maskShapes';
 import { VFX_BY_KEY, type VfxAsset } from './vfxAssets';
 
-export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'swirl' | 'drawn' | 'physics' | 'combo' | 'vfx';
+export type RecipeGroup = 'trails' | 'fire' | 'magic' | 'ambient' | 'ui' | 'abstract' | 'swirl' | 'drawn' | 'physics' | 'combo' | 'vfx' | 'rotation';
 
 export interface RecipeAtlas {
   url: string;
@@ -74,6 +74,13 @@ interface FxOpts {
   scaleFrom?: number;
   scaleTo?: number;
   scaleEase?: string;
+  /** birth angle range in DEGREES — [a, a] pins it, [0, 360] scatters it */
+  startAngle?: Vec2;
+  /** spin range in DEGREES PER SECOND; each particle picks its own rate */
+  spin?: Vec2;
+  /** eased rotation sweep over life in DEGREES: [from, to] */
+  rotate?: Vec2;
+  rotateEase?: string;
   atlas?: RecipeAtlas;
   /**
    * Solid geometry + moving bodies. All of these are authored in EMITTER space
@@ -191,6 +198,36 @@ function buildSystem(o: SysOpts, id: string, idp: string, name: string, enabled 
   nodes.push({ id: nid(23), kind: 'gen.scaleOverLife', structural: { ease: o.scaleEase ?? 'linear' }, values: { from: f(o.scaleFrom ?? 1), to: f(o.scaleTo ?? 0) } });
   nodes.push({ id: nid(24), kind: 'output.writeScale' });
   link(23, 'out', 24, 'scale');
+
+  // Rotation. Angles are authored in degrees here and converted with a
+  // math.radians node, which is exactly the graph an artist builds by hand —
+  // fork any of these recipes and the wiring is already there to copy.
+  if (o.startAngle) {
+    nodes.push({ id: nid(29), kind: 'gen.randomRange', values: { min: f(o.startAngle[0]), max: f(o.startAngle[1]) } });
+    nodes.push({ id: nid(30), kind: 'math.radians' });
+    nodes.push({ id: nid(31), kind: 'output.initRotation' });
+    link(29, 'out', 30, 'degrees');
+    link(30, 'out', 31, 'rot');
+  }
+  if (o.spin) {
+    nodes.push({ id: nid(32), kind: 'gen.randomRange', values: { min: f(o.spin[0]), max: f(o.spin[1]) } });
+    nodes.push({ id: nid(33), kind: 'math.radians' });
+    nodes.push({ id: nid(34), kind: 'gen.spin' });
+    nodes.push({ id: nid(35), kind: 'output.writeRotation' });
+    link(32, 'out', 33, 'degrees');
+    link(33, 'out', 34, 'rate');
+    link(34, 'out', 35, 'rot');
+  } else if (o.rotate) {
+    const rad = (d: number) => (d * Math.PI) / 180;
+    nodes.push({
+      id: nid(36),
+      kind: 'gen.rotationOverLife',
+      structural: { ease: o.rotateEase ?? 'power2.out' },
+      values: { from: f(rad(o.rotate[0])), to: f(rad(o.rotate[1])) },
+    });
+    nodes.push({ id: nid(37), kind: 'output.writeRotation' });
+    link(36, 'out', 37, 'rot');
+  }
 
   // solid geometry — pure output sinks, so they get ids after the look nodes
   let cid = 25;
@@ -675,6 +712,31 @@ export const RECIPES: Recipe[] = [
     oneLiner: 'Alpha stars drifting up — soft, no glow.', tags: ['star', 'alpha', 'normal'],
     capacity: 300, rate: 30, shape: 'rect', size: [360, 40], velMin: [-14, -60], velMax: [14, -20], lifeMin: 1.6, lifeMax: 2.8,
     colorFrom: '#ffffffff', colorTo: '#cfe0ff22', colorEase: 'sine.inOut', scaleFrom: 2, scaleTo: 1 }),
+
+  // ── rotation ──────────────────────────────────────────────────────────
+  // Three worked answers to "how do I turn the sprite?". Fork any of them and
+  // the wiring is on the canvas: a birth angle at spawn, a spin during life, or
+  // an eased sweep that lands on an exact angle.
+  vfx({ slug: 'tumbling-shards', title: 'Tumbling Shards', group: 'rotation', key: 'star_05',
+    oneLiner: 'Shards burst out at random angles, each tumbling at its own rate.', tags: ['rotation', 'spin', 'burst'],
+    capacity: 600, mode: 'burst', burstCount: 44, burstInterval: 1.2, velMin: [-230, -300], velMax: [230, -120],
+    lifeMin: 1, lifeMax: 1.6, gravity: [0, 240], drag: 0.35,
+    startAngle: [0, 360], spin: [-540, 540],
+    colorFrom: '#ffe9b0ff', colorTo: '#ff7a2a00', colorEase: 'sine.in', scaleFrom: 3.4, scaleTo: 2 }),
+  fx({ slug: 'spinning-coins', title: 'Spinning Coins', group: 'rotation',
+    oneLiner: 'Coins raining down, each turning slowly on its own axis.', tags: ['rotation', 'coins', 'payout'],
+    capacity: 400, blend: 'normal', rate: 30, shape: 'rect', size: [520, 10],
+    velMin: [-30, -40], velMax: [30, 60], lifeMin: 2.2, lifeMax: 3.4, gravity: [0, 150],
+    startAngle: [0, 360], spin: [-160, 160],
+    colorFrom: '#ffffffff', colorTo: '#ffffff00', colorEase: 'sine.in', scaleFrom: 2, scaleTo: 1.8, atlas: COINS }),
+  // a pointed star, not a soft blob: a card about landing on an exact angle has
+  // to be made of sprites whose orientation you can actually read
+  vfx({ slug: 'quarter-turn-drop', title: 'Quarter-Turn Drop', group: 'rotation', key: 'star_01',
+    oneLiner: 'Stars drift up and turn exactly 90 degrees, easing to a stop.', tags: ['rotation', 'ramp', 'ease'],
+    capacity: 300, rate: 26, shape: 'rect', size: [420, 10], velMin: [-26, -70], velMax: [26, -140],
+    lifeMin: 1.6, lifeMax: 2.4, gravity: [0, -20], drag: 0.5,
+    rotate: [0, 90], rotateEase: 'power3.out',
+    colorFrom: '#ffe0b0ff', colorTo: '#ff5a2a00', colorEase: 'sine.in', scaleFrom: 3, scaleTo: 2.2 }),
 
   // fire / light
   vfx({ slug: 'flame-embers', title: 'Flame Embers', group: 'vfx', key: 'flame_02',

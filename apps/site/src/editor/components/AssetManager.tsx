@@ -1,16 +1,21 @@
 /**
  * Asset manager — a full modal (opened from the header) for the project's
- * textures and sprite sequences. Load a single sprite or a sprite sheet, or
+ * textures, sprite sequences, and scene references. Load a single sprite or a sprite sheet, or
  * build an animated sequence by dropping an array of frame images, reorder
  * them, and BAKE them into a uniform strip the runtime plays. Assets bind to
  * the active system (what the preview renders) and are what tex.* node pickers
  * choose from.
+ *
+ * Scene references live here too, on their own tab: they are not particle
+ * textures, but they ARE project assets an artist wants to keep and reuse
+ * across every effect built for the same screen.
  */
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditor } from '../store';
 import type { EditorTexture } from '../types';
 import { VFX_ASSETS, type VfxAsset } from '../../recipes/vfxAssets';
+import { addReferenceFile, useReference } from '../reference';
 
 const EMPTY: EditorTexture[] = [];
 
@@ -59,6 +64,7 @@ export function AssetManager() {
   const setActive = useEditor((s) => s.setActiveTexture);
   const setActiveBlend = useEditor((s) => s.setActiveBlend);
 
+  const [tab, setTab] = useState<'textures' | 'references'>('textures');
   const [selId, setSelId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -142,13 +148,28 @@ export function AssetManager() {
         style={{ background: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-foreground)' }}>
         {/* header */}
         <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--color-border)' }}>
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-center gap-3">
             <span className="text-sm font-semibold">Assets</span>
-            <span className="text-[11px] text-muted-foreground">textures &amp; animated sequences</span>
+            <div className="flex gap-1 text-[11px]">
+              {(['textures', 'references'] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`rounded-md px-2 py-1 ${tab === t ? 'bg-black/30 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {t === 'textures' ? 'Textures' : 'Scene references'}
+                </button>
+              ))}
+            </div>
+            <span className="text-[11px] text-muted-foreground">
+              {tab === 'textures' ? 'particle sprites & animated sequences' : 'the artwork the effect sits on'}
+            </span>
           </div>
           <button className="rounded-md px-2 py-1 text-muted-foreground hover:bg-black/20 hover:text-foreground" onClick={() => setOpen(false)}>✕</button>
         </div>
 
+        {tab === 'references' ? (
+          <ReferenceTab />
+        ) : (
         <div className="flex min-h-0 flex-1">
           {/* library */}
           <div className="flex w-[300px] shrink-0 flex-col border-r" style={{ borderColor: 'var(--color-border)' }}>
@@ -219,10 +240,91 @@ export function AssetManager() {
             )}
           </div>
         </div>
+        )}
       </div>
       {pickerOpen && <VfxPicker onPick={addBuiltInVfx} onClose={() => setPickerOpen(false)} />}
     </div>,
     document.body,
+  );
+}
+
+/**
+ * Scene-reference library. One click shows an image under the preview; the same
+ * image stays in the project, so switching between "on the reels background" and
+ * "on the bonus screen" is a click, not a re-import.
+ */
+function ReferenceTab() {
+  const images = useEditor((s) => s.project.references) ?? [];
+  const ref = useReference();
+  const setReference = useEditor((s) => s.setReference);
+  const removeReference = useEditor((s) => s.removeReference);
+  const renameReference = useEditor((s) => s.renameReference);
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <label
+        className="mb-4 flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed py-6 text-[12px] text-muted-foreground hover:bg-black/20"
+        style={{ borderColor: 'var(--color-border)' }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          const f = [...(e.dataTransfer.files ?? [])].find((x) => x.type.startsWith('image/'));
+          if (f) void addReferenceFile(f);
+        }}>
+        <span className="text-foreground">+ Add a reference image</span>
+        <span className="text-[10px]">drop a screenshot of the scene, or click to pick a file</span>
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => e.target.files?.[0] && void addReferenceFile(e.target.files[0])}
+        />
+      </label>
+
+      {images.length === 0 ? (
+        <div className="grid place-items-center py-10 text-center text-[12px] text-muted-foreground">
+          No references yet. Add the screen this effect plays on and it appears under the preview,
+          so scale and contrast are decided against the real background instead of black.
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-3">
+          {images.map((r) => (
+            <div
+              key={r.id}
+              className="flex flex-col gap-1.5 rounded-lg border p-2"
+              style={{ borderColor: r.id === ref.id ? 'var(--color-foreground)' : 'var(--color-border)' }}>
+              <div className="grid h-28 place-items-center overflow-hidden rounded bg-black/40">
+                <img src={r.src} alt="" className="max-h-28 max-w-full object-contain" />
+              </div>
+              <input
+                className="num w-full text-[11px]"
+                style={{ width: 'auto' }}
+                value={r.name}
+                onChange={(e) => renameReference(r.id, e.target.value)}
+                aria-label="Reference name"
+              />
+              <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <span className="font-mono">{r.width}×{r.height}</span>
+                <button
+                  className="ml-auto rounded px-1.5 py-0.5 hover:bg-black/20 hover:text-foreground"
+                  onClick={() => removeReference(r.id)}>
+                  Delete
+                </button>
+                {r.id === ref.id ? (
+                  <span className="rounded bg-[#a78bfa]/20 px-1.5 py-0.5 text-[#c4b5fd]">● shown</span>
+                ) : (
+                  <button
+                    className="rounded bg-[#a78bfa] px-1.5 py-0.5 font-medium text-black hover:brightness-110"
+                    onClick={() => setReference({ id: r.id, visible: true })}>
+                    Show
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
