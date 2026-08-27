@@ -22,6 +22,7 @@ export const SINGLE_WRITER_OUTPUTS: ReadonlySet<string> = new Set([
   'output.initVelocity',
   'output.initLife',
   'output.initTexIndex',
+  'output.initRotation',
   'output.setVelocity',
   'output.writePosition',
   'output.writeColor',

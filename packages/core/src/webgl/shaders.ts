@@ -22,8 +22,8 @@ float easeSel(int e, float t) {
 }`;
 
 /**
- * Samples per curve in the ease LUT, and the three curves it holds (size,
- * colour, alpha — in that order).
+ * Samples per curve in the ease LUT, and the four curves it holds (size,
+ * colour, alpha, rotation — in that order).
  *
  * The integer selector above can only name the presets it was compiled with,
  * so a custom `cubic-bezier(...)` or multi-keyframe `curve(...)` used to fall
@@ -34,7 +34,7 @@ float easeSel(int e, float t) {
  * linear interpolation. Presets keep their exact analytic path.
  */
 export const EASE_LUT_N = 32;
-export const EASE_LUT_CHANNELS = 3;
+export const EASE_LUT_CHANNELS = 4;
 
 /** Ease dispatch: `e >= 0` selects a preset, `e < 0` reads channel `ch`'s LUT. */
 const EASE_LUT_GLSL = `
@@ -52,6 +52,7 @@ float easeCh(int e, int ch, float t) {
 export const EASE_CH_SIZE = 0;
 export const EASE_CH_COLOR = 1;
 export const EASE_CH_ALPHA = 2;
+export const EASE_CH_ROT = 3;
 
 /** Ease name → shader index (mirror of EASE_GLSL). */
 export const EASE_INDEX: Record<string, number> = {
@@ -464,15 +465,41 @@ out vec4 v_color;
 uniform float u_alphaFrom;   // alpha ramp (gen.alphaOverLife); 1→1 = no-op
 uniform float u_alphaTo;
 uniform int   u_alphaEase;
+
+/**
+ * Rotation. The simulation state has no angle field (7 tightly packed floats,
+ * and widening it would rewrite every buffer and sub-emitter VAO), so the angle
+ * is DERIVED here from the two things a particle already carries: its stable
+ * seed and its age. That is enough for the three forms an artist asks for:
+ *   birth angle   mix(u_rotMin, u_rotMax, rnd(seed))     — random or fixed
+ *   spin          mix(u_spinMin, u_spinMax, rnd(seed)) * age  — rad/s, integrated
+ *   ramp          mix(u_rotFrom, u_rotTo, ease(tN))     — an eased sweep
+ * All three sum, so a tile can start at a random angle AND tumble AND settle.
+ */
+uniform vec2  u_rotStart;    // min, max birth angle (rad)
+uniform vec2  u_spin;        // min, max angular velocity (rad/s)
+uniform float u_rotFrom;     // rotation ramp over life (rad); 0→0 = no-op
+uniform float u_rotTo;
+uniform int   u_rotEase;
 ${EASE_GLSL}
 ${EASE_LUT_GLSL}
+
+float rHash(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
 
 void main() {
   float alive = step(0.00001, a_life) * step(a_age, a_life);
   float tN = clamp(a_age / max(a_life, 1e-4), 0.0, 1.0);
   float size = mix(u_sizeFrom, u_sizeTo, easeCh(u_sizeEase, ${EASE_CH_SIZE}, tN)) * alive;
 
-  vec2 world = a_pos + a_corner * size;
+  float rot = mix(u_rotStart.x, u_rotStart.y, rHash(a_seed * 41.17 + 3.7))
+            + mix(u_spin.x, u_spin.y, rHash(a_seed * 91.53 + 7.1)) * a_age
+            + mix(u_rotFrom, u_rotTo, easeCh(u_rotEase, ${EASE_CH_ROT}, tN));
+  // Only the QUAD spins, not the atlas lookup below — the sprite turns, its
+  // frame does not shear.
+  float rc = cos(rot);
+  float rs = sin(rot);
+  vec2 off = a_corner * size;
+  vec2 world = a_pos + vec2(off.x * rc - off.y * rs, off.x * rs + off.y * rc);
   vec2 clip = vec2(world.x / u_resolution.x * 2.0 - 1.0, 1.0 - world.y / u_resolution.y * 2.0);
   gl_Position = vec4(clip, 0.0, 1.0);
 

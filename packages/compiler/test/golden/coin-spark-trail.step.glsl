@@ -80,6 +80,7 @@ void main() {
   float o_initLife = t_n3;
   vec2 o_initVel = t_n5;
   uint o_texIndex = 0u;
+  float o_initRot = 0.0;
 
     vec2 spawnLocal = o_spawnLocal;
     if (u_maskCount > 0.5) {
@@ -95,7 +96,7 @@ void main() {
     o_flags = 1u | (o_texIndex << 8u);
     o_color = vec4(1.0);
     o_size = 1.0;
-    o_rot = 0.0;
+    o_rot = o_initRot;
     return;
   }
 

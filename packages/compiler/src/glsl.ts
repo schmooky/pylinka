@@ -189,7 +189,7 @@ ${o.initBody}
     o_flags = 1u | (o_texIndex << 8u);
     o_color = vec4(1.0);
     o_size = 1.0;
-    o_rot = 0.0;
+    o_rot = o_initRot;
     return;
   }
 
@@ -360,7 +360,7 @@ ${o.initBody}
     o_flags = 1u | (o_texIndex << 8u);
     o_color = vec4(1.0);
     o_size = 1.0;
-    o_rot = 0.0;
+    o_rot = o_initRot;
     return;
   }
 

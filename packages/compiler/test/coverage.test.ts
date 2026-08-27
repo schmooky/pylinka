@@ -226,4 +226,52 @@ describe('compile — node coverage', () => {
     expect(c.emitSrc).not.toMatch(/\bvec2f\(/);
     expect(c.emitSrc).not.toMatch(/\blet\s/);
   });
+
+  it('rotation compiles: a birth angle at spawn, spin + ramp during update', () => {
+    const c = compile(
+      bundle({
+        nodes: [
+          { id: 'n1', kind: 'shape.point', values: { offset: { t: 'vec2', v: [0, 0] } } },
+          { id: 'n2', kind: 'output.spawnPosition' },
+          { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 2 } } },
+          { id: 'n4', kind: 'gen.randomRange', values: { min: { t: 'f32', v: 0 }, max: { t: 'f32', v: 360 } } },
+          { id: 'n5', kind: 'math.radians' },
+          { id: 'n6', kind: 'output.initRotation' },
+          { id: 'n7', kind: 'gen.spin', values: { rate: { t: 'f32', v: 4 } } },
+          { id: 'n8', kind: 'output.writeRotation' },
+        ],
+        edges: [
+          { id: 'e1', from: { nodeId: 'n1', portId: 'pos' }, to: { nodeId: 'n2', portId: 'pos' } },
+          { id: 'e2', from: { nodeId: 'n4', portId: 'out' }, to: { nodeId: 'n5', portId: 'degrees' } },
+          { id: 'e3', from: { nodeId: 'n5', portId: 'out' }, to: { nodeId: 'n6', portId: 'rot' } },
+          { id: 'e4', from: { nodeId: 'n7', portId: 'out' }, to: { nodeId: 'n8', portId: 'rot' } },
+        ],
+      }),
+      V1_CATALOG,
+      'webgpu',
+    );
+    // spawn: the angle is computed at init and lands in the particle's rot slot
+    expect(c.emitSrc).toContain('* 0.017453292519943295');
+    expect(c.emitSrc).toContain('let o_initRot: f32 =');
+    expect(c.emitSrc).toContain('ParticleRnd(0xffffffffu, 1.0, o_initRot)');
+    // update: spin is an angular velocity, so it must scale with age
+    expect(c.updateSrc).toContain('* p.age');
+    expect(c.updateSrc).toContain('outRot =');
+  });
+
+  it('a graph with no rotation writer still spawns at angle zero', () => {
+    const c = compile(
+      bundle({
+        nodes: [
+          { id: 'n1', kind: 'shape.point', values: { offset: { t: 'vec2', v: [0, 0] } } },
+          { id: 'n2', kind: 'output.spawnPosition' },
+          { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } },
+        ],
+        edges: [{ id: 'e1', from: { nodeId: 'n1', portId: 'pos' }, to: { nodeId: 'n2', portId: 'pos' } }],
+      }),
+      V1_CATALOG,
+      'webgpu',
+    );
+    expect(c.emitSrc).toContain('let o_initRot: f32 = 0.0;');
+  });
 });

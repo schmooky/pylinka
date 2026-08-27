@@ -6,7 +6,14 @@
  * link exactly the shader it linked before those nodes existed.
  */
 import { describe, expect, it } from 'vitest';
-import { updateVs, updateVsSub, type ForceFeatures } from '../src/webgl/shaders.js';
+import {
+  EASE_CH_ROT,
+  EASE_LUT_CHANNELS,
+  RENDER_VS,
+  updateVs,
+  updateVsSub,
+  type ForceFeatures,
+} from '../src/webgl/shaders.js';
 import { featuresOf } from '../src/webgl/engine.js';
 import type { EngineParams } from '../src/webgl/params.js';
 
@@ -58,5 +65,31 @@ describe('interpreted shader — pay only for what you use', () => {
       obstacles: false,
       colliders: true,
     });
+  });
+});
+
+/**
+ * Rotation is DERIVED in the render VS from seed + age (the sim state has no
+ * angle field). These lock the three terms in, and that the atlas lookup is
+ * left alone — rotating the UVs instead of the quad shears the sprite.
+ */
+describe('interpreted render shader — rotation', () => {
+  it('sums a birth angle, a spin integrated over age, and an eased ramp', () => {
+    expect(RENDER_VS).toContain('mix(u_rotStart.x, u_rotStart.y,');
+    expect(RENDER_VS).toContain('mix(u_spin.x, u_spin.y,');
+    expect(RENDER_VS).toContain('* a_age');
+    expect(RENDER_VS).toContain('mix(u_rotFrom, u_rotTo, easeCh(u_rotEase,');
+  });
+
+  it('rotates the quad corners, not the atlas cell', () => {
+    expect(RENDER_VS).toContain('vec2 off = a_corner * size;');
+    expect(RENDER_VS).toContain('vec2(off.x * rc - off.y * rs, off.x * rs + off.y * rc)');
+    // the UV path still reads the cell straight
+    expect(RENDER_VS).toContain('v_uv = (cellPx + (a_corner + 0.5) * u_frameSize) / u_atlasSize;');
+  });
+
+  it('gives rotation its own ease-LUT channel above alpha', () => {
+    expect(EASE_CH_ROT).toBe(3);
+    expect(EASE_LUT_CHANNELS).toBe(4);
   });
 });

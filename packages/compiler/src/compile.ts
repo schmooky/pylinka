@@ -26,6 +26,7 @@ const INIT_OUTPUT_ORDER = [
   'output.initLife',
   'output.initVelocity',
   'output.initTexIndex',
+  'output.initRotation',
 ];
 
 export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Backend): CompiledSystem {
@@ -247,6 +248,7 @@ class CompileCtx {
     const life = byKind.get('output.initLife');
     const vel = byKind.get('output.initVelocity');
     const tex = byKind.get('output.initTexIndex');
+    const rot = byKind.get('output.initRotation');
 
     const sp = this.inputExpr(spawn!.id, 'pos');
     out.push(`  let o_spawnLocal: vec2f = ${sp.expr};${sp.srcId ? ` // output.spawnPosition ← ${sp.srcId}` : ''}`);
@@ -260,6 +262,13 @@ class CompileCtx {
       tex !== undefined
         ? `  let o_texIndex: u32 = u32(${this.inputExpr(tex.id, 'index').expr});`
         : `  let o_texIndex: u32 = 0u;`,
+    );
+    // Birth angle. Always emitted (0.0 when the graph has no writer) so every
+    // spawn site can assign it unconditionally.
+    out.push(
+      rot !== undefined
+        ? `  let o_initRot: f32 = ${this.inputExpr(rot.id, 'rot').expr};`
+        : `  let o_initRot: f32 = 0.0;`,
     );
     void INIT_OUTPUT_ORDER;
     return { body: out.join('\n'), eases };

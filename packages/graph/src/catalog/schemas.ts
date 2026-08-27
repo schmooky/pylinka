@@ -178,6 +178,33 @@ const gens: NodeSchema[] = [
     outputs: [outPort('out', 'f32')],
     structural: [{ key: 'ease', options: EASE_OPTIONS, default: 'linear' }],
   }),
+  // ---- rotation ----------------------------------------------------------
+  // Sprites rotate. `output.writeRotation` only ever set an ANGLE, so wiring a
+  // constant into it pinned every particle at that angle and looked like
+  // "rotation is broken" — the missing piece was a term that grows with age.
+  // `gen.spin` is that term: an angular VELOCITY integrated over the particle's
+  // own age, which is what "spin the asset while it lives" means.
+  schema({
+    kind: 'gen.spin',
+    label: 'Spin (rad/s)',
+    namespace: 'gen',
+    evalTime: 'update',
+    impact: 'low',
+    inputs: [inPort('rate', 'f32', f(3.1415926535897931))],
+    outputs: [outPort('out', 'f32')],
+  }),
+  // An eased sweep from one angle to another over the lifetime — the ramp form,
+  // for a tile that turns exactly 90 degrees as it falls and then stops.
+  schema({
+    kind: 'gen.rotationOverLife',
+    label: 'Rotation over life',
+    namespace: 'gen',
+    evalTime: 'update',
+    impact: 'low',
+    inputs: [inPort('from', 'f32', f(0)), inPort('to', 'f32', f(6.2831853071795862))],
+    outputs: [outPort('out', 'f32')],
+    structural: [{ key: 'ease', options: EASE_OPTIONS, default: 'linear' }],
+  }),
   schema({
     kind: 'gen.ease',
     label: 'Ease',
@@ -215,6 +242,9 @@ const maths: NodeSchema[] = [
   schema({ kind: 'math.max', label: 'Max', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('a', 'f32', f(0)), inPort('b', 'f32', f(0))], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'math.sin', label: 'Sin', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('x', 'f32', f(0))], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'math.cos', label: 'Cos', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('x', 'f32', f(0))], outputs: [outPort('out', 'f32')] }),
+  // Every angle port in the catalog is radians (cos/sin take it straight), but
+  // an artist types 45, not 0.785 — so this is the adapter they reach for.
+  schema({ kind: 'math.radians', label: 'Degrees to radians', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('degrees', 'f32', f(0))], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'math.abs', label: 'Abs', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('x', 'f32', f(0))], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'math.length', label: 'Length', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('v', 'vec2', v2(0, 0))], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'math.normalize', label: 'Normalize', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('v', 'vec2', v2(0, 0))], outputs: [outPort('out', 'vec2')] }),
@@ -284,6 +314,10 @@ const shapes: NodeSchema[] = [
 const outputs: NodeSchema[] = [
   schema({ kind: 'output.spawnPosition', label: 'Spawn position', namespace: 'output', evalTime: 'init', impact: 'low', inputs: [inPort('pos', 'vec2', v2(0, 0))], outputs: [] }),
   schema({ kind: 'output.initVelocity', label: 'Init velocity', namespace: 'output', evalTime: 'init', impact: 'low', inputs: [inPort('vel', 'vec2', v2(0, 0))], outputs: [] }),
+  // Birth angle. Wire a `gen.randomRange` for scattered starts, a literal for a
+  // fixed one. Without this every particle spawned at 0 and any spin was
+  // perfectly in phase across the whole burst, which reads as a single object.
+  schema({ kind: 'output.initRotation', label: 'Init rotation', namespace: 'output', evalTime: 'init', impact: 'low', inputs: [inPort('rot', 'f32', f(0))], outputs: [] }),
   schema({ kind: 'output.initLife', label: 'Init life', namespace: 'output', evalTime: 'init', impact: 'low', inputs: [inPort('life', 'f32', f(1))], outputs: [] }),
   schema({ kind: 'output.addForce', label: 'Add force', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('force', 'vec2', v2(0, 0))], outputs: [] }),
   schema({ kind: 'output.drag', label: 'Drag', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('drag', 'f32', f(0))], outputs: [] }),

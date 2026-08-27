@@ -11,6 +11,7 @@ import { sampleEaseLut } from '@pylinka/compiler';
 import {
   EASE_CH_ALPHA,
   EASE_CH_COLOR,
+  EASE_CH_ROT,
   EASE_CH_SIZE,
   EASE_INDEX,
   EASE_LUT_CHANNELS,
@@ -46,8 +47,19 @@ export interface EngineParams {
   alphaTo: number;
   alphaEase: number;
   /**
+   * Birth angle range in radians (`output.initRotation`). A constant collapses
+   * to [v, v]; a `gen.randomRange` gives each particle its own start angle.
+   */
+  rotStart: [number, number];
+  /** Angular velocity range in rad/s (`gen.spin`). [0,0] = no spin. */
+  spin: [number, number];
+  /** Eased rotation ramp over life in radians (`gen.rotationOverLife`). */
+  rotFrom: number;
+  rotTo: number;
+  rotEase: number;
+  /**
    * Flattened ease LUT, `EASE_LUT_CHANNELS × EASE_LUT_N` samples in channel
-   * order size, colour, alpha. Only the channels whose ease index is -1 (i.e.
+   * order size, colour, alpha, rotation. Only the channels whose ease index is -1 (i.e.
    * a custom curve the fixed shader cannot name) are meaningful; the rest are
    * left as the identity ramp.
    */
@@ -167,6 +179,29 @@ export function extractParams(
     return v2(n.values?.[portId], d);
   };
 
+  /**
+   * An angle-valued port as a [min, max] RANGE in radians. Follows one
+   * `math.radians` hop (the catalog is radians everywhere, but an artist types
+   * 45) and reads a `gen.randomRange` behind the port as the range itself —
+   * which is how "start at a random angle" and "each shard tumbles at its own
+   * rate" are authored. Anything else collapses to a constant range.
+   */
+  const angleRange = (host: Node, portId: string, d: [number, number]): [number, number] => {
+    let owner = host;
+    let port = portId;
+    let k = 1;
+    const hop = source(owner.id, port);
+    if (hop?.kind === 'math.radians') {
+      owner = hop;
+      port = 'degrees';
+      k = Math.PI / 180;
+    }
+    const src = source(owner.id, port);
+    if (src?.kind === 'gen.randomRange') return [fk(src, 'min', 0) * k, fk(src, 'max', 0) * k];
+    const v = fk(owner, port, k === 1 ? d[0] : 0) * k;
+    return [v, v];
+  };
+
   const p: EngineParams = {
     capacity: system.capacity,
     emitter: system.emitter,
@@ -191,6 +226,11 @@ export function extractParams(
     alphaFrom: 1,
     alphaTo: 1,
     alphaEase: 0,
+    rotStart: [0, 0],
+    spin: [0, 0],
+    rotFrom: 0,
+    rotTo: 0,
+    rotEase: 0,
     easeLut: identityLut(),
     pointFields: [],
     turbulence: [0, 120, 1],
@@ -358,6 +398,29 @@ export function extractParams(
     p.alphaFrom = fk(alphaNode, 'from', 1);
     p.alphaTo = fk(alphaNode, 'to', 0);
     p.alphaEase = easeFor(alphaNode, EASE_CH_ALPHA);
+  }
+
+  // ---- rotation ------------------------------------------------------------
+  // Three independent terms, all summed in the render shader (see RENDER_VS):
+  // a birth angle, a constant spin, and an eased ramp over life. Reading them
+  // here instead of only from `output.writeRotation` means `gen.spin` works the
+  // moment it is dropped on the canvas, the way gen.colorOverLife already does.
+  const rotNode = byKind('output.initRotation');
+  if (rotNode) p.rotStart = angleRange(rotNode, 'rot', [0, 0]);
+
+  const spinNode = byKind('gen.spin');
+  if (spinNode) p.spin = angleRange(spinNode, 'rate', [Math.PI, Math.PI]);
+
+  const wiredRot = source(byKind('output.writeRotation')?.id, 'rot');
+  const rotRamp =
+    byKind('gen.rotationOverLife') ??
+    (wiredRot?.kind === 'gen.numberOverLife' || wiredRot?.kind === 'gen.curveOverLife'
+      ? wiredRot
+      : undefined);
+  if (rotRamp) {
+    p.rotFrom = fk(rotRamp, 'from', 0);
+    p.rotTo = fk(rotRamp, 'to', 0);
+    p.rotEase = easeFor(rotRamp, EASE_CH_ROT);
   }
 
   const burstNode = byKind('output.deathBurst');

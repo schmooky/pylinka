@@ -235,6 +235,12 @@ export const NODE_CODEGEN: Record<string, NodeCodegen> = {
     one(`mix(${i.from}, ${i.to}, ${ctx.ease(s.ease)}(${ctx.consts.AGE_N}))`),
   'gen.alphaOverLife': (ctx, i, s) =>
     one(`mix(${i.from}, ${i.to}, ${ctx.ease(s.ease)}(${ctx.consts.AGE_N}))`),
+  // Spin is an angular VELOCITY: integrate it over the particle's own age so
+  // the angle keeps growing while it lives. Wire `rate` to a gen.randomRange
+  // for per-particle tumble, and remember a negative rate spins the other way.
+  'gen.spin': (_c, i) => one(`(${i.rate} * p.age)`),
+  'gen.rotationOverLife': (ctx, i, s) =>
+    one(`mix(${i.from}, ${i.to}, ${ctx.ease(s.ease)}(${ctx.consts.AGE_N}))`),
   // Standalone reshaper: run any 0..1 value through the chosen ease. Wire e.g.
   // input.ageNormalized (or a knob) into `t`, pick a preset/custom bezier, then
   // wire `out` into anything. The `t` clamp keeps overshoot-free presets sane.
@@ -256,6 +262,7 @@ export const NODE_CODEGEN: Record<string, NodeCodegen> = {
   'math.max': (_c, i) => one(`max(${i.a}, ${i.b})`),
   'math.sin': (_c, i) => one(`sin(${i.x})`),
   'math.cos': (_c, i) => one(`cos(${i.x})`),
+  'math.radians': (_c, i) => one(`(${i.degrees} * 0.017453292519943295)`),
   'math.abs': (_c, i) => one(`abs(${i.x})`),
   'math.length': (_c, i) => one(`length(${i.v})`),
   'math.normalize': (ctx, i) => one(ctx.safeNormalize(i.v!)),
