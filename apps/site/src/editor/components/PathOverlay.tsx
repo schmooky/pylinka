@@ -52,7 +52,7 @@ export function PathOverlay({ editing }: PathOverlayProps) {
       ref={svgRef}
       viewBox={`0 0 ${VB} ${VB}`}
       preserveAspectRatio="none"
-      className="absolute inset-0 h-full w-full"
+      className="absolute inset-0 z-10 h-full w-full"
       style={{ pointerEvents: editing ? 'auto' : 'none', cursor: editing ? 'crosshair' : 'default', touchAction: 'none' }}
       onPointerDown={(e) => {
         if (!editing || dragIdx.current >= 0 || e.target !== svgRef.current) return;

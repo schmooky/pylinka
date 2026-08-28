@@ -431,6 +431,16 @@ export function Preview() {
         onPointerMove={onMove}
         onPointerUp={onPanUp}
         onPointerLeave={() => { mouseRef.current = null; panRef.current = null; }}>
+        {/*
+          Stacking inside the preview, bottom to top: reference behind (z 0),
+          the canvas (z 1), reference in front (z 3), then every interactive
+          overlay at z 10. The canvas has to be a positioned, z-indexed element
+          so the behind-reference can sit under it — but that also lifts it over
+          any sibling left on the default z, and a painted-over control is a
+          dead control however late it comes in the DOM: the click lands on the
+          canvas and the preview pans instead. So the overlays name their layer
+          explicitly rather than relying on document order.
+        */}
         <ReferenceLayer view={view} draggable={refOpen} />
         <canvas
           key={backend}
@@ -441,18 +451,18 @@ export function Preview() {
         {refOpen && <ReferencePanel onClose={() => setRefOpen(false)} />}
         <PathOverlay editing={pathEdit} />
         {pathEdit && (
-          <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[10px] text-[#c4b5fd]">
+          <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 px-2 py-1 text-[10px] text-[#c4b5fd]">
             drawing path — click to add · drag to move · double-click to delete
           </div>
         )}
         {recompiled !== '' && (
-          <div className="pointer-events-none absolute right-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[10px] text-amber-300">
+          <div className="pointer-events-none absolute right-2 top-2 z-10 rounded-md bg-black/70 px-2 py-1 text-[10px] text-amber-300">
             {recompiled}
           </div>
         )}
         {/* vertical tool palette — one active pointer tool at a time */}
         <div
-          className="absolute left-2 top-1/2 flex -translate-y-1/2 flex-col gap-1 rounded-lg border p-1 shadow-lg"
+          className="absolute left-2 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-1 rounded-lg border p-1 shadow-lg"
           style={{ background: 'color-mix(in oklab, var(--color-card) 85%, transparent)', borderColor: 'var(--color-border)' }}
           onPointerDown={(e) => e.stopPropagation()}
           onWheel={(e) => e.stopPropagation()}>
