@@ -9,7 +9,7 @@ export const RENDER_WGSL = /* wgsl */ `
 struct RenderUniforms {
   scaleOffset: vec4f, // sx, sy, ox, oy
   grid: vec4f,        // cols, rows, sizeScale, pad(px)
-  anim: vec4f,        // fps, play(0 once / 1 loop), pick(0 per-particle / 1 fixed), fixedRow
+  anim: vec4f,        // fps, play(0 stretch / 1 loop / 2 hold), pick(0 per-particle / 1 fixed), fixedRow
   frame: vec4f,       // frameW, frameH, atlasW, atlasH (px)
 }
 @group(0) @binding(0) var<uniform> R: RenderUniforms;
@@ -43,8 +43,9 @@ fn vs(@builtin(vertex_index) vi: u32,
   let tN = clamp(age / max(life, 1e-4), 0.0, 1.0);
   let seedN = f32(seed & 0xffffu) / 65536.0;
   let row = clamp(select(floor(seedN * rows), R.anim.w, R.anim.z > 0.5), 0.0, rows - 1.0);
-  let col = select(clamp(floor(tN * cols), 0.0, cols - 1.0),
-                   floor(age * R.anim.x) % cols, R.anim.y > 0.5);
+  let col = select(select(clamp(floor(tN * cols), 0.0, cols - 1.0),
+                          floor(age * R.anim.x) % cols, R.anim.y > 0.5),
+                   clamp(floor(age * R.anim.x), 0.0, cols - 1.0), R.anim.y > 1.5);
   let cellPx = vec2f(col, row) * (R.frame.xy + R.grid.w);
 
   var o: VSOut;

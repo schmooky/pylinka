@@ -21,7 +21,7 @@ layout(location = 8) in uint a_seed;   // instance — state offset 24
 
 uniform vec4 u_scaleOffset; // clip = world.xy * xy + zw (§13.8)
 uniform vec4 u_grid;        // cols, rows, sizeScale, pad(px)
-uniform vec4 u_anim;        // fps, play(0 once / 1 loop), pick(0 per-particle / 1 fixed), fixedRow
+uniform vec4 u_anim;        // fps, play(0 stretch / 1 loop / 2 hold), pick(0 per-particle / 1 fixed), fixedRow
 uniform vec4 u_frame;       // frameW, frameH, atlasW, atlasH (px)
 
 out vec2 v_uv;
@@ -40,9 +40,11 @@ void main() {
   float tN = clamp(a_age / max(a_life, 1e-4), 0.0, 1.0);
   float seedN = float(a_seed & 0xffffu) / 65536.0;
   float row = clamp((u_anim.z > 0.5) ? u_anim.w : floor(seedN * rows), 0.0, rows - 1.0);
-  float col = (u_anim.y > 0.5)
-    ? mod(floor(a_age * u_anim.x), cols)
-    : clamp(floor(tN * cols), 0.0, cols - 1.0);
+  float col = (u_anim.y > 1.5)
+    ? clamp(floor(a_age * u_anim.x), 0.0, cols - 1.0)
+    : (u_anim.y > 0.5)
+      ? mod(floor(a_age * u_anim.x), cols)
+      : clamp(floor(tN * cols), 0.0, cols - 1.0);
   vec2 cellPx = vec2(col, row) * (u_frame.xy + u_grid.w);
 
   gl_Position = vec4(world * u_scaleOffset.xy + u_scaleOffset.zw, 0.0, 1.0);

@@ -456,7 +456,7 @@ uniform vec2  u_frameSize;   // px
 uniform vec2  u_grid;        // cols, rows
 uniform float u_pad;         // px between cells
 uniform float u_fps;
-uniform float u_play;        // 0 once-over-life, 1 loop
+uniform float u_play;        // 0 stretch-over-life, 1 loop at fps, 2 play once at fps then hold
 uniform float u_pick;        // 0 per-particle random row, 1 fixed row
 uniform float u_seqRow;      // fixed row when u_pick == 1
 
@@ -506,9 +506,15 @@ void main() {
   if (u_textured > 0.5) {
     float row = (u_pick > 0.5) ? u_seqRow : floor(a_seed * u_grid.y);
     row = clamp(row, 0.0, u_grid.y - 1.0);
-    float col = (u_play > 0.5)
-      ? mod(floor(a_age * u_fps), u_grid.x)
-      : clamp(floor(tN * u_grid.x), 0.0, u_grid.x - 1.0);
+    // Three playback modes, and only two of them look at fps. 'once' stretches
+    // the strip across the particle's life, which is why setting fps on it
+    // appeared to do nothing; 'hold' is the mode that plays at fps and stops on
+    // the last frame.
+    float col = (u_play > 1.5)
+      ? clamp(floor(a_age * u_fps), 0.0, u_grid.x - 1.0)
+      : (u_play > 0.5)
+        ? mod(floor(a_age * u_fps), u_grid.x)
+        : clamp(floor(tN * u_grid.x), 0.0, u_grid.x - 1.0);
     vec2 cellPx = vec2(col, row) * (u_frameSize + u_pad);
     v_uv = (cellPx + (a_corner + 0.5) * u_frameSize) / u_atlasSize;
   } else {

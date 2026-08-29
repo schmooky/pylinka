@@ -15,6 +15,7 @@ import {
   type ForceFeatures,
 } from '../src/webgl/shaders.js';
 import { featuresOf } from '../src/webgl/engine.js';
+import { playCode } from '../src/atlas.js';
 import type { EngineParams } from '../src/webgl/params.js';
 
 const OBSTACLE_TOKENS = ['obstacleForces', 'u_obCount', 'u_obA', 'u_obSoft', 'u_obRel'];
@@ -91,5 +92,28 @@ describe('interpreted render shader — rotation', () => {
   it('gives rotation its own ease-LUT channel above alpha', () => {
     expect(EASE_CH_ROT).toBe(3);
     expect(EASE_LUT_CHANNELS).toBe(4);
+  });
+});
+
+/**
+ * Sprite-sheet playback. `once` stretches the strip across the lifetime and
+ * ignores fps, which is why a changed fps could look like it did nothing —
+ * `hold` is the mode that plays at fps. These lock the three branches in, and
+ * that `once` and `loop` keep the exact expressions they had before `hold`
+ * existed (a project authored on either must not shift a frame).
+ */
+describe('interpreted render shader — atlas playback', () => {
+  it('maps the three modes to the codes the shaders branch on', () => {
+    expect(playCode('once')).toBe(0);
+    expect(playCode('loop')).toBe(1);
+    expect(playCode('hold')).toBe(2);
+    expect(playCode(undefined)).toBe(1); // loop stays the default
+  });
+
+  it('branches once / loop / hold, and only two of them read fps', () => {
+    expect(RENDER_VS).toContain('(u_play > 1.5)');
+    expect(RENDER_VS).toContain('clamp(floor(a_age * u_fps), 0.0, u_grid.x - 1.0)'); // hold
+    expect(RENDER_VS).toContain('mod(floor(a_age * u_fps), u_grid.x)'); // loop
+    expect(RENDER_VS).toContain('clamp(floor(tN * u_grid.x), 0.0, u_grid.x - 1.0)'); // once, no fps
   });
 });

@@ -22,6 +22,7 @@ import { SpawnScheduler } from '../scheduler.js';
 import { clampDt } from '../time.js';
 import { featuresOf, WebGL2Engine, type AtlasConfig, type MaskConfig } from './engine.js';
 import { extractParams, type EngineParams, type KnobValues } from './params.js';
+import { playCode, type AtlasPlay } from '../atlas.js';
 
 /**
  * Rasterize an emission mask into a point table: one emitter-relative offset
@@ -103,7 +104,7 @@ function resolveAtlas(o: AtlasOptions | undefined): AtlasConfig | undefined {
     frameH: o.frameH,
     pad: o.pad ?? 0,
     fps: o.fps ?? 12,
-    play: o.play === 'once' ? 0 : 1,
+    play: playCode(o.play),
     pick,
     row: o.row ?? (pick === 1 ? Math.floor(Math.random() * o.rows) : 0),
   };
@@ -215,8 +216,8 @@ export interface AtlasOptions {
   height?: number;
   /** frames/second when looping (default 12). */
   fps?: number;
-  /** 'loop' (default) spins forever; 'once' plays across the particle's life. */
-  play?: 'loop' | 'once';
+  /** see `AtlasPlay` — 'loop' (default), 'once' (stretched over life), 'hold'. */
+  play?: AtlasPlay;
   /** 'per-particle' (default) random sequence per particle; 'per-spawn' fixed. */
   pick?: 'per-particle' | 'per-spawn';
   /** which row when pick === 'per-spawn' (default random). */

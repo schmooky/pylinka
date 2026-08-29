@@ -15,6 +15,7 @@ import { ParticleView } from './particle-view.js';
 import { getSimBackendFactory, type SimBackend, type SimStats } from './sim.js';
 import { resolveTexture, type TextureInput } from './texture.js';
 import type { CompiledAtlasOptions } from '../compiled/sprite.js';
+import type { AtlasPlay } from '../atlas.js';
 
 export interface CreateOptions {
   /** The host pixi Renderer (app.renderer). Backend + device derive from it. */
@@ -37,7 +38,7 @@ export interface CreateOptions {
  *  core Project type). Honour them so a plain export renders textured with no
  *  extra wiring. Explicit `texture`/`textures` options take precedence. */
 interface TexturedProject {
-  textures?: { id: string; src: string; cols?: number; rows?: number; pad?: number; fps?: number; play?: 'loop' | 'once'; pick?: 'per-particle' | 'per-spawn' }[];
+  textures?: { id: string; src: string; cols?: number; rows?: number; pad?: number; fps?: number; play?: AtlasPlay; pick?: 'per-particle' | 'per-spawn' }[];
   systemTextures?: Record<string, string | null>;
 }
 

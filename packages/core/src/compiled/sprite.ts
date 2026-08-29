@@ -5,6 +5,8 @@
  * sprite.
  */
 
+import { playCode, type AtlasPlay } from '../atlas.js';
+
 /**
  * Base sprite edge in world units: a particle whose `output.writeScale` is 1.0
  * (or a system with no scaleOverLife, whose size defaults to 1) draws as an
@@ -39,10 +41,11 @@ export interface CompiledAtlasOptions {
   frameW?: number;
   frameH?: number;
   pad?: number;
-  /** column-advance rate when play === 'loop' */
+  /** column-advance rate when play is 'loop' or 'hold' */
   fps?: number;
-  /** 'loop' cycles cols by age·fps; 'once' maps the column across the lifetime */
-  play?: 'loop' | 'once';
+  /** see `AtlasPlay`: 'loop' cycles at fps, 'once' stretches over the lifetime,
+   *  'hold' plays once at fps and stops on the last frame */
+  play?: AtlasPlay;
   /** 'per-particle' randomises the row per particle; 'per-spawn' fixes one row */
   pick?: 'per-particle' | 'per-spawn';
   /** fixed row when pick === 'per-spawn' (defaults to a random row) */
@@ -55,8 +58,8 @@ export interface CompiledAtlasOptions {
  */
 export interface AtlasAnim {
   fps: number;
-  /** 0 = once-over-life, 1 = loop */
-  play: 0 | 1;
+  /** 0 = stretch over life, 1 = loop at fps, 2 = play once at fps then hold */
+  play: 0 | 1 | 2;
   /** 0 = per-particle random row, 1 = fixed row */
   pick: 0 | 1;
   /** fixed row when pick === 1 */
@@ -73,7 +76,7 @@ export function resolveAnim(atlas: CompiledAtlasOptions | undefined): AtlasAnim 
   const pick = atlas.pick === 'per-spawn' ? 1 : 0;
   return {
     fps: atlas.fps ?? 12,
-    play: atlas.play === 'once' ? 0 : 1,
+    play: playCode(atlas.play),
     pick,
     row: atlas.row ?? (pick === 1 ? Math.floor(Math.random() * rows) : 0),
   };

@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditor } from '../store';
+import type { AtlasPlay } from '@pylinka/core';
 import type { EditorTexture } from '../types';
 import { VFX_ASSETS, type VfxAsset } from '../../recipes/vfxAssets';
 import { addReferenceFile, useReference } from '../reference';
@@ -456,12 +457,13 @@ function AssetDetail({
 
       {/* playback */}
       <div className="grid grid-cols-3 gap-2">
-        <NumField label="fps" v={tex.fps} on={(n) => onPatch({ fps: n })} />
+        <NumField label="fps" v={tex.fps} on={(n) => onPatch({ fps: n })} disabled={tex.play === 'once'} />
         <label className="flex flex-col gap-0.5">
           <span className="text-[9px] text-muted-foreground">play</span>
-          <select className="sel" value={tex.play} onChange={(e) => onPatch({ play: e.target.value as 'loop' | 'once' })}>
-            <option value="loop">loop</option>
-            <option value="once">once</option>
+          <select className="sel" value={tex.play} onChange={(e) => onPatch({ play: e.target.value as AtlasPlay })}>
+            <option value="loop">loop at fps</option>
+            <option value="once">stretch over life</option>
+            <option value="hold">once at fps, hold</option>
           </select>
         </label>
         <label className="flex flex-col gap-0.5">
@@ -471,6 +473,13 @@ function AssetDetail({
             <option value="per-spawn">per spawn</option>
           </select>
         </label>
+        <div className="col-span-3 text-[10px] text-muted-foreground">
+          {tex.play === 'once'
+            ? 'Stretch over life ignores fps — the sequence always finishes exactly as the particle dies, whatever its lifetime. Pick a mode below if you want the frame rate to be the thing that decides.'
+            : tex.play === 'hold'
+              ? `Plays through once at ${tex.fps} fps (${(tex.cols / Math.max(tex.fps, 1)).toFixed(2)}s for ${tex.cols} frames), then stays on the last frame.`
+              : `Cycles forever at ${tex.fps} fps — one pass every ${(tex.cols / Math.max(tex.fps, 1)).toFixed(2)}s over ${tex.cols} frames.`}
+        </div>
       </div>
 
       <div className="flex items-center gap-2 border-t pt-3" style={{ borderColor: 'var(--color-border)' }}>
@@ -484,11 +493,19 @@ function AssetDetail({
   );
 }
 
-function NumField({ label, v, on }: { label: string; v: number; on: (n: number) => void }) {
+function NumField({ label, v, on, disabled }: { label: string; v: number; on: (n: number) => void; disabled?: boolean }) {
   return (
-    <label className="flex flex-col gap-0.5">
+    <label className={`flex flex-col gap-0.5 ${disabled ? 'opacity-40' : ''}`}>
       <span className="text-[9px] text-muted-foreground">{label}</span>
-      <input className="num" type="number" min="0" value={v} onChange={(e) => on(num(e.target.value, v))} />
+      <input
+        className="num"
+        type="number"
+        min="0"
+        value={v}
+        disabled={disabled}
+        title={disabled ? 'This playback mode ignores fps' : undefined}
+        onChange={(e) => on(num(e.target.value, v))}
+      />
     </label>
   );
 }

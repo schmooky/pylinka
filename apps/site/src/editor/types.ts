@@ -1,4 +1,5 @@
 import type { PylinkaProject } from '@pylinka/graph';
+import type { AtlasPlay } from '@pylinka/core';
 
 /** A sprite-sequence atlas the editor can render (uniform grid: rows = sequences). */
 export interface EditorTexture {
@@ -11,7 +12,8 @@ export interface EditorTexture {
   rows: number;
   pad: number;
   fps: number;
-  play: 'loop' | 'once';
+  /** see `AtlasPlay` in @pylinka/core — only 'loop' and 'hold' use `fps` */
+  play: AtlasPlay;
   pick: 'per-particle' | 'per-spawn';
   /** editor-only: source frames of a sequence built from individual files, kept
    *  so they can be reordered and re-baked. Absent for a plain sprite/sheet. The

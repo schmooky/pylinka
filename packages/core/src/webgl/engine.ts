@@ -42,7 +42,7 @@ export interface AtlasConfig {
   frameH: number;
   pad: number;
   fps: number;
-  play: 0 | 1; // 0 once-over-life, 1 loop
+  play: 0 | 1 | 2; // 0 stretch-over-life, 1 loop at fps, 2 play once at fps then hold
   pick: 0 | 1; // 0 per-particle random row, 1 fixed row
   row: number; // fixed row when pick == 1
 }
