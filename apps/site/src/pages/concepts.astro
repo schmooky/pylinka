@@ -146,6 +146,48 @@ import DocsLayout from '../layouts/DocsLayout.astro';
     texture with a visible orientation.
   </p>
 
+  <h2>Sub-emitters: spawning from another emitter</h2>
+  <p>
+    A system can be born from another system's particles instead of from the cursor. Point its
+    parent at the emitter you want in the emitter strip, then pick which moment fires it:
+  </p>
+  <ul>
+    <li>
+      <strong>on their deaths</strong> &mdash; debris where a projectile ends, sparks where a rocket
+      burns out. This is the default and what sub-emitters always did.
+    </li>
+    <li>
+      <strong>on their births</strong> &mdash; a flash the instant one appears. A bolt of lightning
+      and the light it throws are born on the same frame, and this is how you say that.
+    </li>
+  </ul>
+  <p>
+    Both are one-frame edges on the same parent slot, read from the same buffers, so a birth costs
+    exactly what a death costs. The setting lives on the child's <code>output.deathBurst</code> node
+    (<code>on</code>), which also decides how many children each event spawns and how much of the
+    parent's velocity they inherit &mdash; one for a flash, a dozen for an explosion.
+  </p>
+
+  <h2>Sprite sheets: which modes read fps</h2>
+  <p>
+    An animated atlas advances through its columns one of three ways, and only two of them look at
+    <code>fps</code>:
+  </p>
+  <ul>
+    <li><strong>loop at fps</strong> &mdash; cycle the columns forever.</li>
+    <li>
+      <strong>stretch over life</strong> &mdash; the strip is mapped across the particle's lifetime,
+      so the sequence always finishes exactly as the particle dies, whatever its life.
+      <code>fps</code> is <em>ignored</em>. This is the mode where changing fps looks broken; it
+      isn't, the mode simply has no use for it.
+    </li>
+    <li><strong>once at fps, hold</strong> &mdash; play through once at <code>fps</code>, then stay on the last frame.</li>
+  </ul>
+  <p>
+    Reach for <em>hold</em> when the frame rate is the thing you mean, and <em>stretch</em> when
+    &ldquo;the animation finishes with the particle&rdquo; is.
+  </p>
+
   <h2>Pools and lifetime</h2>
   <p>
     Each system pre-allocates a fixed <code>capacity</code> of particle slots. A particle dies on
