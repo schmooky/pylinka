@@ -330,7 +330,11 @@ ${ft.colliders
  * parent's death position. There is no cursor-window emitter spawn. All other
  * integration matches UPDATE_VS.
  */
-export const updateVsSub = (ft: ForceFeatures = NO_FEATURES, burst = false): string => `#version 300 es
+export const updateVsSub = (
+  ft: ForceFeatures = NO_FEATURES,
+  burst = false,
+  on: 'death' | 'birth' = 'death',
+): string => `#version 300 es
 precision highp float;
 
 in vec2 i_pos;
@@ -379,16 +383,18 @@ void main() {
 
   bool pPrevAlive = (i_pLifePrev > 0.0) && (i_pAgePrev < i_pLifePrev);
   bool pCurrAlive = (i_pLife > 0.0) && (i_pAge < i_pLife);
-  bool justDied = pPrevAlive && !pCurrAlive;
+  // one-frame edge on the parent slot: ${on}. A birth trigger is what puts a
+  // light flash on the frame a spark appears, rather than the frame it dies.
+  bool parentFired = ${on === 'birth' ? '!pPrevAlive && pCurrAlive' : 'pPrevAlive && !pCurrAlive'};
 
 ${
   burst
-    ? `  // death-burst: this pass writes copy u_burstK; a death fires the first
+    ? `  // burst: this pass writes copy u_burstK; a parent event fires the first
   //  burstN copies (keyed off the parent slot only, so copies agree).
   float dseed = hash11(id * 3.19 + u_frame * 7.53 + 5.0);
   int burstN = int(max(floor(mix(u_countMin, u_countMax, dseed) + 0.5), 0.0));
-  bool doSpawn = justDied && u_burstK < burstN;`
-    : `  bool doSpawn = justDied;`
+  bool doSpawn = parentFired && u_burstK < burstN;`
+    : `  bool doSpawn = parentFired;`
 }
 
   if (doSpawn) {

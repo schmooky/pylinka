@@ -86,6 +86,8 @@ export class WebGL2Engine {
   private parentCap = 0;
   private burstMax = 1;
   private hasBurst = false;
+  /** which parent edge fires a child spawn — baked into the sub shader */
+  private subOn: 'death' | 'birth' = 'death';
   // Every field below holds a GL object, so every one of them is invalidated by
   // a context loss and rebuilt by createResources(). None of them can be
   // readonly for that reason.
@@ -177,6 +179,7 @@ export class WebGL2Engine {
     // A death-burst spawns up to `max` children per parent death → the child
     // pool is parentCap × max, laid out in `max` blocked regions (see step()).
     this.hasBurst = sub !== undefined && params.deathBurst !== undefined;
+    this.subOn = params.subOn;
     this.burstMax = sub ? (params.deathBurst?.max ?? 1) : 1;
     this.parentCap = sub ? sub.parent.capacityValue : params.capacity;
     this.capacity = sub ? this.parentCap * this.burstMax : params.capacity;
@@ -232,7 +235,7 @@ export class WebGL2Engine {
     // did before those nodes existed.
     this.updateProg = link(
       gl,
-      sub ? updateVsSub(this.feat, this.hasBurst) : updateVs(this.feat),
+      sub ? updateVsSub(this.feat, this.hasBurst, this.subOn) : updateVs(this.feat),
       UPDATE_FS,
       TF_VARYINGS,
     );

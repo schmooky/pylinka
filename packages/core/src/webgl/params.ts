@@ -108,10 +108,13 @@ export interface EngineParams {
     /** 1 = geometry is emitter-relative (structural `space: 'emitter'`). */
     relative: 0 | 1;
   }[];
-  /** output.deathBurst — sub-emitter explosion: countMin..countMax spawns per
-   *  parent death, up to `max` (child-pool multiplier + pass count), each
-   *  inheriting `inherit` of the parent's death velocity. */
-  deathBurst?: { max: number; countMin: number; countMax: number; inherit: number };
+  /** output.deathBurst — sub-emitter burst: countMin..countMax spawns per
+   *  parent event, up to `max` (child-pool multiplier + pass count), each
+   *  inheriting `inherit` of the parent's velocity at that moment. `on` picks
+   *  the event: the parent's death (debris) or its birth (a flash). */
+  deathBurst?: { max: number; countMin: number; countMax: number; inherit: number; on: 'death' | 'birth' };
+  /** which parent edge a sub-emitter child spawns on, even with no burst node. */
+  subOn: 'death' | 'birth';
 }
 
 /** structural `space` → the runtime's emitter-relative flag. */
@@ -236,6 +239,7 @@ export function extractParams(
     turbulence: [0, 120, 1],
     obstacles: [],
     colliders: [],
+    subOn: 'death',
   };
 
   const shapeNode = source(byKind('output.spawnPosition')?.id, 'pos');
@@ -427,11 +431,14 @@ export function extractParams(
   if (burstNode) {
     const raw = Number(burstNode.structural?.max ?? '8');
     const max = Number.isFinite(raw) ? Math.min(64, Math.max(1, Math.floor(raw))) : 8;
+    const on = burstNode.structural?.on === 'birth' ? 'birth' : 'death';
+    p.subOn = on;
     p.deathBurst = {
       max,
       countMin: fk(burstNode, 'countMin', 1),
       countMax: fk(burstNode, 'countMax', 1),
       inherit: fk(burstNode, 'inheritVelocity', 0),
+      on,
     };
   }
 

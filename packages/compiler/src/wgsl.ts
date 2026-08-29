@@ -110,6 +110,9 @@ ${body}
 
 /** Death-burst codegen inputs (from an `output.deathBurst` node). The scalar
  *  fields are backend-neutral value-table expressions (`V[n].x`) or literals. */
+/** Which one-frame edge on the parent slot fires a child spawn. */
+export type SubTrigger = 'death' | 'birth';
+
 export interface SubBurst {
   /** hard per-death cap + child-pool multiplier (structural `max`). */
   max: number;
@@ -136,7 +139,7 @@ export interface SubBurst {
  * debris flies along its heading. The child pool is sized parentCap × max, and
  * subEmit dispatches one invocation per PARENT slot (`arrayLength(&prevAlive)`).
  */
-export function subEmitKernel(body: string, burst?: SubBurst): string {
+export function subEmitKernel(body: string, burst?: SubBurst, on: SubTrigger = 'death'): string {
   const head = `
 @group(0) @binding(8) var<storage, read> pHot: array<ParticleHot>;
 @group(0) @binding(9) var<storage, read> pMeta: array<ParticleMeta>;
@@ -149,7 +152,8 @@ fn subEmit(@builtin(global_invocation_id) gid: vec3u) {
   let aliveNow = pMeta[i].flags & 1u;
   let wasAlive = prevAlive[i];
   prevAlive[i] = aliveNow;
-  if (wasAlive != 1u || aliveNow != 0u) { return; }
+  // one-frame edge on the parent slot: ${on}
+  if (wasAlive != ${on === 'birth' ? '0u || aliveNow != 1u' : '1u || aliveNow != 0u'}) { return; }
 `;
 
   if (burst === undefined) {

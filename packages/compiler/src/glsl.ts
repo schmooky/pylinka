@@ -13,7 +13,7 @@
  * fragment stage that completes the program.
  */
 
-import type { SubBurst } from './wgsl.js';
+import type { SubBurst, SubTrigger } from './wgsl.js';
 
 /** Per-particle interleaved state layout shared by compiler and runtime. */
 export interface Webgl2Attrib {
@@ -70,9 +70,11 @@ export interface GlslStepOptions {
   postIntegrate: string;
   /** setVelocity graphs omit the force/drag integration lines (§13.6) */
   setVelocity: boolean;
-  /** death-burst config (sub-step only) — spawns countMin..countMax per death
-   *  across `max` k-region passes (uniform u_burstK selects the pass). */
+  /** death-burst config (sub-step only) — spawns countMin..countMax per parent
+   *  event across `max` k-region passes (uniform u_burstK selects the pass). */
   burst?: SubBurst;
+  /** which parent edge fires the spawn (sub-step only; default 'death'). */
+  subOn?: SubTrigger;
 }
 
 /** The fused transform-feedback step vertex shader. */
@@ -333,17 +335,22 @@ void main() {
   gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
   uint slot = uint(gl_VertexID);
   bool wasAlive = (i_flags & 1u) != 0u;
-  bool parentJustDied = ((i_pFlagsPrev & 1u) != 0u) && ((i_pFlags & 1u) == 0u);
+  // one-frame edge on the parent slot: ${o.subOn ?? 'death'}
+  bool parentFired = ${
+    (o.subOn ?? 'death') === 'birth'
+      ? '((i_pFlagsPrev & 1u) == 0u) && ((i_pFlags & 1u) != 0u)'
+      : '((i_pFlagsPrev & 1u) != 0u) && ((i_pFlags & 1u) == 0u)'
+  };
 ${
   o.burst
-    ? `  // burst: this pass writes copy u_burstK; each death fires the first
-  //  burstN of the max copies. burstN keys off the parent slot only, so
-  //  every copy agrees on it.
+    ? `  // burst: this pass writes copy u_burstK; each parent event fires the
+  //  first burstN of the max copies. burstN keys off the parent slot only,
+  //  so every copy agrees on it.
   uint dseed = hash2(U.baseSeed, hash2(slot, U.frame));
   float burstF = mix(${o.burst.countMin}, ${o.burst.countMax}, srand(dseed, 176u));
   uint burstN = min(uint(max(floor(burstF + 0.5), 0.0)), ${o.burst.max}u);
-  bool doSpawn = !wasAlive && parentJustDied && uint(u_burstK) < burstN;`
-    : `  bool doSpawn = !wasAlive && parentJustDied;`
+  bool doSpawn = !wasAlive && parentFired && uint(u_burstK) < burstN;`
+    : `  bool doSpawn = !wasAlive && parentFired;`
 }
 
   if (doSpawn) {

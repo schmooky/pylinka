@@ -328,21 +328,28 @@ const outputs: NodeSchema[] = [
   schema({ kind: 'output.writeScale', label: 'Write scale', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('scale', 'f32', f(1))], outputs: [] }),
   schema({ kind: 'output.writeRotation', label: 'Write rotation', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('rot', 'f32', f(0))], outputs: [] }),
   schema({ kind: 'output.initTexIndex', label: 'Init texture index', namespace: 'output', evalTime: 'init', impact: 'low', inputs: [inPort('index', 'f32', f(0))], outputs: [] }),
+  // The child-side declaration of a sub-emitter burst. `on` picks WHICH parent
+  // event fires it: a death (debris where a projectile ends) or a birth (a
+  // light flash the instant a spark appears). Both are one-frame edges on the
+  // parent slot, so they cost the same and read the same buffers.
   schema({
     kind: 'output.deathBurst',
-    label: 'Burst on death',
+    label: 'Burst from parent',
     namespace: 'output',
     evalTime: 'init',
     impact: 'medium',
     impactNote:
-      'Sub-emitter only: multiplies the child pool by `max` and spawns countMin..countMax particles at each parent death — an explosion where a projectile dies.',
+      'Sub-emitter only: multiplies the child pool by `max` and spawns countMin..countMax particles at each parent death (or birth, via `on`) — an explosion where a projectile dies, or a flash where one is born.',
     inputs: [
       inPort('countMin', 'f32', f(8)),
       inPort('countMax', 'f32', f(8)),
       inPort('inheritVelocity', 'f32', f(0)),
     ],
     outputs: [],
-    structural: [{ key: 'max', options: ['1', '2', '4', '8', '16', '32', '64'], default: '8' }],
+    structural: [
+      { key: 'max', options: ['1', '2', '4', '8', '16', '32', '64'], default: '8' },
+      { key: 'on', options: ['death', 'birth'], default: 'death' },
+    ],
   }),
   schema({ kind: 'output.killIf', label: 'Kill if', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('cond', 'bool', boolean(false))], outputs: [] }),
   schema({ kind: 'output.killIfOutOfRect', label: 'Kill if out of rect', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('min', 'vec2', v2(0, 0)), inPort('max', 'vec2', v2(100, 100))], outputs: [] }),

@@ -189,6 +189,14 @@ interface EditorState {
   setActiveBlend(mode: System['blendMode']): void;
   /** make `childId` spawn on `parentId`'s particle deaths (null = born at cursor) */
   setSubParent(childId: string, parentId: string | null): void;
+  /** which parent event the ACTIVE system spawns on ('death' by default) */
+  subTrigger(): 'death' | 'birth';
+  /**
+   * Pick the parent event the ACTIVE system spawns on. The setting lives on an
+   * `output.deathBurst` node, so choosing 'birth' on a child that has none adds
+   * a minimal one (a single spawn per event) rather than silently doing nothing.
+   */
+  setSubTrigger(on: 'death' | 'birth'): void;
   // knobs (project params)
   /** add a new f32 knob; returns its id */
   addParam(init?: Partial<Pick<ParamDef, 'name' | 'min' | 'max' | 'default' | 'unit' | 'group'>>): string;
@@ -464,6 +472,41 @@ export const useEditor = create<EditorState>((set, get) => {
           links[childId] = parentId;
         }
         p.subEmitters = links;
+      }, true);
+    },
+
+    subTrigger() {
+      const sys = activeSysOf(get().project);
+      const node = sys.graph.nodes.find((n) => n.kind === 'output.deathBurst');
+      return node?.structural?.on === 'birth' ? 'birth' : 'death';
+    },
+
+    setSubTrigger(on) {
+      // the sub shader bakes the trigger in, so this is a construction-time
+      // change → bumpTex, same as a texture or a mask
+      commit((p, sys) => {
+        const existing = sys.graph.nodes.find((n) => n.kind === 'output.deathBurst');
+        if (existing) {
+          existing.structural = { ...(existing.structural ?? {}), on };
+          return;
+        }
+        if (on === 'death') return; // the default needs no node
+        // One spawn per parent birth: the flash case wants exactly one child,
+        // not an explosion. `max: 1` also keeps the child pool the parent's size.
+        const id = nextNodeId(p);
+        sys.graph.nodes.push({
+          id,
+          kind: 'output.deathBurst',
+          structural: { max: '1', on: 'birth' },
+          values: {
+            countMin: { t: 'f32', v: 1 },
+            countMax: { t: 'f32', v: 1 },
+            inheritVelocity: { t: 'f32', v: 0 },
+          },
+        });
+        const spawn = sys.graph.nodes.find((n) => n.kind === 'output.spawnPosition');
+        const at = spawn ? get().positions[spawn.id] : undefined;
+        get().positions[id] = { x: (at?.x ?? 0) + 260, y: (at?.y ?? 0) - 90 };
       }, true);
     },
 

@@ -93,3 +93,41 @@ describe('death-burst codegen', () => {
     expect(compile(bundle(g), V1_CATALOG, 'webgpu').burst).toEqual({ max: 64 });
   });
 });
+
+/**
+ * `on: 'birth'` moves the trigger to the other edge of the parent's life — a
+ * flash the instant a spark appears, rather than debris where it dies. It is a
+ * compile-time constant, so a graph that never asks for it must emit exactly
+ * the shader it emitted before the option existed.
+ */
+describe('sub-emitter trigger — death vs birth', () => {
+  const graphOn = (on?: string): Graph => {
+    const g = burstGraph();
+    const node = g.nodes.find((n) => n.kind === 'output.deathBurst')!;
+    node.structural = on === undefined ? { max: '16' } : { max: '16', on };
+    return g;
+  };
+
+  it('WGSL: death takes the alive→dead edge, birth the dead→alive one', () => {
+    const death = compile(bundle(graphOn('death')), V1_CATALOG, 'webgpu');
+    const birth = compile(bundle(graphOn('birth')), V1_CATALOG, 'webgpu');
+    expect(death.subSrc).toContain('if (wasAlive != 1u || aliveNow != 0u) { return; }');
+    expect(birth.subSrc).toContain('if (wasAlive != 0u || aliveNow != 1u) { return; }');
+    expect(birth.subSrc).not.toContain('if (wasAlive != 1u || aliveNow != 0u) { return; }');
+  });
+
+  it('GLSL: the parent edge flips the same way', () => {
+    const death = compile(bundle(graphOn('death')), V1_CATALOG, 'webgl2');
+    const birth = compile(bundle(graphOn('birth')), V1_CATALOG, 'webgl2');
+    expect(death.subSrc).toContain('((i_pFlagsPrev & 1u) != 0u) && ((i_pFlags & 1u) == 0u)');
+    expect(birth.subSrc).toContain('((i_pFlagsPrev & 1u) == 0u) && ((i_pFlags & 1u) != 0u)');
+  });
+
+  it('a graph with no `on` is byte-identical to one that says death', () => {
+    for (const target of ['webgpu', 'webgl2'] as const) {
+      const absent = compile(bundle(graphOn()), V1_CATALOG, target);
+      const explicit = compile(bundle(graphOn('death')), V1_CATALOG, target);
+      expect(absent.subSrc).toBe(explicit.subSrc);
+    }
+  });
+});

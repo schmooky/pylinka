@@ -19,7 +19,15 @@ import { easeFnGlsl, GLSL_DISCARD_FS, glslStepShader, glslSubStepShader } from '
 import { naturalCompare, resolveEvalTimes } from './topo.js';
 import { wgslBodyToGlsl } from './translate.js';
 import { CompileError, V1_BINDINGS, type CompiledSystem } from './types.js';
-import { easeFn, emitKernel, preamble, subEmitKernel, updateKernel, type SubBurst } from './wgsl.js';
+import {
+  easeFn,
+  emitKernel,
+  preamble,
+  subEmitKernel,
+  updateKernel,
+  type SubBurst,
+  type SubTrigger,
+} from './wgsl.js';
 
 const INIT_OUTPUT_ORDER = [
   'output.spawnPosition',
@@ -73,6 +81,9 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
   // death-burst (sub-emitter explosions): sized/looped from an output.deathBurst
   // node, if present. null → the classic one-spawn-per-death sub-emitter.
   const burst = ctx.burstConfig();
+  // which parent edge fires a child spawn — a compile-time constant, so a graph
+  // that never asked for birth-triggering emits byte-identical shaders
+  const subOn = ctx.subTrigger();
 
   let emitSrc: string;
   let updateSrc: string;
@@ -93,7 +104,7 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
       preamble(slots.layout.slotCount, initFlags) +
       easeDefsWgsl(initEases) +
       '\n' +
-      subEmitKernel(initBody, burst ?? undefined);
+      subEmitKernel(initBody, burst ?? undefined, subOn);
   } else {
     // webgl2: ONE fused TF step shader (see glsl.ts header for the mapping), so
     // it needs every ease used by either the init or update body.
@@ -112,6 +123,7 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
       postIntegrate: wgslBodyToGlsl(postIntegrate, ctx.tempTypes),
       setVelocity,
       ...(burst ? { burst } : {}),
+      ...(subOn === 'birth' ? { subOn } : {}),
     };
     emitSrc = glslStepShader(glslOpts);
     updateSrc = GLSL_DISCARD_FS;
@@ -291,6 +303,18 @@ class CompileCtx {
       countMax: this.burstScalar(node.id, 'countMax', 1),
       inherit: this.burstScalar(node.id, 'inheritVelocity', 0),
     };
+  }
+
+  /**
+   * Which parent event a sub-emitter child spawns on, from the `on` structural
+   * of its `output.deathBurst` node. Defaults to 'death', so a graph without
+   * the node (or without the structural) keeps the behaviour it always had.
+   */
+  subTrigger(): SubTrigger {
+    const node = this.graph.nodes.find(
+      (n) => resolveKind(this.catalog, n.kind) === 'output.deathBurst',
+    );
+    return node?.structural?.on === 'birth' ? 'birth' : 'death';
   }
 
   /** f32 value-slot expression for a burst port, or a literal fallback. */

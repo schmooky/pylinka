@@ -11,7 +11,16 @@ export function Systems() {
   const renameSystem = useEditor((s) => s.renameSystem);
   const toggleSystem = useEditor((s) => s.toggleSystem);
   const setSubParent = useEditor((s) => s.setSubParent);
+  const setSubTrigger = useEditor((s) => s.setSubTrigger);
   const parentId = useEditor((s) => (s.project.subEmitters ?? {})[s.activeSystemId] ?? '');
+  // read the trigger off the graph so it stays in step when the node is edited
+  // directly on the canvas
+  const trigger = useEditor((s) => {
+    const sys = s.project.systems.find((x) => x.id === s.activeSystemId);
+    return sys?.graph.nodes.find((n) => n.kind === 'output.deathBurst')?.structural?.on === 'birth'
+      ? 'birth'
+      : 'death';
+  });
   const project = useEditor((s) => s.project);
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -70,17 +79,31 @@ export function Systems() {
       </button>
 
       {parentChoices.length > 0 && (
-        <label className="ml-auto flex shrink-0 items-center gap-1.5 pl-2 text-muted-foreground"
-          title={`Where “${activeName}” particles are born`}>
-          <span className="text-[10px] uppercase tracking-wider">“{activeName}” spawns from</span>
-          <select className="sel" value={parentId}
-            onChange={(e) => setSubParent(activeId, e.target.value || null)}>
-            <option value="">cursor / emitter</option>
-            {parentChoices.map((s) => (
-              <option key={s.id} value={s.id}>↳ deaths of “{s.name}”</option>
-            ))}
-          </select>
-        </label>
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 pl-2 text-muted-foreground">
+          <label className="flex items-center gap-1.5" title={`Where “${activeName}” particles are born`}>
+            <span className="text-[10px] uppercase tracking-wider">“{activeName}” spawns from</span>
+            <select className="sel" value={parentId}
+              onChange={(e) => setSubParent(activeId, e.target.value || null)}>
+              <option value="">cursor / emitter</option>
+              {parentChoices.map((s) => (
+                <option key={s.id} value={s.id}>↳ “{s.name}”</option>
+              ))}
+            </select>
+          </label>
+          {/*
+            Which parent edge fires the child. Deaths give you debris where a
+            projectile ends; births give you a flash the instant one appears —
+            a lightning bolt and its light, born on the same frame.
+          */}
+          {parentId !== '' && (
+            <select className="sel" value={trigger}
+              title="Which moment in the parent's life spawns this emitter"
+              onChange={(e) => setSubTrigger(e.target.value as 'death' | 'birth')}>
+              <option value="death">on their deaths</option>
+              <option value="birth">on their births</option>
+            </select>
+          )}
+        </div>
       )}
     </div>
   );
