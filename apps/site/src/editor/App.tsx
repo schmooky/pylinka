@@ -54,6 +54,12 @@ function EditorApp() {
   const removeNote = useEditor((s) => s.removeNote);
   const setAssetsOpen = useEditor((s) => s.setAssetsOpen);
   const lockAnnotations = useEditor((s) => s.lockAnnotations);
+  // ⌘ on a Mac, Ctrl elsewhere — only for the tooltip text
+  const modKey = typeof navigator !== 'undefined' && /Mac|iPad|iPhone/.test(navigator.userAgent);
+  const undo = useEditor((s) => s.undo);
+  const redo = useEditor((s) => s.redo);
+  const pastCount = useEditor((s) => s.past);
+  const futureCount = useEditor((s) => s.future);
 
   const exportJson = () => {
     const proj = snapshot();
@@ -76,6 +82,36 @@ function EditorApp() {
     };
     r.readAsText(file);
   };
+
+  /**
+   * Undo / redo. Deliberately NOT while the caret is in a text field: the
+   * browser's own undo is better there (it steps through what you typed), and
+   * stealing the key would make editing a name or a number worse. Everywhere
+   * else on the canvas, Ctrl/Cmd+Z walks the editor's own history — which is
+   * what a deleted node needs, since the browser has no idea one existed.
+   */
+  useEffect(() => {
+    const isTyping = (el: EventTarget | null): boolean => {
+      const t = el as HTMLElement | null;
+      if (!t) return false;
+      const tag = t.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || isTyping(e.target)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (k === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
 
   // drop a .pylinka.json anywhere on the editor to import it
   useEffect(() => {
@@ -189,6 +225,24 @@ function EditorApp() {
           aria-label="Project name"
         />
         <div className="ml-auto flex items-center gap-2 text-xs">
+          <div className="flex items-center rounded-md border border-border">
+            <button
+              onClick={undo}
+              disabled={pastCount === 0}
+              title={`Undo (${modKey ? '\u2318' : 'Ctrl+'}Z) — ${pastCount} step${pastCount === 1 ? '' : 's'} back`}
+              aria-label="Undo"
+              className="px-2 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent">
+              ↶
+            </button>
+            <button
+              onClick={redo}
+              disabled={futureCount === 0}
+              title={`Redo (${modKey ? '\u21e7\u2318' : 'Ctrl+Shift+'}Z) — ${futureCount} step${futureCount === 1 ? '' : 's'} forward`}
+              aria-label="Redo"
+              className="border-l border-border px-2 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent">
+              ↷
+            </button>
+          </div>
           <button onClick={() => setAssetsOpen(true)} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground" title="Textures & animated sequences">Assets</button>
           <ProjectsMenu />
           <button onClick={exportJson} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">Export</button>

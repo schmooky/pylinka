@@ -242,10 +242,39 @@ interface EditorState {
   renameReference(id: string, name: string): void;
   /** patch how the active reference is displayed (opacity, scale, offset, …) */
   setReference(patch: Partial<ReferenceSettings>): void;
+  // undo / redo
+  /** how many steps are on each stack — the header buttons read these */
+  past: number;
+  future: number;
+  undo(): void;
+  redo(): void;
   reset(): void;
   newProject(): void;
   importProject(obj: unknown): void;
 }
+
+/**
+ * One undo step. The asset LIBRARIES (`textures`, `references`) are deliberately
+ * left out: they hold data-URL images, and keeping dozens of copies of a sprite
+ * sheet on a history stack is how an editor quietly starts eating hundreds of
+ * megabytes. Undo carries the current libraries forward instead, so adding or
+ * deleting an image is the one thing Ctrl+Z does not reach — everything on the
+ * canvas, including a deleted node, is covered.
+ */
+interface Snapshot {
+  project: Omit<EditorProject, 'textures' | 'references'>;
+  positions: Record<string, XY>;
+  activeSystemId: string;
+}
+
+/** How many steps to keep. Deep past is rarely useful and always costs memory. */
+const HISTORY_LIMIT = 80;
+
+/**
+ * Consecutive commits sharing a coalesce key inside this window collapse into
+ * one step, so dragging a slider is a single undo rather than ninety.
+ */
+const COALESCE_MS = 700;
 
 const initial = load();
 
@@ -263,13 +292,106 @@ export const useEditor = create<EditorState>((set, get) => {
   const activeSysOf = (p: EditorProject): System =>
     p.systems.find((s) => s.id === get().activeSystemId) ?? p.systems[0]!;
 
-  const commit = (mutate: (p: EditorProject, sys: System) => void, bumpTex = false) => {
+  /** undo stacks. Held outside the store state so pushing a step never costs a
+   *  re-render; the counts in state are what the UI subscribes to. */
+  const past: Snapshot[] = [];
+  const future: Snapshot[] = [];
+  let lastKey: string | null = null;
+  let lastAt = 0;
+
+  const snapshot = (s: {
+    project: EditorProject;
+    positions: Record<string, XY>;
+    activeSystemId: string;
+  }): Snapshot => {
+    const rest = { ...s.project };
+    delete rest.textures;
+    delete rest.references;
+    return { project: rest, positions: s.positions, activeSystemId: s.activeSystemId };
+  };
+
+  /**
+   * @param coalesce  commits sharing this key inside COALESCE_MS collapse into
+   *   one undo step — a slider drag, a number typed digit by digit.
+   */
+  const commit = (
+    mutate: (p: EditorProject, sys: System) => void,
+    bumpTex = false,
+    coalesce?: string,
+  ) => {
     set((s) => {
+      const now = Date.now();
+      const merge = coalesce !== undefined && coalesce === lastKey && now - lastAt < COALESCE_MS;
+      if (!merge) {
+        past.push(snapshot(s));
+        if (past.length > HISTORY_LIMIT) past.shift();
+        future.length = 0; // a fresh edit forks the timeline
+      }
+      lastKey = coalesce ?? null;
+      lastAt = now;
+
       const project = structuredClone(s.project);
       mutate(project, activeSysOf(project));
       project.updatedAt = new Date().toISOString();
       persist(project, s.positions, s.activeSystemId);
-      return { project, rev: s.rev + 1, ...(bumpTex ? { texRev: s.texRev + 1 } : {}) };
+      return {
+        project,
+        rev: s.rev + 1,
+        past: past.length,
+        future: future.length,
+        ...(bumpTex ? { texRev: s.texRev + 1 } : {}),
+      };
+    });
+  };
+
+  /**
+   * Positions live outside the project, so a node drag has to record its own
+   * history step — otherwise Ctrl+Z after nudging a node does nothing, or
+   * worse, silently rewinds the edit before it.
+   */
+  const commitPositions = (next: (prev: Record<string, XY>) => Record<string, XY>) => {
+    set((s) => {
+      past.push(snapshot(s));
+      if (past.length > HISTORY_LIMIT) past.shift();
+      future.length = 0;
+      lastKey = null;
+      const positions = next(s.positions);
+      persist(s.project, positions, s.activeSystemId);
+      return { positions, past: past.length, future: future.length };
+    });
+  };
+
+  /**
+   * Move one step along the history. Both stacks bump `texRev` as well as
+   * `rev`: a step can cross a system being added, a mask painted or a
+   * sub-emitter relinked, and those are construction-time inputs the preview
+   * can only pick up by rebuilding its engines.
+   */
+  const travel = (from: Snapshot[], to: Snapshot[]) => {
+    const snap = from.pop();
+    if (snap === undefined) return;
+    set((s) => {
+      to.push(snapshot(s));
+      lastKey = null; // never coalesce across a jump
+      const project: EditorProject = {
+        ...(snap.project as EditorProject),
+        // the libraries live outside history — carry today's forward
+        ...(s.project.textures ? { textures: s.project.textures } : {}),
+        ...(s.project.references ? { references: s.project.references } : {}),
+      };
+      persist(project, snap.positions, snap.activeSystemId);
+      return {
+        project,
+        positions: snap.positions,
+        activeSystemId: project.systems.some((x) => x.id === snap.activeSystemId)
+          ? snap.activeSystemId
+          : project.systems[0]!.id,
+        selectedNodeId: null,
+        rev: s.rev + 1,
+        texRev: s.texRev + 1,
+        past: past.length,
+        future: future.length,
+      };
     });
   };
 
@@ -284,7 +406,12 @@ export const useEditor = create<EditorState>((set, get) => {
         ? { ...project.editor.nodePositions }
         : project.systems.reduce<Record<string, XY>>((acc, s) => Object.assign(acc, autoLayout(s.graph)), {});
     persist(project, positions, activeSystemId);
-    set((s) => ({ project, positions, activeSystemId, rev: s.rev + 1, texRev: s.texRev + 1, selectedNodeId: null }));
+    // a different project is a different timeline — do not let Ctrl+Z walk back
+    // into the one that was open before it
+    past.length = 0;
+    future.length = 0;
+    lastKey = null;
+    set((s) => ({ project, positions, activeSystemId, rev: s.rev + 1, texRev: s.texRev + 1, selectedNodeId: null, past: 0, future: 0 }));
   };
 
   const initActive =
@@ -299,6 +426,8 @@ export const useEditor = create<EditorState>((set, get) => {
     selectedNodeId: null,
     rev: 0,
     texRev: 0,
+    past: 0,
+    future: 0,
     assetsOpen: false,
     system: () => activeSysOf(get().project),
     snapshot: () => {
@@ -326,7 +455,8 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     moveNode(id, x, y) {
-      set((s) => ({ positions: { ...s.positions, [id]: { x, y } } }));
+      // React Flow calls this once on drag STOP, so one drag is one undo step
+      commitPositions((prev) => ({ ...prev, [id]: { x, y } }));
     },
 
     setValue(nodeId, portId, value) {
@@ -335,7 +465,7 @@ export const useEditor = create<EditorState>((set, get) => {
         if (!node) return;
         node.values = node.values ?? {};
         node.values[portId] = value;
-      });
+      }, false, `value:${nodeId}:${portId}`);
     },
 
     setStructural(nodeId, key, value) {
@@ -387,7 +517,7 @@ export const useEditor = create<EditorState>((set, get) => {
     rename(name) {
       commit((p) => {
         p.name = name;
-      });
+      }, false, 'rename');
     },
 
     setActiveSystem(id) {
@@ -506,7 +636,10 @@ export const useEditor = create<EditorState>((set, get) => {
         });
         const spawn = sys.graph.nodes.find((n) => n.kind === 'output.spawnPosition');
         const at = spawn ? get().positions[spawn.id] : undefined;
-        get().positions[id] = { x: (at?.x ?? 0) + 260, y: (at?.y ?? 0) - 90 };
+        // replace, never mutate: history snapshots share this object
+        set((st) => ({
+          positions: { ...st.positions, [id]: { x: (at?.x ?? 0) + 260, y: (at?.y ?? 0) - 90 } },
+        }));
       }, true);
     },
 
@@ -541,7 +674,7 @@ export const useEditor = create<EditorState>((set, get) => {
         if (patch.unit !== undefined) pd.unit = patch.unit || undefined;
         if (patch.group !== undefined) pd.group = patch.group || undefined;
         if (pd.min !== undefined && pd.max !== undefined && pd.max < pd.min) [pd.min, pd.max] = [pd.max, pd.min];
-      });
+      }, false, `param:${id}`);
     },
 
     removeParam(id) {
@@ -664,7 +797,7 @@ export const useEditor = create<EditorState>((set, get) => {
       // live (engine.apply → clock.setEmitterSettings), no re-create.
       commit((_p, sys) => {
         sys.emitter = { ...sys.emitter, ...patch };
-      });
+      }, false, 'emitter');
     },
 
     addFrame(rect) {
@@ -687,7 +820,7 @@ export const useEditor = create<EditorState>((set, get) => {
       commit((p) => {
         const f = p.annotations?.frames.find((x) => x.id === id);
         if (f) Object.assign(f, patch);
-      });
+      }, false, `frame:${id}`);
     },
 
     removeFrame(id) {
@@ -716,7 +849,7 @@ export const useEditor = create<EditorState>((set, get) => {
       commit((p) => {
         const n = p.annotations?.notes.find((x) => x.id === id);
         if (n) Object.assign(n, patch);
-      });
+      }, false, `note:${id}`);
     },
 
     removeNote(id) {
@@ -757,7 +890,15 @@ export const useEditor = create<EditorState>((set, get) => {
     setReference(patch) {
       commit((p) => {
         p.reference = { ...DEFAULT_REFERENCE, ...(p.reference ?? {}), ...patch };
-      });
+      }, false, 'reference');
+    },
+
+    undo() {
+      travel(past, future);
+    },
+
+    redo() {
+      travel(future, past);
     },
 
     reset() {
