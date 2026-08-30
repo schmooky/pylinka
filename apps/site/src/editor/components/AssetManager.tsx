@@ -475,7 +475,7 @@ function AssetDetail({
         </label>
         <div className="col-span-3 text-[10px] text-muted-foreground">
           {tex.play === 'once'
-            ? 'Stretch over life ignores fps — the sequence always finishes exactly as the particle dies, whatever its lifetime. Pick a mode below if you want the frame rate to be the thing that decides.'
+            ? 'Stretch over life ignores fps — the sequence always finishes exactly as the particle dies, whatever its lifetime. Switch to “once at fps, hold” if the frame rate is the thing you mean.'
             : tex.play === 'hold'
               ? `Plays through once at ${tex.fps} fps (${(tex.cols / Math.max(tex.fps, 1)).toFixed(2)}s for ${tex.cols} frames), then stays on the last frame.`
               : `Cycles forever at ${tex.fps} fps — one pass every ${(tex.cols / Math.max(tex.fps, 1)).toFixed(2)}s over ${tex.cols} frames.`}
