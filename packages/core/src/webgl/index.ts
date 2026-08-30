@@ -23,6 +23,7 @@ import { clampDt } from '../time.js';
 import { featuresOf, WebGL2Engine, type AtlasConfig, type MaskConfig } from './engine.js';
 import { extractParams, type EngineParams, type KnobValues } from './params.js';
 import { playCode, type AtlasPlay } from '../atlas.js';
+import { pickSystem } from '../system.js';
 
 /**
  * Rasterize an emission mask into a point table: one emitter-relative offset
@@ -261,10 +262,7 @@ export function createParticles(
       : target.getContext('webgl2', { premultipliedAlpha: true, alpha: true });
   if (!gl) throw new Error('WebGL2 is not available on this target.');
 
-  const system =
-    project.systems.find((s) => s.name === opts.systemName) ??
-    project.systems.find((s) => s.enabled) ??
-    project.systems[0];
+  const system = pickSystem(project, opts.systemName);
   if (!system) throw new Error('Project has no systems.');
 
   // knob values seeded from ParamDef defaults (by name)
@@ -295,6 +293,7 @@ export function createParticles(
   let curSystem = system;
   let curParams = project.params;
   const systemName = system.name;
+  const systemId = system.id;
   const maxDt = opts.maxDt ?? 0.05;
 
   const canvas = gl.canvas as HTMLCanvasElement;
@@ -349,10 +348,8 @@ export function createParticles(
       recomputeWind();
     },
     apply(next: PylinkaProject): boolean {
-      const sys =
-        next.systems.find((s) => s.name === systemName) ??
-        next.systems.find((s) => s.enabled) ??
-        next.systems[0];
+      // by ID first: renaming an emitter must not rebind this handle to another
+      const sys = pickSystem(next, systemName, systemId);
       if (!sys) return false;
       for (const pd of next.params) {
         if (pd.name in knobValues) continue;

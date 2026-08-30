@@ -29,7 +29,7 @@ import type {
 } from '../compiled/types.js';
 import { KnobStore } from '../knobs.js';
 import { clampDt } from '../time.js';
-import { pickSystem } from '../webgpu/engine.js';
+import { pickSystem } from '../system.js';
 import { COMPILED_RENDER_FS, COMPILED_RENDER_VS } from './shaders.js';
 
 const STRIDE = WEBGL2_LAYOUT.strideBytes;
@@ -526,7 +526,8 @@ export class WebGL2CompiledSim {
 
   /** Same semantics as the WebGPU sim: zero-recompile for value edits. */
   applyProject(next: PylinkaProject, systemName?: string): boolean {
-    const sys = pickSystem(next, systemName ?? this.system.name);
+    // by ID first: a rename must not silently rebind this handle to another system
+    const sys = pickSystem(next, systemName ?? this.system.name, this.system.id);
     if (sys === undefined || sys.capacity !== this.capacity) return false;
 
     for (const pd of next.params) {

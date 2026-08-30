@@ -36,17 +36,12 @@ const META_STRIDE = 8;
 const COUNTERS_SIZE = 12;
 const STATS_INTERVAL = 30; // frames between counter readbacks (§13.11 step 7)
 
+import { pickSystem } from '../system.js';
+export { pickSystem };
+
 /** handle → sim, so a sub-emitter child can reach its parent's GPU buffers. */
 const simOf = new WeakMap<CompiledParticlesHandle, WebGPUSystemSim>();
 
-/** Pick the system a handle drives (same rule as the interpreted backend). */
-export function pickSystem(project: PylinkaProject, systemName?: string): System | undefined {
-  return (
-    project.systems.find((s) => s.name === systemName) ??
-    project.systems.find((s) => s.enabled) ??
-    project.systems[0]
-  );
-}
 
 export interface WebGPUSimOptions {
   /** render target format (canvas preferred format / pixi's target) */
