@@ -4,8 +4,8 @@ import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { seedProject } from './seed';
 import { autoLayout } from './layout';
 import { RECIPES, type RecipeAtlas } from '../recipes/data';
-import type { CommentFrame, EditorProject, EditorTexture, EmissionMaskData, EmitterPathData, ReferenceImage, ReferenceSettings, StickyNote } from './types';
-import { DEFAULT_REFERENCE } from './types';
+import type { CommentFrame, EditorProject, EditorTexture, EmissionMaskData, EmitterPathData, PreviewBackground, ReferenceImage, ReferenceSettings, StickyNote } from './types';
+import { DEFAULT_PREVIEW_BACKGROUND, DEFAULT_REFERENCE } from './types';
 import { generateAnnotations } from './annotate';
 
 const KEY = 'pylinka.editor.project';
@@ -253,6 +253,8 @@ interface EditorState {
   renameReference(id: string, name: string): void;
   /** patch how the active reference is displayed (opacity, scale, offset, …) */
   setReference(patch: Partial<ReferenceSettings>): void;
+  /** patch the preview's backdrop (grid or solid, and its colour) */
+  setPreviewBackground(patch: Partial<PreviewBackground>): void;
   // undo / redo
   /** how many steps are on each stack — the header buttons read these */
   past: number;
@@ -976,6 +978,16 @@ export const useEditor = create<EditorState>((set, get) => {
       commit((p) => {
         p.reference = { ...DEFAULT_REFERENCE, ...(p.reference ?? {}), ...patch };
       }, false, 'reference');
+    },
+
+    setPreviewBackground(patch) {
+      commit((p) => {
+        p.previewBackground = {
+          ...DEFAULT_PREVIEW_BACKGROUND,
+          ...(p.previewBackground ?? {}),
+          ...patch,
+        };
+      }, false, 'previewBackground');
     },
 
     undo() {

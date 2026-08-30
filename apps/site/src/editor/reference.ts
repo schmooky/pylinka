@@ -4,12 +4,29 @@
  * plain exports loses its refresh boundary).
  */
 import { useEditor } from './store';
-import { DEFAULT_REFERENCE, type ReferenceSettings } from './types';
+import {
+  DEFAULT_PREVIEW_BACKGROUND,
+  DEFAULT_REFERENCE,
+  type PreviewBackground,
+  type ReferenceSettings,
+} from './types';
 
 /** The project's reference settings, with the defaults filled in. */
 export function useReference(): ReferenceSettings {
   const stored = useEditor((s) => s.project.reference);
   return { ...DEFAULT_REFERENCE, ...(stored ?? {}) };
+}
+
+/**
+ * The preview backdrop, with defaults filled in.
+ *
+ * The merge happens OUTSIDE the selector on purpose. Zustand compares what a
+ * selector returns by reference, so building the object inside one hands it a
+ * new value on every render and the component re-renders forever.
+ */
+export function usePreviewBackground(): PreviewBackground {
+  const stored = useEditor((s) => s.project.previewBackground);
+  return { ...DEFAULT_PREVIEW_BACKGROUND, ...(stored ?? {}) };
 }
 
 function readFile(file: File): Promise<string> {

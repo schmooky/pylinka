@@ -13,6 +13,7 @@ import { usePreview } from '../previewStore';
 import { frameSize, type EditorProject } from '../types';
 import { PathOverlay } from './PathOverlay';
 import { ReferenceLayer, ReferencePanel } from './ReferenceLayer';
+import { usePreviewBackground } from '../reference';
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
@@ -121,6 +122,7 @@ export function Preview() {
   // scene reference: open panel = the image takes the pointer so it can be
   // dragged into place; closed = inert, and pan/spawn behave as before
   const [refOpen, setRefOpen] = useState(false);
+  const bg = usePreviewBackground();
   const [backend, setBackend] = useState<BackendChoice>(initialBackend);
   const backendRef = useRef(backend);
   backendRef.current = backend;
@@ -412,7 +414,10 @@ export function Preview() {
     <div className="flex h-full flex-col">
       <div
         ref={wrapRef}
-        className="relative min-h-[340px] flex-1 overflow-hidden bg-black"
+        className="relative min-h-[340px] flex-1 overflow-hidden"
+        // the backdrop is the bottom layer: the canvas is transparent, and what
+        // shows through it is how a light blend mode becomes visible at all
+        data-bg={bg.mode}
         style={{ cursor: tool === 'spawn' ? 'crosshair' : tool === 'pan' ? 'grab' : 'default' }}
         onPointerDown={onPanDown}
         onPointerMove={onMove}
@@ -428,6 +433,7 @@ export function Preview() {
           canvas and the preview pans instead. So the overlays name their layer
           explicitly rather than relying on document order.
         */}
+        <div className="pointer-events-none absolute inset-0" style={backdropStyle(bg)} />
         <ReferenceLayer view={view} draggable={refOpen} />
         <canvas
           key={backend}
@@ -516,4 +522,20 @@ export function Preview() {
       </div>
     </div>
   );
+}
+
+/**
+ * The preview backdrop. A checkerboard is the standard "this is transparent"
+ * signal, and it is the one background where an additive effect reads correctly
+ * — over solid black, adding light and covering with light look the same.
+ */
+function backdropStyle(bg: { mode: 'grid' | 'solid'; color: string; size: number }): React.CSSProperties {
+  if (bg.mode === 'solid') return { background: bg.color };
+  // a quiet checker: enough to read as transparent, not enough to compete with
+  // the effect drawn on top of it
+  const light = `color-mix(in oklab, ${bg.color} 88%, white)`;
+  return {
+    background: `repeating-conic-gradient(${bg.color} 0% 25%, ${light} 0% 50%)`,
+    backgroundSize: `${bg.size * 2}px ${bg.size * 2}px`,
+  };
 }

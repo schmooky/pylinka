@@ -78,6 +78,29 @@ export const DEFAULT_REFERENCE: ReferenceSettings = {
   front: false,
 };
 
+/**
+ * What sits behind the particles in the preview.
+ *
+ * A transparent canvas over solid black is the worst case for judging a light
+ * blend mode: additive means "add to what is behind", and adding to black is
+ * indistinguishable from covering it. A checkerboard says "this is transparent"
+ * the way every other art tool does, and a solid colour lets you check the
+ * effect against the tone it will actually play on.
+ */
+export interface PreviewBackground {
+  mode: 'grid' | 'solid';
+  /** the solid colour, and the darker square of the grid */
+  color: string;
+  /** grid square size in px */
+  size: number;
+}
+
+export const DEFAULT_PREVIEW_BACKGROUND: PreviewBackground = {
+  mode: 'grid',
+  color: '#101010',
+  size: 16,
+};
+
 /** A named, colored comment frame around an area of a system's graph (à la UE Blueprints). */
 export interface CommentFrame {
   id: string;
@@ -141,6 +164,8 @@ export interface EditorProject extends PylinkaProject {
   references?: ReferenceImage[];
   /** which reference is shown behind the preview, and how */
   reference?: ReferenceSettings;
+  /** what the preview draws behind everything else */
+  previewBackground?: PreviewBackground;
 }
 
 /** Per-frame atlas dims from a uniform grid (matches the runtime's tools). */

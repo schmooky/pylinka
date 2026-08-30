@@ -8,9 +8,68 @@
  * the preview whenever Settings is open.
  */
 import { useEditor } from '../store';
-import { addReferenceFile, useReference } from '../reference';
+import { addReferenceFile, usePreviewBackground, useReference } from '../reference';
 
 const EMPTY: never[] = [];
+
+/**
+ * The backdrop the effect is judged against.
+ *
+ * This is not decoration. A transparent canvas over solid black is the worst
+ * case for a light blend mode: additive means "add to what is behind", and
+ * adding to black is indistinguishable from covering it — which is how `add`
+ * managed to look broken for so long. A checkerboard says "transparent" the way
+ * every art tool does, and a solid colour checks the effect against the tone it
+ * will actually play on.
+ */
+export function BackgroundSettings() {
+  const bg = usePreviewBackground();
+  const set = useEditor((s) => s.setPreviewBackground);
+
+  return (
+    <div className="flex flex-col gap-3 text-xs">
+      <label className="flex items-center gap-3">
+        <span className="w-24 shrink-0 text-muted-foreground">backdrop</span>
+        <select
+          className="sel sel-wide"
+          value={bg.mode}
+          onChange={(e) => set({ mode: e.target.value as 'grid' | 'solid' })}>
+          <option value="grid">checkerboard</option>
+          <option value="solid">solid colour</option>
+        </select>
+      </label>
+      <label className="flex items-center gap-3">
+        <span className="w-24 shrink-0 text-muted-foreground">colour</span>
+        <input
+          type="color"
+          className="h-6 w-12 cursor-pointer rounded border border-border bg-transparent"
+          value={bg.color}
+          onChange={(e) => set({ color: e.target.value })}
+        />
+        <span className="font-mono text-[10px] text-muted-foreground">{bg.color}</span>
+      </label>
+      {bg.mode === 'grid' && (
+        <label className="flex items-center gap-3">
+          <span className="w-24 shrink-0 text-muted-foreground">square</span>
+          <input
+            className="num"
+            type="number"
+            min={4}
+            max={64}
+            value={bg.size}
+            onChange={(e) => set({ size: Math.min(64, Math.max(4, Number(e.target.value) || 16)) })}
+          />
+          <span className="text-[10px] text-muted-foreground">px</span>
+        </label>
+      )}
+      <p className="leading-relaxed text-muted-foreground">
+        Editor-only — the runtime draws on whatever your game puts behind it. Judge an{' '}
+        <code>add</code> or <code>screen</code> emitter against something other than black, or you
+        are looking at the one backdrop where those modes cannot show themselves.
+      </p>
+    </div>
+  );
+}
 
 export function ReferenceSettings() {
   const ref = useReference();

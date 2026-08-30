@@ -156,6 +156,13 @@ import DocsLayout from '../layouts/DocsLayout.astro';
     black keys itself out with no cutout needed.
   </p>
   <p>
+    Judge those modes against something other than black. Adding light to black and covering black
+    with light look identical, so a black backdrop is the one background where <code>add</code>
+    cannot show itself — which is exactly how it managed to look broken. The preview&rsquo;s backdrop
+    is a checkerboard by default and can be set to any solid colour in
+    <em>Project → Settings → Preview</em>, with the scene reference layered over it.
+  </p>
+  <p>
     Emitters draw in the order they appear in the project, which is the order of the tab strip and
     of the list in <em>Project → Settings → Emitters</em>, where it can be reordered. The first is
     drawn first and therefore sits furthest back. One exception is structural rather than a choice:

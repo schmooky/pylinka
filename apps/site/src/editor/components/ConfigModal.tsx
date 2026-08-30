@@ -12,7 +12,7 @@ import { createPortal } from 'react-dom';
 import { useEditor } from '../store';
 import { usePreview } from '../previewStore';
 import { EmitterPanel } from './EmitterPanel';
-import { ReferenceSettings } from './ReferenceSettings';
+import { BackgroundSettings, ReferenceSettings } from './ReferenceSettings';
 
 type Section = { id: string; label: string; depth: 0 | 1 };
 
@@ -201,8 +201,12 @@ export function ConfigModal() {
             {section === 'preview' && (
               <Group
                 title="Preview"
-                hint="What sits behind the particles while you author them. Editor-only — the runtime never sees it.">
-                <ReferenceSettings />
+                hint="What sits behind the particles while you author them. Editor-only — the runtime never sees any of it.">
+                <BackgroundSettings />
+                <div className="mt-1 border-t border-border pt-4">
+                  <h3 className="mb-2 text-xs font-semibold">Scene reference</h3>
+                  <ReferenceSettings />
+                </div>
               </Group>
             )}
           </div>
