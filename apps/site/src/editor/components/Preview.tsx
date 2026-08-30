@@ -434,9 +434,6 @@ export function Preview() {
       <div
         ref={wrapRef}
         className="relative min-h-[340px] flex-1 overflow-hidden bg-background"
-        // the backdrop is the bottom layer: the canvas is transparent, and what
-        // shows through it is how a light blend mode becomes visible at all
-        data-bg={bg.mode}
         style={{ cursor: tool === 'spawn' ? 'crosshair' : tool === 'pan' ? 'grab' : 'default' }}
         onPointerDown={onPanDown}
         onPointerMove={onMove}

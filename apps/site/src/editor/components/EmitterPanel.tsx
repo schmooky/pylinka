@@ -161,7 +161,7 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
             ? 'click the preview to add points · drag to move · double-click to delete'
             : path?.points.length
               ? `${path.points.length} points — emitter follows the spline`
-              : 'no path — the emitter sits at the centre, or follows the cursor with the preview's Follow tool'}
+              : 'no path — the emitter sits at the centre, or follows the cursor with the preview\u2019s Follow tool'}
         </span>
       </div>
       {path && path.points.length >= 2 && (

@@ -218,7 +218,7 @@ describe('undo — per-system attachments', () => {
     roundTrip(() => store().setReference({ opacity: 0.25, offset: [40, 60] })));
 
   it('change the preview backdrop', () =>
-    roundTrip(() => store().setPreviewBackground({ mode: 'solid', color: '#334455' })));
+    roundTrip(() => store().setPreviewBackground({ a: '#334455', b: '#445566', size: 24 })));
 
   it('pick a texture on a tex node', () => {
     const id = store().addTextureId({
