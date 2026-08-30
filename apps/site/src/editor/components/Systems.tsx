@@ -31,7 +31,12 @@ export function Systems() {
   return (
     <div
       data-tour="emitters"
-      className="tabstrip flex items-end gap-0.5 overflow-x-auto pr-2 pt-1 text-xs"
+      /*
+        No gap between children. The line under the strip is the sum of their
+        bottom borders, so any gap is a hole in it — the children have to sit
+        flush and use their own padding for breathing room instead.
+      */
+      className="tabstrip flex items-end overflow-x-auto pr-2 pt-1 text-xs"
       style={{ background: 'var(--color-card)' }}>
       {/* the line has to start at the very edge, or the first tab's corner
           curves into nothing */}
@@ -40,7 +45,7 @@ export function Systems() {
         const active = sys.id === activeId;
         return (
           <div key={sys.id}
-            className={`group relative flex shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 py-1 ${
+            className={`group relative flex shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-3 py-1 ${
               active ? 'text-foreground' : 'border-b text-muted-foreground hover:bg-accent/40'
             } ${sys.enabled ? '' : 'opacity-50'}`}
             /*
@@ -91,7 +96,7 @@ export function Systems() {
         );
       })}
       <button onClick={addSystem} title="Add an emitter"
-        className="ml-1 shrink-0 rounded-t-md border-b border-border px-2.5 py-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
+        className="shrink-0 rounded-t-md border-b border-border px-3 py-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         + Emitter
       </button>
       {/*
@@ -107,7 +112,7 @@ export function Systems() {
       <button
         onClick={() => openConfig(`emitter:${activeId}`)}
         title="Configure this emitter"
-        className="shrink-0 rounded-t-md border-b border-border px-2.5 py-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
+        className="shrink-0 rounded-t-md border-b border-border px-3 py-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         Configure
       </button>
     </div>
