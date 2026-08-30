@@ -42,7 +42,7 @@ const STEPS: { anchor?: string; title: string; text: string }[] = [
   {
     anchor: 'preview-tools',
     title: 'Driving the preview',
-    text: 'Follow the cursor, orbit the emitter, or click to burst. The scene reference — the artwork your effect has to sit on — is in Project → Settings → Preview.',
+    text: 'Let the emitter follow your cursor, or switch to Spawn and click the preview to burst at that point. The scene reference — the artwork your effect has to sit on — is in Project → Settings → Preview.',
   },
   {
     anchor: 'undo',

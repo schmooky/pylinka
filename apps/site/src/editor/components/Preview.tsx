@@ -74,12 +74,17 @@ function initialBackend(): BackendChoice {
 }
 
 /** The single active pointer tool for the preview. Scroll always zooms; Fit resets. */
-type Tool = 'pan' | 'follow' | 'orbit' | 'spawn';
+type Tool = 'pan' | 'follow' | 'spawn';
+/*
+ * `spawn` is called "Spawn", not "Burst". It used to be, and the bar right next
+ * to it has a "Burst now" BUTTON that fires immediately — two controls two
+ * places apart, both reading "Burst", one arming a click and one going off on
+ * its own. Selecting a tool must never be the thing that fires it.
+ */
 const TOOLS: { id: Tool; icon: string; label: string; hint: string }[] = [
   { id: 'pan', icon: '⤧', label: 'Pan', hint: 'drag to move the view · scroll to zoom' },
   { id: 'follow', icon: '⌖', label: 'Follow', hint: 'the emitter tracks your cursor' },
-  { id: 'orbit', icon: '◌', label: 'Orbit', hint: 'the emitter circles the centre' },
-  { id: 'spawn', icon: '✳', label: 'Burst', hint: 'click the preview to burst there' },
+  { id: 'spawn', icon: '✳', label: 'Spawn', hint: 'click the preview to burst at that point' },
 ];
 
 export function Preview() {
@@ -97,7 +102,7 @@ export function Preview() {
   // off by default: a still emitter shows the graph you authored, not a motion
   // the preview added. Trajectory splines still run regardless.
   // ONE active pointer tool at a time (small toolbar): pan the view · make the
-  // emitter follow the cursor · orbit the emitter · click to spawn a burst.
+  // emitter follow the cursor · click to spawn a burst at that point.
   const [tool, setTool] = useState<Tool>('pan');
   const toolRef = useRef(tool);
   toolRef.current = tool;
@@ -285,15 +290,12 @@ export function Preview() {
       if (handles.length) {
         let ex: number, ey: number;
         if (toolRef.current === 'follow' && mouseRef.current) [ex, ey] = mouseRef.current;
-        else if (toolRef.current === 'orbit') {
-          const r = Math.min(canvas.width, canvas.height) * 0.28;
-          ex = canvas.width / 2 + Math.cos(t * 1.8) * r;
-          ey = canvas.height / 2 + Math.sin(t * 1.8) * r;
-        } else { ex = canvas.width / 2; ey = canvas.height / 2; }
+        else { ex = canvas.width / 2; ey = canvas.height / 2; }
         const alive = 0;
         for (let i = 0; i < handles.length; i++) {
           const fx = handles[i]!;
-          // a system with a trajectory spline follows it; others follow mouse/orbit
+          // a system with a trajectory spline follows it; the rest sit at the
+          // centre, or follow the cursor
           const sysId = fxSysRef.current[i];
           const path = sysId ? (projRef.current.systemPaths ?? {})[sysId] : null;
           if (path && path.points.length >= 2) {
@@ -391,7 +393,7 @@ export function Preview() {
       spawnReq.current = { x, y };
       return;
     }
-    if (toolRef.current !== 'pan') return; // follow/orbit don't drag the view
+    if (toolRef.current !== 'pan') return; // follow doesn't drag the view
     panRef.current = { cx: e.clientX, cy: e.clientY, vx: view.x, vy: view.y };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
@@ -517,9 +519,9 @@ export function Preview() {
         />
         <button
           className="rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-          title="Spawn a burst on the active emitter now — the runtime API is handle.spawnBurst(n)"
+          title="Fire a burst on the active emitter right now — the runtime API is handle.spawnBurst(n)"
           onClick={spawnActive}>
-          Burst ▸
+          Burst now
         </button>
 
         <select
