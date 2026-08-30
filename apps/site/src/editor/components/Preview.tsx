@@ -398,10 +398,23 @@ export function Preview() {
       last = now;
       t += dt;
       const stage = stageRef.current;
-      // the raw path draws its own backdrop into the framebuffer before the
-      // particles; the pixi stage owns its own, as a tiling sprite under the
-      // world container
-      if (stage === null) {
+      /*
+       * A canvas gets exactly ONE context, ever, and asking for a second kind
+       * returns null forever after.
+       *
+       * This used to run whenever `stage` was null — which includes the gap
+       * before an async createPixiStage has resolved. One tick in that window
+       * took a webgl2 context on the canvas, and pixi's later getContext
+       * ('webgpu') came back null: `Cannot read properties of null (reading
+       * 'configure')`, from deep inside the renderer, on a canvas that looks
+       * perfectly fine. So the test is which backend was CHOSEN, not whether
+       * its stage happens to exist yet.
+       *
+       * The raw path draws its backdrop into the framebuffer before the
+       * particles; the pixi stage owns its own, a tiling sprite under the
+       * world container.
+       */
+      if (backendRef.current === 'webgl') {
         const gl = canvas.getContext('webgl2');
         if (gl) {
           if (!backdropRef.current) backdropRef.current = createBackdrop(gl);
