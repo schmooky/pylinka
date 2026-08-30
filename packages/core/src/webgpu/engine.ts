@@ -715,9 +715,13 @@ export async function createParticles(
       if (wantStats) sim.resolveStats();
       sim.endFrame(dt);
     },
-    setEmitter(x: number, y: number) {
+    setEmitter(x: number, y: number, teleport = false) {
       sim.clock.ex = x * zoom;
       sim.clock.ey = y * zoom;
+      if (teleport) {
+        sim.clock.px = sim.clock.ex;
+        sim.clock.py = sim.clock.ey;
+      }
     },
     spawnBurst(count: number) {
       sim.clock.spawnBurst(count);

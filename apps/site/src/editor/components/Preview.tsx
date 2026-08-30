@@ -314,7 +314,11 @@ export function Preview() {
             const [px2, py2] = entry.drv.at(t);
             fx.setEmitter(px2, py2);
           } else {
-            fx.setEmitter(ex, ey);
+            // Spawn cuts the emitter around rather than moving it: without
+            // teleport, `rateOverDistance` reads every jump as travel and fires
+            // a spawn proportional to it — one at the click, another when it
+            // snaps back, both far larger than the burst you asked for.
+            fx.setEmitter(ex, ey, toolRef.current === 'spawn');
           }
           /*
            * A click is ONE burst at that point, and nothing else moves. Making
@@ -324,7 +328,7 @@ export function Preview() {
            * effect. The tool tests a burst; it does not re-place the emitter.
            */
           if (sysId === activeSysRef.current && spawnReq.current) {
-            fx.setEmitter(spawnReq.current.x, spawnReq.current.y);
+            fx.setEmitter(spawnReq.current.x, spawnReq.current.y, true);
             fx.spawnBurst(burstCountRef.current);
           }
           fx.update(dt);

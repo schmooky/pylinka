@@ -19,7 +19,17 @@ export interface CompiledParticlesHandle {
   /** Step the simulation and render one frame. Call once per rAF tick. */
   update(dtSeconds: number): void;
   /** Move where new particles are born (canvas pixels). */
-  setEmitter(x: number, y: number): void;
+  /**
+   * Move where new particles are born (world/canvas pixels).
+   *
+   * `teleport` moves the emitter WITHOUT counting the distance travelled. That
+   * distance is what `rateOverDistance` turns into spawns — the feature that
+   * lays a trail behind a dragged emitter — so jumping the emitter somewhere
+   * for one frame otherwise fires a spawn proportional to how far it jumped,
+   * and another one when it jumps back. Teleport when the move is a cut rather
+   * than a motion: placing a one-off burst, or repositioning between shots.
+   */
+  setEmitter(x: number, y: number, teleport?: boolean): void;
   /** Emit an extra burst next frame. */
   spawnBurst(count: number): void;
   /** Set a named knob live — writes a value-table slot, never recompiles. */
