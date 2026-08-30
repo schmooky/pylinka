@@ -79,23 +79,37 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
       <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         Spawn — “{systemName}”
       </div>
+      {/*
+        These modes all run BY THEMSELVES. "burst" in particular repeats — it is
+        a batch every interval, not a batch when you ask — and calling it that
+        next to a preview tool also called Burst made it read as manual, so an
+        emitter firing on its own clock looked like the tool misbehaving. The
+        labels say when each one fires.
+      */}
       <div className="mb-2 flex overflow-hidden rounded-md border border-border">
         {(
           [
-            ['flow', 'automatic'],
-            ['burst', 'burst'],
-            ['once', 'once'],
+            ['flow', 'stream', 'a continuous stream, at a rate you set'],
+            ['burst', 'repeating', 'a batch every interval, on its own clock — this one keeps going'],
+            ['once', 'once', 'a single batch when the effect starts, then nothing'],
           ] as const
-        ).map(([m, label]) => (
+        ).map(([m, label, hint]) => (
           <button
             key={m}
-            title={m === 'flow' ? 'continuous stream at a rate' : m === 'burst' ? 'a batch of particles every interval' : 'a single batch at the start'}
+            title={hint}
             onClick={() => setEmitter(m === 'flow' ? { mode: 'flow' } : { mode: m, burst })}
             className={`flex-1 py-1.5 ${emitter.mode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
             {label}
           </button>
         ))}
       </div>
+      <p className="mb-3 text-[10px] leading-relaxed text-muted-foreground">
+        {emitter.mode === 'flow'
+          ? `Emits ${emitter.rate} particles a second for as long as it runs.`
+          : emitter.mode === 'burst'
+            ? `Emits ${burst.count} particles every ${burst.interval}s, over and over, without being asked. Use “once” if you want to fire it yourself with the preview's Spawn tool.`
+            : 'Emits one batch at the start and then stops. Use the preview’s Spawn tool to fire more, wherever you click.'}
+      </p>
       {emitter.mode === 'flow' ? (
         <div className="mb-3 grid grid-cols-2 gap-2">
           <label className="flex flex-col gap-0.5">
@@ -147,7 +161,7 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
             ? 'click the preview to add points · drag to move · double-click to delete'
             : path?.points.length
               ? `${path.points.length} points — emitter follows the spline`
-              : 'no path — emitter follows the mouse / orbit'}
+              : 'no path — the emitter sits at the centre, or follows the cursor with the preview's Follow tool'}
         </span>
       </div>
       {path && path.points.length >= 2 && (
