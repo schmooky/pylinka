@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ParamDef, System } from '@pylinka/graph';
+import type { Node, ParamDef, System } from '@pylinka/graph';
 import { extractParams, parseColor } from '../src/webgl/params.js';
 
 describe('parseColor', () => {
@@ -435,5 +435,86 @@ describe('extractParams — velocity that is not a random range', () => {
     );
     expect(p.velMin).toEqual([5, -9]);
     expect(p.velMax).toEqual([5, -9]);
+  });
+});
+
+/**
+ * Fields are found BY KIND, not by following wires — this backend drives a
+ * fixed set of uniforms rather than evaluating the graph. Two things followed
+ * from that and both were wrong: a field node sitting unconnected on the canvas
+ * still pulled on the whole effect (so deleting the `output.addForce` it fed
+ * changed nothing), and a second node of the same kind REPLACED the first
+ * instead of adding to it, though `output.addForce` and `output.drag` are
+ * accumulating outputs the compiler emits as `force +=` and `dragK +=`.
+ */
+describe('extractParams — fields, wiring and accumulation', () => {
+  const grav = (id: string, y: number): Node => ({ id, kind: 'field.gravity', values: { g: { t: 'vec2', v: [0, y] } } });
+  const life: Node = { id: 'life', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } };
+  const addForce: Node = { id: 'af', kind: 'output.addForce' };
+  const wire = (from: string): System['graph']['edges'][number] => ({
+    id: `e-${from}`, from: { nodeId: from, portId: 'force' }, to: { nodeId: 'af', portId: 'force' },
+  });
+  const sys = (nodes: Node[], edges: System['graph']['edges'] = []): System => ({
+    id: 's1', name: 'f', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 }, graph: { nodes, edges },
+  });
+
+  it('ignores a field that is wired to nothing', () => {
+    const p = extractParams(sys([life, grav('g1', 999)]), [], {});
+    expect(p.gravity).toEqual([0, 0]);
+  });
+
+  it('applies one that is wired', () => {
+    const p = extractParams(sys([life, addForce, grav('g1', 340)], [wire('g1')]), [], {});
+    expect(p.gravity).toEqual([0, 340]);
+  });
+
+  it('adds two gravities together rather than keeping the last', () => {
+    const p = extractParams(sys([life, addForce, grav('g1', 100), grav('g2', 7)], [wire('g1'), wire('g2')]), [], {});
+    expect(p.gravity).toEqual([0, 107]);
+  });
+
+  it('adds two drags together', () => {
+    const drag = (id: string, c: number): Node => ({ id, kind: 'field.drag', values: { coefficient: { t: 'f32', v: c } } });
+    const toDrag = (from: string): System['graph']['edges'][number] => ({
+      id: `e-${from}`, from: { nodeId: from, portId: 'drag' }, to: { nodeId: 'od', portId: 'drag' },
+    });
+    const p = extractParams(
+      sys([life, { id: 'od', kind: 'output.drag' }, drag('d1', 2), drag('d2', 3)], [toDrag('d1'), toDrag('d2')]),
+      [], {},
+    );
+    expect(p.drag).toBe(5);
+  });
+
+  it('follows a knob bound to gravity', () => {
+    const g: Node = { id: 'g1', kind: 'field.gravity', knobBindings: { g: 'p1' } };
+    const p = extractParams(
+      sys([life, addForce, g], [wire('g1')]),
+      [{ id: 'p1', name: 'grav', type: 'vec2', scale: 'linear', default: { t: 'vec2', v: [0, 0] } }],
+      { grav: [0, 500] },
+    );
+    expect(p.gravity).toEqual([0, 500]);
+  });
+});
+
+/**
+ * Lifetime, when a `gen.randomRange` is not what is behind the port. The
+ * fallback branch read the port's raw literal and nothing else, so a lifetime
+ * driven by a knob landed on the 1-1.5s default with the knob ignored.
+ */
+describe('extractParams — lifetime from a knob', () => {
+  it('reads the knob rather than the default range', () => {
+    const s: System = {
+      id: 's1', name: 'ttl', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+      emitter: { mode: 'flow', rate: 10 },
+      graph: { nodes: [{ id: 'n3', kind: 'output.initLife', knobBindings: { life: 'p1' } }], edges: [] },
+    };
+    const p = extractParams(
+      s,
+      [{ id: 'p1', name: 'ttl', type: 'f32', min: 0, max: 10, scale: 'linear', default: { t: 'f32', v: 1 } }],
+      { ttl: 4 },
+    );
+    expect(p.lifeMin).toBe(4);
+    expect(p.lifeMax).toBe(4);
   });
 });

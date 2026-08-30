@@ -279,24 +279,54 @@ export function extractParams(
     }
   }
 
-  const lifeNode = source(byKind('output.initLife')?.id, 'life');
-  if (lifeNode?.kind === 'gen.randomRange') {
-    p.lifeMin = fk(lifeNode, 'min', 1);
-    p.lifeMax = fk(lifeNode, 'max', 1.5);
-  } else {
-    const lit = byKind('output.initLife')?.values?.life;
-    if (lit?.t === 'f32') {
-      p.lifeMin = lit.v;
-      p.lifeMax = lit.v;
+  /**
+   * Lifetime, the same shape as velocity above: a `gen.randomRange` behind the
+   * port is the range, anything else is one exact value. The `else` branch used
+   * to read the port's raw literal only, so a lifetime coming from a knob fell
+   * through to the 1-1.5s default and the knob did nothing.
+   */
+  const lifeOut = byKind('output.initLife');
+  if (lifeOut !== undefined) {
+    const lifeNode = source(lifeOut.id, 'life');
+    if (lifeNode?.kind === 'gen.randomRange') {
+      p.lifeMin = fk(lifeNode, 'min', 1);
+      p.lifeMax = fk(lifeNode, 'max', 1.5);
+    } else {
+      const v = fk(lifeOut, 'life', 1);
+      p.lifeMin = v;
+      p.lifeMax = v;
     }
   }
 
+  /**
+   * Does this field reach anything?
+   *
+   * The loop below finds fields BY KIND, ignoring the wires. A `field.gravity`
+   * dropped on the canvas and left unconnected therefore pulled on the whole
+   * effect, and deleting the `output.addForce` it fed changed nothing — the
+   * exact inverse of a missing node inventing behaviour. Requiring an outgoing
+   * edge is a coarse test (this backend cannot follow a force through a math
+   * node, so it does not check WHERE the wire goes) but it draws the line in
+   * the right place: a node wired to nothing does nothing.
+   */
+  const wired = (id: string): boolean => g.edges.some((e) => e.from.nodeId === id);
+
   for (const n of g.nodes) {
-    if (n.kind === 'field.gravity') p.gravity = v2(n.values?.g, [0, 300]);
-    if (n.kind === 'field.drag') p.drag = fk(n, 'coefficient', 0);
+    if (!wired(n.id) && n.kind.startsWith('field.')) continue;
+    /*
+     * Gravity and drag ACCUMULATE. `output.addForce` and `output.drag` are
+     * accumulating outputs — the compiler emits `force +=` and `dragK +=` —
+     * so two gravity nodes are one stronger pull. Assigning here meant the
+     * last node in the list won and every other one silently vanished.
+     */
+    if (n.kind === 'field.gravity') {
+      const gv = vk(n, 'g', [0, 300]);
+      p.gravity = [p.gravity[0] + gv[0], p.gravity[1] + gv[1]];
+    }
+    if (n.kind === 'field.drag') p.drag += fk(n, 'coefficient', 0);
     if (n.kind === 'field.vortex' && p.pointFields.length < 4) {
       p.pointFields.push({
-        center: v2(n.values?.center, [0, 0]),
+        center: vk(n, 'center', [0, 0]),
         tangential: fk(n, 'strength', 300),
         pull: fk(n, 'pull', 0),
         radius: fk(n, 'radius', 240),
@@ -306,7 +336,7 @@ export function extractParams(
     if (n.kind === 'field.radial' && p.pointFields.length < 4) {
       // schema: +strength pushes away from center → pull is the negation
       p.pointFields.push({
-        center: v2(n.values?.center, [0, 0]),
+        center: vk(n, 'center', [0, 0]),
         tangential: 0,
         pull: -fk(n, 'strength', 0),
         radius: 0,
