@@ -19,7 +19,6 @@ export function Systems() {
   const toggleSystem = useEditor((s) => s.toggleSystem);
   const setConfigOpen = useEditor((s) => s.setConfigOpen);
   const setConfigSection = useEditor((s) => s.setConfigSection);
-  const project = useEditor((s) => s.project);
   const [editing, setEditing] = useState<string | null>(null);
 
 
@@ -28,13 +27,6 @@ export function Systems() {
     setConfigOpen(true);
   };
 
-  /** A sub-emitter says so on its tab — it is not born at the cursor like the rest. */
-  const bornFrom = (sysId: string): string | undefined => {
-    const parent = (project.subEmitters ?? {})[sysId];
-    if (!parent) return undefined;
-    const name = project.systems.find((s) => s.id === parent)?.name;
-    return name ? `born from “${name}”` : undefined;
-  };
 
   return (
     <div
@@ -82,9 +74,6 @@ export function Systems() {
                 onDoubleClick={() => setEditing(sys.id)}>
                 {sys.name}
               </button>
-            )}
-            {bornFrom(sys.id) !== undefined && (
-              <span title={bornFrom(sys.id)} className="shrink-0 text-[10px] leading-none opacity-70">↳</span>
             )}
             {systems.length > 1 && (
               <button title="Remove emitter" onClick={() => removeSystem(sys.id)}
