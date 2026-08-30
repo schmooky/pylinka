@@ -246,13 +246,6 @@ interface EditorState {
   /** how many steps are on each stack — the header buttons read these */
   past: number;
   future: number;
-  /**
-   * Bumped on every undo/redo. React Flow owns the node positions it renders and
-   * only re-reads them when the graph STRUCTURE changes, so a step that moved
-   * nothing but coordinates would revert the store and leave the canvas showing
-   * the old drag. The canvas watches this to resync.
-   */
-  histRev: number;
   undo(): void;
   redo(): void;
   reset(): void;
@@ -318,13 +311,25 @@ export const useEditor = create<EditorState>((set, get) => {
   };
 
   /**
+   * The one way to change the document. Everything an undo step has to capture
+   * goes through here — the project, and the editor state a change implies
+   * (node positions, which emitter is active). An action that writes `set`
+   * directly is invisible to history, which is how adding an emitter ended up
+   * un-undoable; `store.test.ts` asserts the whole action surface routes here.
+   *
    * @param coalesce  commits sharing this key inside COALESCE_MS collapse into
    *   one undo step — a slider drag, a number typed digit by digit.
+   * @param extra  editor state the mutation implies, applied atomically with
+   *   the project so one step covers the whole change.
    */
   const commit = (
     mutate: (p: EditorProject, sys: System) => void,
     bumpTex = false,
     coalesce?: string,
+    extra?: (
+      p: EditorProject,
+      prev: { positions: Record<string, XY>; activeSystemId: string },
+    ) => { positions?: Record<string, XY>; activeSystemId?: string; selectedNodeId?: string | null },
   ) => {
     set((s) => {
       const now = Date.now();
@@ -340,9 +345,16 @@ export const useEditor = create<EditorState>((set, get) => {
       const project = structuredClone(s.project);
       mutate(project, activeSysOf(project));
       project.updatedAt = new Date().toISOString();
-      persist(project, s.positions, s.activeSystemId);
+      const more =
+        extra?.(project, { positions: s.positions, activeSystemId: s.activeSystemId }) ?? {};
+      const positions = more.positions ?? s.positions;
+      const activeSystemId = more.activeSystemId ?? s.activeSystemId;
+      persist(project, positions, activeSystemId);
       return {
         project,
+        positions,
+        activeSystemId,
+        ...(more.selectedNodeId !== undefined ? { selectedNodeId: more.selectedNodeId } : {}),
         rev: s.rev + 1,
         past: past.length,
         future: future.length,
@@ -396,7 +408,6 @@ export const useEditor = create<EditorState>((set, get) => {
         selectedNodeId: null,
         rev: s.rev + 1,
         texRev: s.texRev + 1,
-        histRev: s.histRev + 1,
         past: past.length,
         future: future.length,
       };
@@ -436,7 +447,6 @@ export const useEditor = create<EditorState>((set, get) => {
     texRev: 0,
     past: 0,
     future: 0,
-    histRev: 0,
     assetsOpen: false,
     system: () => activeSysOf(get().project),
     snapshot: () => {
@@ -458,9 +468,10 @@ export const useEditor = create<EditorState>((set, get) => {
         const node: Node = { id: newId, kind, values };
         if (Object.keys(structural).length) node.structural = structural;
         sys.graph.nodes.push(node);
-      });
-      set((s) => ({ positions: { ...s.positions, [newId]: { x, y } }, selectedNodeId: newId }));
-      persist(get().project, get().positions, get().activeSystemId);
+      }, false, undefined, (_p, prev) => ({
+        positions: { ...prev.positions, [newId]: { x, y } },
+        selectedNodeId: newId,
+      }));
     },
 
     moveNode(id, x, y) {
@@ -540,40 +551,46 @@ export const useEditor = create<EditorState>((set, get) => {
       const base = Number(/\d+/.exec(nextNodeId(p0))?.[0] ?? '1');
       const n = p0.systems.length + 1;
       const sys = makeSystem(`emitter ${n}`, base);
-      const positions = autoLayout(sys.graph);
-      set((s) => {
-        const project = structuredClone(s.project);
-        project.systems.push(sys);
-        project.updatedAt = new Date().toISOString();
-        const merged = { ...s.positions, ...positions };
-        persist(project, merged, sys.id);
-        return { project, positions: merged, activeSystemId: sys.id, selectedNodeId: null, rev: s.rev + 1, texRev: s.texRev + 1 };
-      });
+      const layout = autoLayout(sys.graph);
+      commit(
+        (p) => {
+          p.systems.push(sys);
+        },
+        true,
+        undefined,
+        (_p, prev) => ({
+          positions: { ...prev.positions, ...layout },
+          activeSystemId: sys.id,
+          selectedNodeId: null,
+        }),
+      );
     },
 
     removeSystem(id) {
-      const p = get().project;
-      if (p.systems.length <= 1) return; // keep at least one emitter
-      set((s) => {
-        const project = structuredClone(s.project);
-        project.systems = project.systems.filter((x) => x.id !== id);
-        if (project.systemTextures) delete project.systemTextures[id];
-        if (project.systemMasks) delete project.systemMasks[id];
-        if (project.systemPaths) delete project.systemPaths[id];
-        if (project.annotations) {
-          project.annotations.frames = project.annotations.frames.filter((f) => f.systemId !== id);
-          project.annotations.notes = project.annotations.notes.filter((n) => n.systemId !== id);
-        }
-        if (project.subEmitters) {
-          delete project.subEmitters[id]; // as a child
-          for (const [c, par] of Object.entries(project.subEmitters))
-            if (par === id) delete project.subEmitters[c]; // as a parent
-        }
-        project.updatedAt = new Date().toISOString();
-        const activeSystemId = s.activeSystemId === id ? project.systems[0]!.id : s.activeSystemId;
-        persist(project, s.positions, activeSystemId);
-        return { project, activeSystemId, selectedNodeId: null, rev: s.rev + 1, texRev: s.texRev + 1 };
-      });
+      if (get().project.systems.length <= 1) return; // keep at least one emitter
+      commit(
+        (project) => {
+          project.systems = project.systems.filter((x) => x.id !== id);
+          if (project.systemTextures) delete project.systemTextures[id];
+          if (project.systemMasks) delete project.systemMasks[id];
+          if (project.systemPaths) delete project.systemPaths[id];
+          if (project.annotations) {
+            project.annotations.frames = project.annotations.frames.filter((f) => f.systemId !== id);
+            project.annotations.notes = project.annotations.notes.filter((n) => n.systemId !== id);
+          }
+          if (project.subEmitters) {
+            delete project.subEmitters[id]; // as a child
+            for (const [c, par] of Object.entries(project.subEmitters))
+              if (par === id) delete project.subEmitters[c]; // as a parent
+          }
+        },
+        true,
+        undefined,
+        (project, prev) => ({
+          activeSystemId: prev.activeSystemId === id ? project.systems[0]!.id : prev.activeSystemId,
+          selectedNodeId: null,
+        }),
+      );
     },
 
     renameSystem(id, name) {
@@ -621,6 +638,8 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     setSubTrigger(on) {
+      let placed: string | null = null;
+      let at: XY | undefined;
       // the sub shader bakes the trigger in, so this is a construction-time
       // change → bumpTex, same as a texture or a mask
       commit((p, sys) => {
@@ -643,13 +662,19 @@ export const useEditor = create<EditorState>((set, get) => {
             inheritVelocity: { t: 'f32', v: 0 },
           },
         });
+        placed = id;
         const spawn = sys.graph.nodes.find((n) => n.kind === 'output.spawnPosition');
-        const at = spawn ? get().positions[spawn.id] : undefined;
-        // replace, never mutate: history snapshots share this object
-        set((st) => ({
-          positions: { ...st.positions, [id]: { x: (at?.x ?? 0) + 260, y: (at?.y ?? 0) - 90 } },
-        }));
-      }, true);
+        at = spawn ? get().positions[spawn.id] : undefined;
+      }, true, undefined, (_p, prev) =>
+        placed === null
+          ? {}
+          : {
+              positions: {
+                ...prev.positions,
+                [placed]: { x: (at?.x ?? 0) + 260, y: (at?.y ?? 0) - 90 },
+              },
+            },
+      );
     },
 
     addParam(init) {

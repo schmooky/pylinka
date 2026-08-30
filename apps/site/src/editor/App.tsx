@@ -14,6 +14,7 @@ import {
 } from '@xyflow/react';
 import { useEditor } from './store';
 import { toFlow, FRAME_PREFIX, NOTE_PREFIX } from './graphAdapter';
+import { geometryOf, geometrySignature, reconcilePositions } from './reconcile';
 import { nodesBBox } from './annotate';
 import { PylinkaNode } from './components/PylinkaNode';
 import { CommentNode, NoteNode } from './components/AnnotationNodes';
@@ -60,7 +61,7 @@ function EditorApp() {
   const redo = useEditor((s) => s.redo);
   const pastCount = useEditor((s) => s.past);
   const futureCount = useEditor((s) => s.future);
-  const histRev = useEditor((s) => s.histRev);
+  const positions = useEditor((s) => s.positions);
 
   const exportJson = () => {
     const proj = snapshot();
@@ -205,28 +206,21 @@ function EditorApp() {
   }, [structureSig]);
 
   /**
-   * Resync coordinates after an undo/redo. React Flow keeps the position of
-   * every node in its OWN state and only takes ours when `structureSig`
-   * changes, so a step that moved a node or a comment frame and nothing else
-   * used to revert the store while the canvas kept showing the drag — the
-   * counter went down, the node did not move. Patching positions in place
-   * (rather than rebuilding the flow) keeps selection and avoids remounting
-   * every node on each step.
+   * Keep the canvas's coordinates in step with the store's — for ANY change,
+   * not just an undo. React Flow owns the position of the nodes it draws and
+   * only takes ours when the structure changes, so anything that moves a node
+   * without adding or removing one (undo/redo of a move, an import, a reset, a
+   * re-layout) would otherwise rewind the store behind a canvas still drawing
+   * the old place. See reconcile.ts for why this is a no-op during a drag.
    */
+  const geomSig = useMemo(
+    () => geometrySignature(positions, project.annotations),
+    [positions, project.annotations],
+  );
   useEffect(() => {
-    if (histRev === 0) return;
-    const { positions, project: proj } = useEditor.getState();
-    const ann = new Map<string, { x: number; y: number }>();
-    for (const f of proj.annotations?.frames ?? []) ann.set(FRAME_PREFIX + f.id, { x: f.x, y: f.y });
-    for (const n of proj.annotations?.notes ?? []) ann.set(NOTE_PREFIX + n.id, { x: n.x, y: n.y });
-    setRfNodes((ns) =>
-      ns.map((n) => {
-        const p = ann.get(n.id) ?? positions[n.id];
-        if (!p || (p.x === n.position.x && p.y === n.position.y)) return n;
-        return { ...n, position: { x: p.x, y: p.y } };
-      }),
-    );
-  }, [histRev, setRfNodes]);
+    const want = geometryOf(useEditor.getState().positions, useEditor.getState().project.annotations);
+    setRfNodes((ns) => reconcilePositions(ns, want));
+  }, [geomSig, setRfNodes]);
 
   useEffect(() => {
     setRfNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === selectedNodeId })));
