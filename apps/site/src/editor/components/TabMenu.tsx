@@ -23,13 +23,11 @@ export interface TabMenuTarget {
 function Row({
   onClick,
   children,
-  hint,
   disabled,
   danger,
 }: {
   onClick(): void;
   children: React.ReactNode;
-  hint?: string;
   disabled?: boolean;
   danger?: boolean;
 }) {
@@ -37,11 +35,10 @@ function Row({
     <button
       disabled={disabled}
       onClick={onClick}
-      className={`flex w-full items-center gap-3 whitespace-nowrap rounded px-2 py-1.5 text-left text-[11px] hover:bg-accent disabled:opacity-35 disabled:hover:bg-transparent ${
+      className={`block w-full whitespace-nowrap rounded px-2 py-1.5 text-left text-[11px] hover:bg-accent disabled:opacity-35 disabled:hover:bg-transparent ${
         danger ? 'text-foreground/90 hover:text-destructive' : 'text-foreground/90'
       }`}>
-      <span className="min-w-0 flex-1">{children}</span>
-      {hint !== undefined && <span className="shrink-0 text-[10px] text-muted-foreground">{hint}</span>}
+      {children}
     </button>
   );
 }
@@ -101,9 +98,9 @@ export function TabMenu({
   return (
     <div
       ref={box}
-      className="fixed z-50 w-52 rounded-lg border p-1 shadow-2xl"
+      className="fixed z-50 w-max min-w-44 rounded-lg border p-1 shadow-2xl"
       style={{
-        left: Math.min(target.screen.x, window.innerWidth - 216),
+        left: Math.min(target.screen.x, window.innerWidth - 240),
         top: Math.min(target.screen.y, window.innerHeight - 200),
         background: 'var(--color-popover)',
         borderColor: 'var(--color-border)',
@@ -123,8 +120,7 @@ export function TabMenu({
               const payload = copyEmitter(project, sys.id);
               if (payload) void writeClipboard(payload);
               onClose();
-            }}
-            hint="as JSON">
+            }}>
             Copy
           </Row>
           <div className="my-1 border-t border-border" />
@@ -139,8 +135,7 @@ export function TabMenu({
             onClick={() => {
               toggleSystem(sys.id);
               onClose();
-            }}
-            hint={sys.enabled ? 'in the preview' : 'muted'}>
+            }}>
             {sys.enabled ? 'Mute' : 'Unmute'}
           </Row>
           <div className="my-1 border-t border-border" />
@@ -160,11 +155,10 @@ export function TabMenu({
             onClick={() => {
               onTemplates();
               onClose();
-            }}
-            hint="sparks, smoke…">
+            }}>
             From a template…
           </Row>
-          <Row onClick={() => void paste()} hint="from the clipboard">
+          <Row onClick={() => void paste()}>
             Paste emitter
           </Row>
           <div className="my-1 border-t border-border" />
@@ -172,8 +166,7 @@ export function TabMenu({
             onClick={() => {
               addSystem();
               onClose();
-            }}
-            hint="build it yourself">
+            }}>
             Empty emitter
           </Row>
         </>

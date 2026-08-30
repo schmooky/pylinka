@@ -29,21 +29,18 @@ export interface MenuTarget {
 function Row({
   onClick,
   children,
-  hint,
   disabled,
 }: {
   onClick(): void;
   children: React.ReactNode;
-  hint?: string;
   disabled?: boolean;
 }) {
   return (
     <button
       disabled={disabled}
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-foreground/90 hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent">
-      <span className="min-w-0 flex-1 truncate">{children}</span>
-      {hint !== undefined && <span className="shrink-0 text-[10px] text-muted-foreground">{hint}</span>}
+      className="block w-full truncate rounded px-2 py-1.5 text-left text-[11px] text-foreground/90 hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent">
+      {children}
     </button>
   );
 }
@@ -187,7 +184,7 @@ export function GraphMenu({ target, onClose }: { target: MenuTarget; onClose(): 
 
       {/* canvas actions — knobs, annotations and locking, on the spot they apply to */}
       <div className="border-t border-border p-1">
-        <Row onClick={addKnob} hint="live control">
+        <Row onClick={addKnob}>
           Add knob
         </Row>
         <Row
@@ -216,7 +213,6 @@ export function GraphMenu({ target, onClose }: { target: MenuTarget; onClose(): 
         )}
         <Row
           disabled={sysAnnotations.length === 0}
-          hint={sysAnnotations.length ? `${sysAnnotations.length}` : undefined}
           onClick={() => {
             lockAnnotations(!allLocked);
             onClose();
