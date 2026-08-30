@@ -12,9 +12,29 @@ import { copyEmitter, type ClipboardPayload } from './clipboard';
 type NodesPayload = Extract<ClipboardPayload, { kind: 'nodes' }>;
 type EmitterPayload = Extract<ClipboardPayload, { kind: 'emitter' }>;
 
-/** Edge ids only have to be unique; the graph never reads meaning out of them. */
-function nextEdgeId(): string {
-  return `e${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+/**
+ * Ids that have to be unique are derived from the project, not from the clock.
+ * `Date.now()` looks unique and is not: two pastes in the same millisecond —
+ * a double-click, a test, a loop — produce the same id, and a second system
+ * sharing an id with the first quietly breaks everything keyed by it.
+ */
+function nextSystemId(p: EditorProject): string {
+  let max = 0;
+  for (const s of p.systems) {
+    const m = /^s(\d+)$/.exec(s.id);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `s${max + 1}`;
+}
+
+/** Edge ids only have to be unique within the graph. */
+function nextEdgeId(graph: System['graph']): string {
+  let max = 0;
+  for (const e of graph.edges) {
+    const m = /^e(\d+)$/.exec(e.id);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `e${max + 1}`;
 }
 
 /** "spark" -> "spark copy" -> "spark copy 2", so a duplicate is findable. */
@@ -560,7 +580,7 @@ export const useEditor = create<EditorState>((set, get) => {
       commit((_p, sys) => {
         const g = sys.graph;
         g.edges = g.edges.filter((e) => !(e.to.nodeId === to.nodeId && e.to.portId === to.portId));
-        g.edges.push({ id: `e${Date.now()}_${Math.floor(Math.random() * 1e4)}`, from, to });
+        g.edges.push({ id: nextEdgeId(g), from, to });
       });
     },
 
@@ -1022,7 +1042,7 @@ export const useEditor = create<EditorState>((set, get) => {
             const to = nodeIdMap.get(e.to.nodeId);
             if (from === undefined || to === undefined) continue;
             sys.graph.edges.push({
-              id: nextEdgeId(),
+              id: nextEdgeId(sys.graph),
               from: { nodeId: from, portId: e.from.portId },
               to: { nodeId: to, portId: e.to.portId },
             });
@@ -1066,7 +1086,7 @@ export const useEditor = create<EditorState>((set, get) => {
             paramIdMap.set(src.id, pid);
           }
 
-          newId = `s${Date.now().toString(36)}`;
+          newId = nextSystemId(p);
           const sys: System = structuredClone(payload.system);
           sys.id = newId;
           sys.name = uniqueSystemName(p, payload.system.name);
@@ -1089,8 +1109,8 @@ export const useEditor = create<EditorState>((set, get) => {
               );
             }
           }
-          sys.graph.edges = sys.graph.edges.map((e) => ({
-            id: nextEdgeId(),
+          sys.graph.edges = sys.graph.edges.map((e, i) => ({
+            id: `e${i + 1}`,
             from: { nodeId: idMap.get(e.from.nodeId) ?? e.from.nodeId, portId: e.from.portId },
             to: { nodeId: idMap.get(e.to.nodeId) ?? e.to.nodeId, portId: e.to.portId },
           }));
