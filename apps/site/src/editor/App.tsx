@@ -269,6 +269,16 @@ function EditorApp() {
             <Background gap={22} color="color-mix(in oklab, var(--color-border) 70%, transparent)" />
             <Controls showInteractive={false} />
           </ReactFlow>
+          {/*
+            The palette used to be a dock you could not miss. Now that nodes
+            come from a menu, nothing on screen says so — this is the one line
+            that has to be there, and it steps aside while the menu is open.
+          */}
+          {!menu && (
+            <span className="pointer-events-none absolute bottom-2 right-3 z-10 text-[10px] text-muted-foreground/70">
+              right-click for nodes
+            </span>
+          )}
           {menu && <GraphMenu target={menu} onClose={() => setMenu(null)} />}
           </div>
         </div>
