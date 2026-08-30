@@ -143,6 +143,16 @@ describe('interpreted shader — spawn shapes', () => {
     expect(updateVsSub(undefined, true, 'death')).toContain('float(u_burstK) / max(float(burstN), 1.0)');
   });
 
+  it('spawns a circle on the ring, not across the disc', () => {
+    for (const src of build()) {
+      // the compiled backends have always been `vec2(cos, sin) * radius`; this
+      // one used to multiply by sqrt(random) as well, filling the disc, so the
+      // same graph looked different in a preview and in a game
+      expect(src).toContain('if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); return vec2(cos(a), sin(a)) * u_shapeR; }');
+      expect(src).not.toContain('u_shapeR * sqrt(');
+    }
+  });
+
   it('declares the two per-shape vectors in both shaders', () => {
     for (const src of build()) {
       expect(src).toContain('uniform vec2  u_shapeA');

@@ -290,7 +290,11 @@ float rnd(float s, float k) { return hash11(s * 57.31 + k * 131.7 + 0.123); }
  * (inner, outer) radii, the chain's start and end.
  */
 vec2 shapeOffset(float s, float t) {
-  if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); return vec2(cos(a), sin(a)) * u_shapeR * sqrt(rnd(s, 9.0)); }
+  // circle is the RING, as the compiled backends have always had it and as the
+  // catalog implies by offering torus alongside it. This used to spawn across
+  // the filled disc, so the same graph looked one way in an editor preview and
+  // another way in a game. A filled blob is a torus with an inner radius of 0.
+  if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); return vec2(cos(a), sin(a)) * u_shapeR; }
   if (u_shape == 2) return (vec2(rnd(s, 1.0), rnd(s, 2.0)) - 0.5) * u_shapeSize;
   if (u_shape == 3) { float a = 6.2831853 * rnd(s, 1.0); float r = mix(u_shapeA.x, u_shapeA.y, rnd(s, 9.0)); return vec2(cos(a), sin(a)) * r; }
   if (u_shape == 4) { float a = 6.2831853 * (t >= 0.0 ? t : rnd(s, 1.0)); return vec2(cos(a), sin(a)) * u_shapeR; }
@@ -410,7 +414,11 @@ float rnd(float s, float k) { return hash11(s * 57.31 + k * 131.7 + 0.123); }
  * (inner, outer) radii, the chain's start and end.
  */
 vec2 shapeOffset(float s, float t) {
-  if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); return vec2(cos(a), sin(a)) * u_shapeR * sqrt(rnd(s, 9.0)); }
+  // circle is the RING, as the compiled backends have always had it and as the
+  // catalog implies by offering torus alongside it. This used to spawn across
+  // the filled disc, so the same graph looked one way in an editor preview and
+  // another way in a game. A filled blob is a torus with an inner radius of 0.
+  if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); return vec2(cos(a), sin(a)) * u_shapeR; }
   if (u_shape == 2) return (vec2(rnd(s, 1.0), rnd(s, 2.0)) - 0.5) * u_shapeSize;
   if (u_shape == 3) { float a = 6.2831853 * rnd(s, 1.0); float r = mix(u_shapeA.x, u_shapeA.y, rnd(s, 9.0)); return vec2(cos(a), sin(a)) * r; }
   if (u_shape == 4) { float a = 6.2831853 * (t >= 0.0 ? t : rnd(s, 1.0)); return vec2(cos(a), sin(a)) * u_shapeR; }

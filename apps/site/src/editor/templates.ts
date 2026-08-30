@@ -20,7 +20,7 @@ const col = (v: string): Literal => ({ t: 'color', v });
 
 interface Recipe {
   shape?: {
-    kind: 'shape.point' | 'shape.circle' | 'shape.rectangle' | 'shape.burstRing';
+    kind: 'shape.point' | 'shape.circle' | 'shape.torus' | 'shape.rectangle' | 'shape.burstRing';
     values: Node['values'];
   };
   life: Vec2;
@@ -159,7 +159,8 @@ export const EMITTER_TEMPLATES: EmitterTemplate[] = [
     name: 'Smoke',
     hint: 'Grey puffs that rise, spread and thin out.',
     system: sys('smoke', { mode: 'flow', rate: 90 }, 'normal', 1500, {
-      shape: { kind: 'shape.circle', values: { radius: f(16) } },
+      // a filled blob is a torus with no hole; shape.circle is the ring
+      shape: { kind: 'shape.torus', values: { innerRadius: f(0), outerRadius: f(16) } },
       life: [1.4, 2.6],
       vel: { min: [-12, -30], max: [12, -70] },
       gravity: [0, -20],
@@ -220,7 +221,7 @@ export const EMITTER_TEMPLATES: EmitterTemplate[] = [
     name: 'Fountain',
     hint: 'A jet thrown up that arcs over and falls back.',
     system: sys('fountain', { mode: 'flow', rate: 260 }, 'add', 3000, {
-      shape: { kind: 'shape.circle', values: { radius: f(10) } },
+      shape: { kind: 'shape.torus', values: { innerRadius: f(0), outerRadius: f(10) } },
       life: [1.1, 1.9],
       vel: { min: [-90, -320], max: [90, -460] },
       gravity: [0, 520],
@@ -233,7 +234,7 @@ export const EMITTER_TEMPLATES: EmitterTemplate[] = [
     name: 'Vortex',
     hint: 'Everything caught in a slow swirl around the centre.',
     system: sys('vortex', { mode: 'flow', rate: 160 }, 'add', 2000, {
-      shape: { kind: 'shape.circle', values: { radius: f(56) } },
+      shape: { kind: 'shape.torus', values: { innerRadius: f(0), outerRadius: f(56) } },
       life: [1.6, 2.8],
       vel: { min: [-10, -10], max: [10, 10] },
       drag: 0.1,
