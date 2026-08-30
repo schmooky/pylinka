@@ -679,7 +679,7 @@ export function Preview() {
             magnifies a finished image or slides its drawn area out of view.
           */
         />
-        <PathOverlay editing={pathEdit} />
+        <PathOverlay editing={pathEdit} view={cssView} />
         {pathEdit && (
           <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 px-2 py-1 text-[10px] text-foreground">
             drawing path — click to add · drag to move · double-click to delete
