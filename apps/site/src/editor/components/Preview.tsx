@@ -84,7 +84,7 @@ type Tool = 'pan' | 'follow' | 'spawn';
 const TOOLS: { id: Tool; icon: string; label: string; hint: string }[] = [
   { id: 'pan', icon: '⤧', label: 'Pan', hint: 'drag to move the view · scroll to zoom' },
   { id: 'follow', icon: '⌖', label: 'Follow', hint: 'the emitter tracks your cursor' },
-  { id: 'spawn', icon: '✳', label: 'Spawn', hint: 'click or drag the preview — the emitter moves there and bursts' },
+  { id: 'spawn', icon: '✳', label: 'Spawn', hint: 'click the preview for one burst there — the emitter itself does not move' },
 ];
 
 export function Preview() {
@@ -119,12 +119,6 @@ export function Preview() {
   const burstCountRef = useRef(burstCount);
   burstCountRef.current = burstCount;
   const spawnReq = useRef<{ x: number; y: number } | null>(null);
-  /**
-   * Where the Spawn tool last put the emitter. It STAYS there: a one-shot burst
-   * that snapped straight back to the centre looked like the click had missed,
-   * because the stream you were watching never left the middle of the canvas.
-   */
-  const spawnAt = useRef<{ x: number; y: number } | null>(null);
   /**
    * Errors only. The fps / alive readout that used to live up here is gone for
    * now, but a failed engine create still has to say so — silently rendering
@@ -296,8 +290,6 @@ export function Preview() {
       if (handles.length) {
         let ex: number, ey: number;
         if (toolRef.current === 'follow' && mouseRef.current) [ex, ey] = mouseRef.current;
-        else if (toolRef.current === 'spawn' && spawnAt.current)
-          [ex, ey] = [spawnAt.current.x, spawnAt.current.y];
         else { ex = canvas.width / 2; ey = canvas.height / 2; }
         const alive = 0;
         for (let i = 0; i < handles.length; i++) {
@@ -324,8 +316,13 @@ export function Preview() {
           } else {
             fx.setEmitter(ex, ey);
           }
-          // the click itself also fires a burst, on top of whatever the emitter
-          // is already doing from that point
+          /*
+           * A click is ONE burst at that point, and nothing else moves. Making
+           * the emitter stay where you clicked seemed friendlier and was wrong:
+           * the emitter's own continuous emission followed the cursor around
+           * and never went back, so every click permanently relocated the
+           * effect. The tool tests a burst; it does not re-place the emitter.
+           */
           if (sysId === activeSysRef.current && spawnReq.current) {
             fx.setEmitter(spawnReq.current.x, spawnReq.current.y);
             fx.spawnBurst(burstCountRef.current);
@@ -387,17 +384,11 @@ export function Preview() {
       return;
     }
     if (toolRef.current === 'follow') mouseRef.current = canvasPx(e);
-    // drag with Spawn held down to walk the emitter around
-    else if (toolRef.current === 'spawn' && e.buttons === 1) {
-      const [x, y] = canvasPx(e);
-      spawnAt.current = { x, y };
-    }
   };
   const onPanDown = (e: React.PointerEvent) => {
     if (toolRef.current === 'spawn') {
-      const [x, y] = canvasPx(e);
-      spawnAt.current = { x, y }; // the emitter moves here and stays
-      spawnReq.current = { x, y }; // and this click also bursts (loop consumes it)
+      const [x, y] = canvasPx(e); // one burst here, consumed by the next frame
+      spawnReq.current = { x, y };
       return;
     }
     if (toolRef.current !== 'pan') return; // follow doesn't drag the view
