@@ -84,7 +84,7 @@ type Tool = 'pan' | 'follow' | 'spawn';
 const TOOLS: { id: Tool; icon: string; label: string; hint: string }[] = [
   { id: 'pan', icon: '⤧', label: 'Pan', hint: 'drag to move the view · scroll to zoom' },
   { id: 'follow', icon: '⌖', label: 'Follow', hint: 'the emitter tracks your cursor' },
-  { id: 'spawn', icon: '✳', label: 'Spawn', hint: 'click the preview to burst at that point' },
+  { id: 'spawn', icon: '✳', label: 'Spawn', hint: 'click or drag the preview — the emitter moves there and bursts' },
 ];
 
 export function Preview() {
@@ -119,6 +119,12 @@ export function Preview() {
   const burstCountRef = useRef(burstCount);
   burstCountRef.current = burstCount;
   const spawnReq = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * Where the Spawn tool last put the emitter. It STAYS there: a one-shot burst
+   * that snapped straight back to the centre looked like the click had missed,
+   * because the stream you were watching never left the middle of the canvas.
+   */
+  const spawnAt = useRef<{ x: number; y: number } | null>(null);
   /**
    * Errors only. The fps / alive readout that used to live up here is gone for
    * now, but a failed engine create still has to say so — silently rendering
@@ -290,6 +296,8 @@ export function Preview() {
       if (handles.length) {
         let ex: number, ey: number;
         if (toolRef.current === 'follow' && mouseRef.current) [ex, ey] = mouseRef.current;
+        else if (toolRef.current === 'spawn' && spawnAt.current)
+          [ex, ey] = [spawnAt.current.x, spawnAt.current.y];
         else { ex = canvas.width / 2; ey = canvas.height / 2; }
         const alive = 0;
         for (let i = 0; i < handles.length; i++) {
@@ -316,8 +324,8 @@ export function Preview() {
           } else {
             fx.setEmitter(ex, ey);
           }
-          // click-to-spawn: fire a one-shot burst on the active emitter, at the
-          // clicked point, this frame (the emitter snaps back next frame).
+          // the click itself also fires a burst, on top of whatever the emitter
+          // is already doing from that point
           if (sysId === activeSysRef.current && spawnReq.current) {
             fx.setEmitter(spawnReq.current.x, spawnReq.current.y);
             fx.spawnBurst(burstCountRef.current);
@@ -379,18 +387,17 @@ export function Preview() {
       return;
     }
     if (toolRef.current === 'follow') mouseRef.current = canvasPx(e);
-  };
-  // spawn `burstCount` on the active emitter at its current position (the button)
-  const spawnActive = () => {
-    const i = fxSysRef.current.indexOf(activeSysRef.current);
-    const h = i >= 0 ? fxRef.current[i] : undefined;
-    if (h) h.spawnBurst(burstCountRef.current);
-    else fxRef.current.forEach((x) => x.spawnBurst(burstCountRef.current));
+    // drag with Spawn held down to walk the emitter around
+    else if (toolRef.current === 'spawn' && e.buttons === 1) {
+      const [x, y] = canvasPx(e);
+      spawnAt.current = { x, y };
+    }
   };
   const onPanDown = (e: React.PointerEvent) => {
     if (toolRef.current === 'spawn') {
-      const [x, y] = canvasPx(e); // one-shot burst at the click (loop consumes it)
-      spawnReq.current = { x, y };
+      const [x, y] = canvasPx(e);
+      spawnAt.current = { x, y }; // the emitter moves here and stays
+      spawnReq.current = { x, y }; // and this click also bursts (loop consumes it)
       return;
     }
     if (toolRef.current !== 'pan') return; // follow doesn't drag the view
@@ -515,15 +522,8 @@ export function Preview() {
           onChange={(e) => setBurstCount(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
           className="num"
           style={{ width: 52 }}
-          title="Particles per manual burst"
+          title="Particles per click with the Spawn tool"
         />
-        <button
-          className="rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-          title="Fire a burst on the active emitter right now — the runtime API is handle.spawnBurst(n)"
-          onClick={spawnActive}>
-          Burst now
-        </button>
-
         <select
           value={backend}
           onChange={(e) => setBackend(e.target.value as BackendChoice)}
