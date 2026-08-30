@@ -213,18 +213,26 @@ export function extractParams(
     drag: 0,
     windPower: 0,
     windDir: 0,
-    velMin: [-20, -60],
-    velMax: [20, -120],
+    // An ABSENT node has to mean "nothing", not "something that looks nice".
+    // These defaults used to be a preset: no output.initVelocity gave every
+    // particle 60-120 px/s upward, so deleting the node — or never adding one —
+    // produced a drift with no node anywhere in the graph to explain it, and no
+    // way to turn it off. The compiled backend has always spawned at rest
+    // (`o_initVel = vec2f(0.0)`), so the two backends disagreed on the same
+    // graph. Same reasoning for the size and colour pair below: with no write
+    // node, the compiled backend keeps what the particle was born with.
+    velMin: [0, 0],
+    velMax: [0, 0],
     lifeMin: 1,
     lifeMax: 1.5,
     shape: 0,
     shapeRadius: 40,
     shapeSize: [80, 80],
     colorFrom: [1, 1, 1, 1],
-    colorTo: [1, 1, 1, 0],
+    colorTo: [1, 1, 1, 1],
     colorEase: 0,
     sizeFrom: 8,
-    sizeTo: 0,
+    sizeTo: 8,
     sizeEase: 0,
     alphaFrom: 1,
     alphaTo: 1,
@@ -251,10 +259,24 @@ export function extractParams(
     p.shapeSize = v2(shapeNode.values?.size, [80, 80]);
   }
 
-  const velNode = source(byKind('output.initVelocity')?.id, 'vel');
-  if (velNode?.kind === 'gen.randomVec2') {
-    p.velMin = v2(velNode.values?.min, p.velMin);
-    p.velMax = v2(velNode.values?.max, p.velMax);
+  /**
+   * Birth velocity. A `gen.randomVec2` behind the port is the range itself —
+   * that is how "thrown out at a spread of speeds" is authored — and anything
+   * else collapses to a single value, including the port's own literal and a
+   * knob bound to it. Reading only the randomVec2 case meant typing a velocity
+   * straight into the node, or driving it from a knob, did nothing at all.
+   */
+  const velOut = byKind('output.initVelocity');
+  if (velOut !== undefined) {
+    const velNode = source(velOut.id, 'vel');
+    if (velNode?.kind === 'gen.randomVec2') {
+      p.velMin = vk(velNode, 'min', [0, 0]);
+      p.velMax = vk(velNode, 'max', [0, 0]);
+    } else {
+      const v = vk(velOut, 'vel', [0, 0]);
+      p.velMin = v;
+      p.velMax = v;
+    }
   }
 
   const lifeNode = source(byKind('output.initLife')?.id, 'life');

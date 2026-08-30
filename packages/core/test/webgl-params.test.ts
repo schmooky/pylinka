@@ -359,3 +359,81 @@ describe('extractParams — rotation', () => {
     expect(p.easeLut.slice(64, 96)[16]).toBeCloseTo(16 / 31, 6);
   });
 });
+
+/**
+ * A node that is not there must not do anything.
+ *
+ * These defaults were a preset, not a neutral state: with no
+ * `output.initVelocity` every particle was born moving 60-120 px/s UPWARD, and
+ * with no `output.writeScale` it shrank from 8px to nothing over its life. Both
+ * showed up as motion with no node in the graph to explain it and no way to
+ * switch it off — and the compiled backend disagreed, spawning at rest
+ * (`o_initVel = vec2f(0.0)`) and keeping the size it was born with
+ * (`var outSize = rnd[slot].size`). Same graph, two answers.
+ */
+describe('extractParams — an absent output writes nothing', () => {
+  const bare: System = {
+    id: 's1', name: 'bare', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 },
+    graph: {
+      nodes: [
+        { id: 'n1', kind: 'shape.point' },
+        { id: 'n2', kind: 'output.spawnPosition' },
+        { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } },
+      ],
+      edges: [{ id: 'e1', from: { nodeId: 'n1', portId: 'pos' }, to: { nodeId: 'n2', portId: 'pos' } }],
+    },
+  };
+
+  it('spawns at rest with no output.initVelocity', () => {
+    const p = extractParams(bare, [], {});
+    expect(p.velMin).toEqual([0, 0]);
+    expect(p.velMax).toEqual([0, 0]);
+  });
+
+  it('holds size and colour with no write node', () => {
+    const p = extractParams(bare, [], {});
+    expect(p.sizeTo).toBe(p.sizeFrom);
+    expect(p.colorTo).toEqual(p.colorFrom);
+  });
+});
+
+/**
+ * The velocity port, when a `gen.randomVec2` is NOT what is behind it. Only
+ * that one node kind used to be read, so a velocity typed into the port, or a
+ * knob bound to it, was silently ignored and the preset applied instead.
+ */
+describe('extractParams — velocity that is not a random range', () => {
+  const withLiteral: System = {
+    id: 's1', name: 'literal', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 },
+    graph: {
+      nodes: [
+        { id: 'n1', kind: 'shape.point' },
+        { id: 'n2', kind: 'output.spawnPosition' },
+        { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } },
+        { id: 'n4', kind: 'output.initVelocity', values: { vel: { t: 'vec2', v: [12, 34] } } },
+      ],
+      edges: [{ id: 'e1', from: { nodeId: 'n1', portId: 'pos' }, to: { nodeId: 'n2', portId: 'pos' } }],
+    },
+  };
+
+  it('uses the port literal, as one exact velocity', () => {
+    const p = extractParams(withLiteral, [], {});
+    expect(p.velMin).toEqual([12, 34]);
+    expect(p.velMax).toEqual([12, 34]);
+  });
+
+  it('follows a knob bound to the port', () => {
+    const knobbed = structuredClone(withLiteral);
+    // knobBindings hold the knob's ID; its NAME is what the live value map uses
+    knobbed.graph.nodes[3]!.knobBindings = { vel: 'p1' };
+    const p = extractParams(
+      knobbed,
+      [{ id: 'p1', name: 'launch', type: 'vec2', scale: 'linear', default: { t: 'vec2', v: [0, 0] } }],
+      { launch: [5, -9] },
+    );
+    expect(p.velMin).toEqual([5, -9]);
+    expect(p.velMax).toEqual([5, -9]);
+  });
+});
