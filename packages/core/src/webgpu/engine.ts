@@ -676,6 +676,7 @@ export async function createParticles(
 
   const handle: CompiledParticlesHandle = {
     autoClear: true,
+    clearColor: [0, 0, 0, 0] as [number, number, number, number],
     backendName: 'webgpu',
     get stats() {
       return sim.stats;
@@ -695,7 +696,13 @@ export async function createParticles(
             view: context.getCurrentTexture().createView(),
             loadOp: this.autoClear ? 'clear' : 'load',
             storeOp: 'store',
-            clearValue: { r: 0, g: 0, b: 0, a: 0 },
+            clearValue: {
+              // premultiplied target — see the WebGL2 backend
+              r: this.clearColor[0] * this.clearColor[3],
+              g: this.clearColor[1] * this.clearColor[3],
+              b: this.clearColor[2] * this.clearColor[3],
+              a: this.clearColor[3],
+            },
           },
         ],
       });

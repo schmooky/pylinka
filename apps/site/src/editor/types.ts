@@ -88,16 +88,21 @@ export const DEFAULT_REFERENCE: ReferenceSettings = {
  * effect against the tone it will actually play on.
  */
 export interface PreviewBackground {
-  mode: 'grid' | 'solid';
-  /** the solid colour, and the darker square of the grid */
-  color: string;
-  /** grid square size in px */
+  /** two checker colours; set them the same for a flat backdrop */
+  a: string;
+  b: string;
+  /** checker square size in px */
   size: number;
 }
 
+/**
+ * A dark checker rather than black. Adding light to black and covering black
+ * with light look identical, so pure black is the one backdrop on which an
+ * additive emitter cannot show itself.
+ */
 export const DEFAULT_PREVIEW_BACKGROUND: PreviewBackground = {
-  mode: 'grid',
-  color: '#101010',
+  a: '#141414',
+  b: '#1c1c1c',
   size: 16,
 };
 

@@ -29,43 +29,41 @@ export function BackgroundSettings() {
   return (
     <div className="flex flex-col gap-3 text-xs">
       <label className="flex items-center gap-3">
-        <span className="w-24 shrink-0 text-muted-foreground">backdrop</span>
-        <select
-          className="sel sel-wide"
-          value={bg.mode}
-          onChange={(e) => set({ mode: e.target.value as 'grid' | 'solid' })}>
-          <option value="grid">checkerboard</option>
-          <option value="solid">solid colour</option>
-        </select>
-      </label>
-      <label className="flex items-center gap-3">
-        <span className="w-24 shrink-0 text-muted-foreground">colour</span>
+        <span className="w-24 shrink-0 text-muted-foreground">checker</span>
         <input
           type="color"
           className="h-6 w-12 cursor-pointer rounded border border-border bg-transparent"
-          value={bg.color}
-          onChange={(e) => set({ color: e.target.value })}
+          value={bg.a}
+          onChange={(e) => set({ a: e.target.value })}
         />
-        <span className="font-mono text-[10px] text-muted-foreground">{bg.color}</span>
+        <input
+          type="color"
+          className="h-6 w-12 cursor-pointer rounded border border-border bg-transparent"
+          value={bg.b}
+          onChange={(e) => set({ b: e.target.value })}
+        />
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {bg.a} {bg.b}
+        </span>
       </label>
-      {bg.mode === 'grid' && (
-        <label className="flex items-center gap-3">
-          <span className="w-24 shrink-0 text-muted-foreground">square</span>
-          <input
-            className="num"
-            type="number"
-            min={4}
-            max={64}
-            value={bg.size}
-            onChange={(e) => set({ size: Math.min(64, Math.max(4, Number(e.target.value) || 16)) })}
-          />
-          <span className="text-[10px] text-muted-foreground">px</span>
-        </label>
-      )}
+      <label className="flex items-center gap-3">
+        <span className="w-24 shrink-0 text-muted-foreground">square</span>
+        <input
+          className="num"
+          type="number"
+          min={2}
+          max={128}
+          value={bg.size}
+          onChange={(e) => set({ size: Math.min(128, Math.max(2, Number(e.target.value) || 16)) })}
+        />
+        <span className="text-[10px] text-muted-foreground">px — set both colours the same for a flat backdrop</span>
+      </label>
       <p className="leading-relaxed text-muted-foreground">
-        Editor-only — the runtime draws on whatever your game puts behind it. Judge an{' '}
-        <code>add</code> or <code>screen</code> emitter against something other than black, or you
-        are looking at the one backdrop where those modes cannot show themselves.
+        Drawn INTO the canvas, not behind it. A light blend mode adds to the pixels in the same
+        buffer, so this is what <code>add</code> and <code>screen</code> are actually adding to —
+        behind the canvas it would look like a backdrop while those modes carried on as if it were
+        black. Avoid pure black for the same reason. Editor-only: the runtime draws on whatever your
+        game puts behind it.
       </p>
     </div>
   );

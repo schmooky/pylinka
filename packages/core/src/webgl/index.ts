@@ -131,6 +131,17 @@ export interface ParticlesHandle {
   apply(project: PylinkaProject): boolean;
   /** Whether the canvas should be cleared each frame (default true). */
   autoClear: boolean;
+  /**
+   * What `autoClear` clears to, as straight (non-premultiplied) `[r,g,b,a]` in
+   * 0..1. Defaults to fully transparent.
+   *
+   * This matters more than it looks. The canvas is premultiplied, so a light
+   * blend mode can only add to pixels that are IN this framebuffer — over a
+   * transparent clear there is nothing to add to, and the page behind the
+   * canvas is out of reach. Clearing to the colour the effect will really play
+   * on is what makes `add` and `screen` show what they will actually do.
+   */
+  clearColor: [number, number, number, number];
   /** Alive particle count. Synchronous GPU readback — for debug/stats, not per-frame. */
   aliveCount(): number;
   /**
@@ -292,6 +303,7 @@ export function createParticles(
 
   const handle: ParticlesHandle = {
     autoClear: true,
+    clearColor: [0, 0, 0, 0],
     update(dtSeconds: number) {
       const dt = clampDt(dtSeconds, maxDt);
       const dist = Math.hypot(ex - px, ey - py);
@@ -300,7 +312,10 @@ export function createParticles(
 
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (this.autoClear) {
-        gl.clearColor(0, 0, 0, 0);
+        const [cr, cg, cb, ca] = this.clearColor;
+        // premultiplied target: scale by alpha, or an opaque-looking clear
+        // colour arrives washed out
+        gl.clearColor(cr * ca, cg * ca, cb * ca, ca);
         gl.clear(gl.COLOR_BUFFER_BIT);
       }
       engine.render(canvas.width * zoom, canvas.height * zoom, params);

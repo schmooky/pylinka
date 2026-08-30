@@ -14,6 +14,7 @@ import { frameSize, type EditorProject } from '../types';
 import { PathOverlay } from './PathOverlay';
 import { ReferenceLayer, ReferencePanel } from './ReferenceLayer';
 import { usePreviewBackground } from '../reference';
+import { createBackdrop } from '../backdrop';
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
@@ -123,6 +124,9 @@ export function Preview() {
   // dragged into place; closed = inert, and pan/spawn behave as before
   const [refOpen, setRefOpen] = useState(false);
   const bg = usePreviewBackground();
+  const bgRef = useRef(bg);
+  bgRef.current = bg;
+  const backdropRef = useRef<ReturnType<typeof createBackdrop> | null>(null);
   const [backend, setBackend] = useState<BackendChoice>(initialBackend);
   const backendRef = useRef(backend);
   backendRef.current = backend;
@@ -223,7 +227,9 @@ export function Preview() {
           byId.set(sys.id, ch);
           h = ch;
         }
-        h.autoClear = i === 0;
+        // the backdrop pass owns the clear — see backdrop.ts for why it has to
+        // be inside the framebuffer rather than a layer behind the canvas
+        h.autoClear = false;
         for (const [n, v] of Object.entries(usePreview.getState().knobs)) h.setKnob(n, v);
         handles.push(h);
         sysIds.push(sys.id);
@@ -268,6 +274,13 @@ export function Preview() {
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
       t += dt;
+      // backdrop first: it clears, and the particles add to what it left
+      const gl = canvas.getContext('webgl2');
+      if (gl) {
+        if (!backdropRef.current) backdropRef.current = createBackdrop(gl);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        backdropRef.current.draw(bgRef.current);
+      }
       const handles = fxRef.current;
       if (handles.length) {
         let ex: number, ey: number;
@@ -320,6 +333,8 @@ export function Preview() {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      backdropRef.current?.destroy();
+      backdropRef.current = null;
       for (const h of fxRef.current) h.destroy();
       fxRef.current = [];
     };
@@ -414,7 +429,7 @@ export function Preview() {
     <div className="flex h-full flex-col">
       <div
         ref={wrapRef}
-        className="relative min-h-[340px] flex-1 overflow-hidden"
+        className="relative min-h-[340px] flex-1 overflow-hidden bg-background"
         // the backdrop is the bottom layer: the canvas is transparent, and what
         // shows through it is how a light blend mode becomes visible at all
         data-bg={bg.mode}
@@ -433,7 +448,6 @@ export function Preview() {
           canvas and the preview pans instead. So the overlays name their layer
           explicitly rather than relying on document order.
         */}
-        <div className="pointer-events-none absolute inset-0" style={backdropStyle(bg)} />
         <ReferenceLayer view={view} draggable={refOpen} />
         <canvas
           key={backend}
@@ -524,18 +538,3 @@ export function Preview() {
   );
 }
 
-/**
- * The preview backdrop. A checkerboard is the standard "this is transparent"
- * signal, and it is the one background where an additive effect reads correctly
- * — over solid black, adding light and covering with light look the same.
- */
-function backdropStyle(bg: { mode: 'grid' | 'solid'; color: string; size: number }): React.CSSProperties {
-  if (bg.mode === 'solid') return { background: bg.color };
-  // a quiet checker: enough to read as transparent, not enough to compete with
-  // the effect drawn on top of it
-  const light = `color-mix(in oklab, ${bg.color} 88%, white)`;
-  return {
-    background: `repeating-conic-gradient(${bg.color} 0% 25%, ${light} 0% 50%)`,
-    backgroundSize: `${bg.size * 2}px ${bg.size * 2}px`,
-  };
-}

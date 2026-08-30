@@ -569,24 +569,20 @@ export class WebGL2Engine {
 
     gl.enable(gl.BLEND);
     /*
-     * The light modes must not touch the DESTINATION ALPHA.
+     * Additive has to blend the alpha too, however wrong that looks.
      *
-     * `blendFunc(ONE, ONE)` blends alpha as well as colour, so an OPAQUE sprite
-     * — a glow drawn on black, which is exactly the asset "add" exists for —
-     * drove the canvas alpha to 1 across its whole quad. The canvas then
-     * composited as opaque over whatever was behind it, so the sprite's black
-     * background covered the scene and additive looked identical to normal.
-     * Measured before the fix: both modes returned [0,0,0,255] for the sprite's
-     * black area.
+     * The canvas is premultiplied, so the compositor reads its RGB as already
+     * scaled by alpha. Leaving dst alpha at 0 while RGB carries light is not a
+     * representable premultiplied colour, and the compositor throws the pixel
+     * away — measured: an additive emitter rendered NOTHING at all.
      *
-     * Keeping dst alpha (ZERO, ONE) leaves the canvas transparent where nothing
-     * opaque was drawn, so the browser composites `backdrop + light` — which is
-     * what additive means. Over the black preview it looks the same as it always
-     * did; over a scene reference it is finally right.
+     * So additive composites against whatever is inside this framebuffer, not
+     * against the page behind it. That is why the preview clears to its
+     * backdrop colour rather than to transparent (see `clearColor`): a light
+     * mode can only add to pixels that are actually here.
      */
-    if (p.blend === 'add') gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE);
-    else if (p.blend === 'screen')
-      gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_COLOR, gl.ZERO, gl.ONE);
+    if (p.blend === 'add') gl.blendFunc(gl.ONE, gl.ONE);
+    else if (p.blend === 'screen') gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_COLOR, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
     gl.bindVertexArray(this.renderVAOs[this.cur]!);

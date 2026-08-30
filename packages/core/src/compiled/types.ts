@@ -36,6 +36,16 @@ export interface CompiledParticlesHandle {
   /** Whether the canvas is cleared each frame (default true). */
   autoClear: boolean;
   /**
+   * What `autoClear` clears to, as straight (non-premultiplied) `[r,g,b,a]` in
+   * 0..1. Defaults to fully transparent.
+   *
+   * A light blend mode can only add to pixels that are IN this framebuffer, so
+   * clearing to the colour the effect will really play on is what makes `add`
+   * and `screen` show what they will actually do. Over a transparent clear
+   * there is nothing to add to.
+   */
+  clearColor: [number, number, number, number];
+  /**
    * Alive particle count. webgl2: synchronous readback on call (debug-tier);
    * webgpu: the §13.11 async counter readback, refreshed every 30 frames.
    */

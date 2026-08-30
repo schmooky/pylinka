@@ -496,25 +496,10 @@ export class WebGL2CompiledSim {
 
     gl.enable(gl.BLEND);
     const mode = this.system.blendMode;
-    /*
-     * The light modes must not touch the DESTINATION ALPHA.
-     *
-     * `blendFunc(ONE, ONE)` blends alpha as well as colour, so an OPAQUE sprite
-     * — a glow drawn on black, which is exactly the asset "add" exists for —
-     * drove the canvas alpha to 1 across its whole quad. The canvas then
-     * composited as opaque over whatever was behind it, so the sprite's black
-     * background covered the scene and additive looked identical to normal.
-     * Measured before the fix: both modes returned [0,0,0,255] for the sprite's
-     * black area.
-     *
-     * Keeping dst alpha (ZERO, ONE) leaves the canvas transparent where nothing
-     * opaque was drawn, so the browser composites `backdrop + light` — which is
-     * what additive means. Over the black preview it looks the same as it always
-     * did; over a scene reference it is finally right.
-     */
-    if (mode === 'add') gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE);
-    else if (mode === 'screen')
-      gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_COLOR, gl.ZERO, gl.ONE);
+    // additive blends alpha too — see webgl/engine.ts render() for why leaving
+    // the destination alpha alone makes the compositor discard the pixel
+    if (mode === 'add') gl.blendFunc(gl.ONE, gl.ONE);
+    else if (mode === 'screen') gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_COLOR, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
     gl.bindVertexArray(this.renderVAOs[this.cur]!);
@@ -668,6 +653,7 @@ export function createParticles(
   let destroyed = false;
   const handle: CompiledParticlesHandle = {
     autoClear: true,
+    clearColor: [0, 0, 0, 0] as [number, number, number, number],
     backendName: 'webgl2',
     get stats() {
       return sim.stats;
@@ -691,7 +677,9 @@ export function createParticles(
       sim.step(dt);
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (this.autoClear) {
-        gl.clearColor(0, 0, 0, 0);
+        const [cr, cg, cb, ca] = this.clearColor;
+        // premultiplied target — scale by alpha or the clear arrives washed out
+        gl.clearColor(cr * ca, cg * ca, cb * ca, ca);
         gl.clear(gl.COLOR_BUFFER_BIT);
       }
       const w = canvas.width * zoom;
