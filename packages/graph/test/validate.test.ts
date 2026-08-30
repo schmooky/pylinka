@@ -144,6 +144,39 @@ describe('validateGraph — §12.3', () => {
     expect(has(b, 'W101_CAPACITY_OVERFLOW')).toBe(true);
   });
 
+  /*
+   * Only `flow` used to be checked, though a repeating burst is the easier one
+   * to get wrong: bursts OVERLAP whenever the lifetime outlasts the interval,
+   * and everything past the pool is dropped in silence.
+   */
+  it('W101 — a repeating burst that overlaps itself', () => {
+    // 120 every 0.5s, alive 2s → four batches overlapping → 480
+    const b = minimalBundle({
+      capacity: 200,
+      emitter: { mode: 'burst', rate: 0, burst: { count: 120, interval: 0.5 } },
+    });
+    b.system.graph.nodes.find((n) => n.id === 'n3')!.values = { life: { t: 'f32', v: 2 } };
+    expect(has(b, 'W101_CAPACITY_OVERFLOW')).toBe(true);
+  });
+
+  it('W101 — quiet when the bursts do not overlap', () => {
+    // 120 every 2s, alive 0.5s → one batch at a time → 120 fits in 200
+    const b = minimalBundle({
+      capacity: 200,
+      emitter: { mode: 'burst', rate: 0, burst: { count: 120, interval: 2 } },
+    });
+    b.system.graph.nodes.find((n) => n.id === 'n3')!.values = { life: { t: 'f32', v: 0.5 } };
+    expect(has(b, 'W101_CAPACITY_OVERFLOW')).toBe(false);
+  });
+
+  it('W101 — a one-shot bigger than the pool', () => {
+    const b = minimalBundle({
+      capacity: 200,
+      emitter: { mode: 'once', rate: 0, burst: { count: 900, interval: 0 } },
+    });
+    expect(has(b, 'W101_CAPACITY_OVERFLOW')).toBe(true);
+  });
+
   it('W102 — high-impact node (warning)', () => {
     // synthesize a catalog with a live high-impact node
     const bigSchema: NodeSchema = {
