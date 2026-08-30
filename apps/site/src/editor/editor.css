@@ -120,6 +120,18 @@ input[type='range'] { accent-color: var(--color-foreground); }
   padding: 3px 6px;
   font-size: 11px;
 }
+/*
+ * The emitter strip scrolls when there are more tabs than room, and a scrollbar
+ * lands exactly on the line the active tab opens into — breaking the one edge
+ * the tabs exist to make. The strip still scrolls by wheel and trackpad.
+ */
+.tabstrip {
+  scrollbar-width: none;
+}
+.tabstrip::-webkit-scrollbar {
+  display: none;
+}
+
 /* hide number spinners */
 .num::-webkit-outer-spin-button, .num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 

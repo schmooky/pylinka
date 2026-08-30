@@ -47,18 +47,29 @@ export function Systems() {
   return (
     <div
       data-tour="emitters"
-      className="flex items-end gap-0.5 overflow-x-auto px-2 pt-1.5 text-xs"
+      className="tabstrip flex items-end gap-0.5 overflow-x-auto pr-2 pt-1.5 text-xs"
       style={{ background: 'var(--color-card)' }}>
+      {/* the line has to start at the very edge, or the first tab's corner
+          curves into nothing */}
+      <div className="w-2 shrink-0 border-b border-border" />
       {systems.map((sys) => {
         const active = sys.id === activeId;
         return (
           <div key={sys.id}
-            className={`group flex shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 py-1.5 ${
+            className={`group relative flex shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 py-1.5 ${
               active
                 ? 'border-border text-foreground'
                 : 'border-b border-transparent border-b-border text-muted-foreground hover:bg-accent/40'
             } ${sys.enabled ? '' : 'opacity-50'}`}
             style={active ? { background: 'var(--color-background)' } : undefined}>
+            {/*
+              The active tab met the line at a right angle, which reads as a box
+              parked on a rule rather than a tab opening into the canvas. These
+              flare its bottom corners outward with an inverse curve — the same
+              shape a browser tab uses — so the tab and the line are one edge.
+            */}
+            {active && <Flare side="left" />}
+            {active && <Flare side="right" />}
             <button title={sys.enabled ? 'Enabled — click to mute' : 'Muted — click to enable'}
               onClick={(e) => { e.stopPropagation(); toggleSystem(sys.id); }}
               className="h-1.5 w-1.5 shrink-0 rounded-full"
@@ -116,5 +127,34 @@ export function Systems() {
         Configure
       </button>
     </div>
+  );
+}
+
+/**
+ * One bottom corner of the active tab, curving outward into the line.
+ *
+ * Drawn with radial gradients rather than a border-radius, because the curve is
+ * CONCAVE: the fill is everything OUTSIDE a circle centred on the tab's corner,
+ * which no border-radius can express. The first gradient paints the 1px arc that
+ * the tab's own border continues along; the second fills the wedge below it in
+ * the canvas colour, so tab, curve and line are one edge.
+ */
+function Flare({ side }: { side: 'left' | 'right' }) {
+  const R = 6; // matches the tab's rounded-t-md, so the two curves agree
+  const at = side === 'left' ? 'top left' : 'top right';
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute bottom-0"
+      style={{
+        ...(side === 'left' ? { right: '100%' } : { left: '100%' }),
+        width: R,
+        height: R,
+        background: [
+          `radial-gradient(circle at ${at}, transparent ${R - 0.5}px, var(--color-border) ${R - 0.5}px, var(--color-border) ${R + 0.5}px, transparent ${R + 0.5}px)`,
+          `radial-gradient(circle at ${at}, transparent ${R}px, var(--color-background) ${R}px)`,
+        ].join(', '),
+      }}
+    />
   );
 }
