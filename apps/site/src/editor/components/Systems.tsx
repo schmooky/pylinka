@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useEditor } from '../store';
+import { TabMenu, type TabMenuTarget } from './TabMenu';
+import { TemplatePicker } from './TemplatePicker';
 
 /**
  * Emitter tabs.
@@ -13,14 +15,21 @@ export function Systems() {
   const systems = useEditor((s) => s.project.systems);
   const activeId = useEditor((s) => s.activeSystemId);
   const setActive = useEditor((s) => s.setActiveSystem);
-  const addSystem = useEditor((s) => s.addSystem);
   const removeSystem = useEditor((s) => s.removeSystem);
   const renameSystem = useEditor((s) => s.renameSystem);
   const toggleSystem = useEditor((s) => s.toggleSystem);
-  const duplicateSystem = useEditor((s) => s.duplicateSystem);
   const setConfigOpen = useEditor((s) => s.setConfigOpen);
   const setConfigSection = useEditor((s) => s.setConfigSection);
   const [editing, setEditing] = useState<string | null>(null);
+  const [menu, setMenu] = useState<TabMenuTarget | null>(null);
+  const [templates, setTemplates] = useState(false);
+
+  /** Right-click opens the strip's menu — on a tab, or on the empty stretch. */
+  const openMenu = (e: React.MouseEvent, systemId?: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ screen: { x: e.clientX, y: e.clientY }, ...(systemId ? { systemId } : {}) });
+  };
 
 
   const openConfig = (section: string) => {
@@ -38,7 +47,8 @@ export function Systems() {
         flush and use their own padding for breathing room instead.
       */
       className="tabstrip flex items-end overflow-x-auto pr-2 pt-1 text-xs"
-      style={{ background: 'var(--color-card)' }}>
+      style={{ background: 'var(--color-card)' }}
+      onContextMenu={(e) => openMenu(e)}>
       {/* the line has to start at the very edge, or the first tab's corner
           curves into nothing */}
       <div className="w-2 shrink-0 border-b border-border" />
@@ -59,7 +69,8 @@ export function Systems() {
               active
                 ? { background: 'var(--color-background)', borderColor: 'var(--color-border)' }
                 : { borderColor: 'transparent', borderBottomColor: 'var(--color-border)' }
-            }>
+            }
+            onContextMenu={(e) => openMenu(e, sys.id)}>
             {/*
               The active tab met the line at a right angle, which reads as a box
               parked on a rule rather than a tab opening into the canvas. These
@@ -89,10 +100,6 @@ export function Systems() {
                 {sys.name}
               </button>
             )}
-            <button
-              title="Duplicate this emitter — try a change on the copy and mute the original"
-              onClick={(e) => { e.stopPropagation(); duplicateSystem(sys.id); }}
-              className="text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100">⧉</button>
             {systems.length > 1 && (
               <button title="Remove emitter" onClick={() => removeSystem(sys.id)}
                 className="text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100">✕</button>
@@ -100,7 +107,9 @@ export function Systems() {
           </div>
         );
       })}
-      <button onClick={addSystem} title="Add an emitter"
+      <button
+        onClick={(e) => openMenu(e)}
+        title="New emitter — from a template, from the clipboard, or empty"
         className="shrink-0 rounded-t-md border-b border-border px-3 py-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         + Emitter
       </button>
@@ -120,6 +129,15 @@ export function Systems() {
         className="shrink-0 rounded-t-md border-b border-border px-3 py-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         Configure
       </button>
+      {menu && (
+        <TabMenu
+          target={menu}
+          onClose={() => setMenu(null)}
+          onRename={(id) => setEditing(id)}
+          onTemplates={() => setTemplates(true)}
+        />
+      )}
+      {templates && <TemplatePicker onClose={() => setTemplates(false)} />}
     </div>
   );
 }

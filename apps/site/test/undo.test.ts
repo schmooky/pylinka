@@ -13,7 +13,10 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useEditor } from '../src/editor/store';
-import { copyNodes } from '../src/editor/clipboard';
+import { copyNodes, emitterPayload } from '../src/editor/clipboard';
+import { EMITTER_TEMPLATES } from '../src/editor/templates';
+import { diagnose } from '../src/editor/diagnostics';
+import { autoLayout } from '../src/editor/layout';
 
 /**
  * Everything an undo step is supposed to restore. `updatedAt` is a timestamp
@@ -390,4 +393,35 @@ describe('copy, paste and duplicate', () => {
   });
 
   it('duplicating an emitter is one undo step', () => roundTrip(() => store().duplicateSystem('s1')));
+});
+
+describe('emitter templates', () => {
+  it('every template is a graph the validator accepts', () => {
+    for (const t of EMITTER_TEMPLATES) {
+      const system = { ...structuredClone(t.system), id: `t_${t.id}` };
+      const diags = diagnose(store().project, system);
+      expect(diags.errors, `${t.id}: ${[...diags.byNode.values()].flat().concat(diags.loose).map((d) => d.message).join(' | ')}`).toBe(0);
+    }
+  });
+
+  it('a template lands as a real emitter, in one undo step', () => {
+    const t = EMITTER_TEMPLATES[0]!;
+    const system = { ...structuredClone(t.system), id: `t_${t.id}` };
+    roundTrip(() => store().pasteEmitter(emitterPayload(system, autoLayout(system.graph))));
+  });
+
+  it('two of the same template do not collide on ids or names', () => {
+    const t = EMITTER_TEMPLATES[0]!;
+    const drop = () => {
+      const system = { ...structuredClone(t.system), id: `t_${t.id}` };
+      store().pasteEmitter(emitterPayload(system, autoLayout(system.graph)));
+    };
+    drop();
+    drop();
+    const systems = store().project.systems;
+    const ids = systems.flatMap((s) => s.graph.nodes.map((n) => n.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(new Set(systems.map((s) => s.id)).size).toBe(systems.length);
+    expect(new Set(systems.map((s) => s.name)).size).toBe(systems.length);
+  });
 });

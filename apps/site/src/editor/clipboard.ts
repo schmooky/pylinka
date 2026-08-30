@@ -41,6 +41,18 @@ interface EmitterPayload {
 
 export type ClipboardPayload = NodesPayload | EmitterPayload;
 
+/**
+ * An emitter payload built in code rather than copied — how a template becomes
+ * a real emitter. It goes through the same paste path as a copied one, so it
+ * gets the same id rewriting, naming and single undo step for free.
+ */
+export function emitterPayload(
+  system: System,
+  positions: Record<string, { x: number; y: number }>,
+): EmitterPayload {
+  return { tag: TAG, kind: 'emitter', system, params: [], positions };
+}
+
 /** Parse text off the clipboard, returning undefined for anything that is not ours. */
 export function parsePayload(text: string): ClipboardPayload | undefined {
   try {
