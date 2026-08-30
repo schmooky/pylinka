@@ -4,6 +4,7 @@ import type { Literal, PortType } from '@pylinka/graph';
 import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { useEditor } from '../store';
 import { NS_TINT } from '../nsMeta';
+import { useDiagnostics } from '../diagnostics';
 import { EaseControl } from './CurvePicker';
 
 const HEADER_H = 30;
@@ -116,6 +117,8 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
   const unbindKnob = useEditor((s) => s.unbindKnob);
   const toggleNodeDisabled = useEditor((s) => s.toggleNodeDisabled);
   const muted = useEditor((s) => s.project.disabledNodes?.includes(nodeId) ?? false);
+  const problems = useDiagnostics().byNode.get(nodeId) ?? [];
+  const worst = problems.some((d) => d.severity === 'error') ? 'error' : problems.length ? 'warning' : null;
 
   const connected = useMemo(() => {
     const set = new Set<string>();
@@ -141,7 +144,11 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
       style={{
         width: WIDTH,
         minHeight: bodyH,
-        borderColor: selected ? tint : 'var(--color-border)',
+        borderColor: worst === 'error'
+          ? 'var(--color-destructive)'
+          : selected
+            ? tint
+            : 'var(--color-border)',
         boxShadow: selected ? `0 0 0 1px ${tint}, 0 8px 24px -8px color-mix(in oklab, ${tint} 35%, transparent)` : undefined,
         opacity: muted ? 0.45 : 1,
         filter: muted ? 'grayscale(0.6)' : undefined,
@@ -160,6 +167,15 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
           onClick={() => toggleNodeDisabled(node.id)}
         />
         <span className="truncate font-medium">{schema.label}{muted ? ' (muted)' : ''}</span>
+        {/* the validator knows which node is wrong; this is where it says so */}
+        {worst !== null && (
+          <span
+            className="shrink-0 cursor-help text-[11px] leading-none"
+            style={{ color: worst === 'error' ? 'var(--color-destructive)' : 'var(--color-foreground)' }}
+            title={problems.map((d) => `${d.code}: ${d.message}`).join('\n\n')}>
+            {worst === 'error' ? '!' : '?'}
+          </span>
+        )}
         <code className="ml-auto text-[9px] text-muted-foreground opacity-60">{node.id}</code>
         <button
           className="nodrag -mr-1 hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-black/20 hover:text-foreground group-hover/node:flex"

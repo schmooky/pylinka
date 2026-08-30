@@ -20,6 +20,8 @@ import { CommentNode, NoteNode } from './components/AnnotationNodes';
 import { GraphMenu, type MenuTarget } from './components/GraphMenu';
 import { ConfigModal } from './components/ConfigModal';
 import { startTour } from './tour';
+import { useDiagnostics } from './diagnostics';
+import { portType } from './ports';
 import { Preview } from './components/Preview';
 import { Systems } from './components/Systems';
 import { ProjectsMenu } from './components/ProjectsMenu';
@@ -182,6 +184,25 @@ function EditorApp() {
     setRfNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === selectedNodeId })));
   }, [selectedNodeId, setRfNodes]);
 
+  const diags = useDiagnostics();
+
+  /**
+   * Refuse a wire whose ends do not agree on a type.
+   *
+   * The graph would take it and the compiler would reject it a moment later,
+   * which is a worse way to learn: the mistake is made, the preview goes red,
+   * and the message names a rule rather than the wire you just drew. React Flow
+   * greys the target out instead, so the wire simply will not land.
+   */
+  const isValidConnection = (c: Connection | RFEdge) => {
+    if (!c.source || !c.target || !c.sourceHandle || !c.targetHandle) return false;
+    if (c.source === c.target) return false; // a node cannot feed itself
+    const g = (project.systems.find((s) => s.id === activeSystemId) ?? project.systems[0]!).graph;
+    const from = portType(g, c.source, c.sourceHandle, 'out');
+    const to = portType(g, c.target, c.targetHandle, 'in');
+    return from !== undefined && to !== undefined && from === to;
+  };
+
   const onConnect = (c: Connection) => {
     if (c.source && c.target && c.sourceHandle && c.targetHandle)
       connect({ nodeId: c.source, portId: c.sourceHandle }, { nodeId: c.target, portId: c.targetHandle });
@@ -243,6 +264,7 @@ function EditorApp() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            isValidConnection={isValidConnection}
             onNodeDragStop={(_e, n) => {
               if (n.id.startsWith(FRAME_PREFIX)) updateFrame(n.id.slice(FRAME_PREFIX.length), { x: n.position.x, y: n.position.y });
               else if (n.id.startsWith(NOTE_PREFIX)) updateNote(n.id.slice(NOTE_PREFIX.length), { x: n.position.x, y: n.position.y });
@@ -274,6 +296,13 @@ function EditorApp() {
             come from a menu, nothing on screen says so — this is the one line
             that has to be there, and it steps aside while the menu is open.
           */}
+          {diags.loose.length > 0 && (
+            <div
+              className="pointer-events-none absolute inset-x-2 top-2 z-10 rounded-md border px-2 py-1.5 text-[10px]"
+              style={{ borderColor: 'color-mix(in oklab, var(--color-destructive) 40%, transparent)', background: 'color-mix(in oklab, var(--color-background) 88%, transparent)', color: 'var(--color-destructive)' }}>
+              {diags.loose.map((d) => d.message).join(' · ')}
+            </div>
+          )}
           {!menu && (
             <span className="pointer-events-none absolute bottom-2 right-3 z-10 text-[10px] text-muted-foreground/70">
               right-click for nodes
