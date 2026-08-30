@@ -44,6 +44,17 @@ export interface CompiledParticlesHandle {
   /** Reset the pool + scheduler (§11.5 restart). */
   restart(): void;
   /** Whether the canvas is cleared each frame (default true). */
+  /**
+   * How much world the canvas shows, live.
+   *
+   * `1` maps one world unit to one canvas PIXEL, so on a 2x-density display an
+   * effect authored at 100px covers 50 CSS px — pass `1 / devicePixelRatio` to
+   * make world units device-independent. Above 1 shows more world in the same
+   * canvas (zoom out), below 1 less (zoom in), and because it changes what the
+   * renderer draws rather than stretching a finished image, it stays sharp at
+   * any level. Emitter coordinates stay in canvas pixels.
+   */
+  zoom: number;
   autoClear: boolean;
   /**
    * What `autoClear` clears to, as straight (non-premultiplied) `[r,g,b,a]` in

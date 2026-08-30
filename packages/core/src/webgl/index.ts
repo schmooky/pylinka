@@ -139,6 +139,18 @@ export interface ParticlesHandle {
    * a full re-create (only pool capacity does) — recreate via createParticles.
    */
   apply(project: PylinkaProject): boolean;
+  /**
+   * How much world the canvas shows, live.
+   *
+   * `1` maps one world unit to one canvas PIXEL, so on a 2x-density display an
+   * effect authored at 100px covers 50 CSS px — pass `1 / devicePixelRatio` to
+   * make world units device-independent. Values above 1 show more world in the
+   * same canvas (zoom out), below 1 less (zoom in), and because it changes what
+   * the renderer draws rather than how a finished image is stretched, zooming
+   * this way stays sharp at any level. Emitter coordinates are still canvas
+   * pixels; they are converted for you.
+   */
+  zoom: number;
   /** Whether the canvas should be cleared each frame (default true). */
   autoClear: boolean;
   /**
@@ -298,7 +310,7 @@ export function createParticles(
   const maxDt = opts.maxDt ?? 0.05;
 
   const canvas = gl.canvas as HTMLCanvasElement;
-  const zoom = opts.zoom ?? 1;
+  let zoom = opts.zoom ?? 1;
   let ex = (canvas.width * zoom) / 2;
   let ey = (canvas.height * zoom) / 2;
   let px = ex;
@@ -372,6 +384,13 @@ export function createParticles(
       scheduler.setEmitter(sys.emitter);
       recomputeWind();
       return true;
+    },
+    get zoom() {
+      return zoom;
+    },
+    set zoom(z: number) {
+      // a zoom of 0 divides the world by nothing; ignore it rather than blanking
+      if (Number.isFinite(z) && z > 0) zoom = z;
     },
     aliveCount() {
       return engine.aliveCount();

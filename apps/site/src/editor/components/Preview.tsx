@@ -130,6 +130,36 @@ export function Preview() {
   const bgRef = useRef(bg);
   bgRef.current = bg;
   const backdropRef = useRef<ReturnType<typeof createBackdrop> | null>(null);
+  const dprRef = useRef(1);
+  /** the current canvas sizer, so a zoom step can re-run it */
+  const sizeRef = useRef<(() => void) | null>(null);
+  const viewZRef = useRef(1);
+  /**
+   * How many device pixels the canvas holds per CSS pixel of its own box.
+   *
+   * The preview zooms with a CSS transform, which magnifies a finished image:
+   * at 3x you were looking at a 1x render blown up, and it showed. The buffer
+   * grows with the zoom instead, so there are always at least as many pixels
+   * as the display asks for. Quantised to whole steps and capped, because this
+   * reallocates GPU buffers and a wheel gesture would otherwise do it sixty
+   * times a second, at 9x the area by the end of it.
+   */
+  const density = () => Math.min(3, Math.max(1, Math.ceil(viewZRef.current)));
+
+  /**
+   * World units per canvas pixel, pushed to the running handles.
+   *
+   * The buffer is `dpr x density` device pixels per CSS pixel, and this is the
+   * reciprocal, so one world unit is one CSS pixel of the canvas box however
+   * dense the buffer is underneath. That also fixes a size bug that had
+   * nothing to do with zoom: world units used to be DEVICE pixels, so an
+   * effect authored at 100px covered 100 CSS px on a 1x display and 50 on a
+   * Retina one — the same project, half the size, depending on the screen.
+   */
+  const applyZoom = () => {
+    const z = 1 / (dprRef.current * density());
+    for (const h of fxRef.current) h.zoom = z;
+  };
   // the choice lives in the preview store: the graph reads it too, to mark the
   // nodes the interpreted backend will ignore
   const backend = usePreview((s) => s.backend);
@@ -205,6 +235,7 @@ export function Preview() {
           });
           byId.set(sys.id, wh);
           h = wh;
+          wh.zoom = 1 / (dprRef.current * viewZRef.current);
         } else {
           // compiled path: the whole graph runs as generated GPU code —
           // animated atlases, emission masks, and sub-emitters all supported.
@@ -231,6 +262,7 @@ export function Preview() {
             onRecompile: flashRecompile,
           });
           byId.set(sys.id, ch);
+          ch.zoom = 1 / (dprRef.current * viewZRef.current);
           h = ch;
         }
         // the backdrop pass owns the clear — see backdrop.ts for why it has to
@@ -253,14 +285,26 @@ export function Preview() {
   // webgl2 and webgpu can't share an element).
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const size = () => {
-      canvas.width = Math.floor(canvas.clientWidth * dpr);
-      canvas.height = Math.floor(canvas.clientHeight * dpr);
+      // re-read the ratio every time: dragging the window to a display of a
+      // different density changes it, and a stale one renders soft
+      dprRef.current = Math.min(window.devicePixelRatio || 1, 2);
+      const px = dprRef.current * density();
+      const w = Math.floor(canvas.clientWidth * px);
+      const h = Math.floor(canvas.clientHeight * px);
+      if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      applyZoom();
     };
+    sizeRef.current = size;
     size();
     const ro = new ResizeObserver(size);
     ro.observe(canvas);
+    // ResizeObserver does not fire when only the DENSITY changes
+    const dprWatch = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    dprWatch.addEventListener('change', size);
 
     const init: Record<string, number> = {};
     for (const p of projRef.current.params) if (p.default.t === 'f32') init[p.name] = p.default.v;
@@ -343,6 +387,7 @@ export function Preview() {
     raf = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(raf);
+      dprWatch.removeEventListener('change', size);
       ro.disconnect();
       backdropRef.current?.destroy();
       backdropRef.current = null;
@@ -377,6 +422,17 @@ export function Preview() {
   }, [rev]);
 
   // client coords → canvas pixels (correct under the CSS zoom transform)
+  // the render loop reads the view through refs; the zoom also has to reach the
+  // handles, which is a write rather than a read
+  useEffect(() => {
+    const was = density();
+    viewZRef.current = view.z;
+    // crossing a density step is a buffer reallocation; anything else is just
+    // a different world scale
+    if (density() !== was) sizeRef.current?.();
+    else applyZoom();
+  }, [view.z]);
+
   const canvasPx = (e: { clientX: number; clientY: number }): [number, number] => {
     const c = canvasRef.current!;
     const r = c.getBoundingClientRect();

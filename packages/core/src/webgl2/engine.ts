@@ -609,7 +609,7 @@ export function createParticles(
   if (system === undefined) throw new Error('Project has no systems.');
 
   const canvas = gl.canvas as HTMLCanvasElement;
-  const zoom = opts.zoom ?? 1;
+  let zoom = opts.zoom ?? 1;
   const sizeScale = opts.sizeScale ?? 1;
   const maxDt = opts.maxDt ?? 0.05;
   const maskTable = buildMaskTable(opts.emissionMask);
@@ -694,6 +694,13 @@ export function createParticles(
         sim.clock.px = sim.clock.ex;
         sim.clock.py = sim.clock.ey;
       }
+    },
+    get zoom() {
+      return zoom;
+    },
+    set zoom(z: number) {
+      // a zoom of 0 divides the world by nothing; ignore it rather than blanking
+      if (Number.isFinite(z) && z > 0) zoom = z;
     },
     spawnBurst(count: number) {
       sim.clock.spawnBurst(count);

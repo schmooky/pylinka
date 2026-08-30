@@ -257,7 +257,8 @@ function trailSystem(g: SceneGeometry): System {
     emitter: { mode: 'flow', rate: 460, rateOverDistance: 0.9 },
     graph: graph(
       [
-        { id: 'n1', kind: 'shape.circle', values: { radius: f(g.orbRadius * 0.75) } },
+        // the trail is born across the orb's area, not on its outline
+        { id: 'n1', kind: 'shape.torus', values: { innerRadius: f(0), outerRadius: f(g.orbRadius * 0.75) } },
         { id: 'n2', kind: 'output.spawnPosition' },
         { id: 'n3', kind: 'gen.randomRange', values: { min: f(0.35), max: f(0.9) } },
         { id: 'n4', kind: 'output.initLife' },

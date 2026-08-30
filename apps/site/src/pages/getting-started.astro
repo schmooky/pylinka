@@ -40,9 +40,12 @@ fx.spawnBurst(300);</code></pre>
   <p>
     This entry point interprets the common node patterns into a fixed GPU model: spawn shape,
     random velocity and life, gravity, wind, drag, colour and scale over life, obstacles and
-    colliders. An effect that uses nodes outside that set still runs, and the extra nodes are
-    quietly ignored. Convenient right up until the moment you wonder why a node did nothing, so
-    reach for the compiled backends below once an effect gets serious.
+    colliders. An effect that uses nodes outside that set still runs, and the extra nodes do
+    nothing — the whole of <code>math.*</code> and <code>input.*</code> among them. Ask it what it
+    can run with <code>isInterpreted(kind)</code> or <code>unsupportedNodes(system)</code> from
+    <code>@pylinka/core/webgl</code>; the editor uses those to mark such nodes
+    <em>inert</em> while this backend is the one running. Reach for the compiled backends below
+    once an effect gets serious — they evaluate the graph and cover the whole catalog.
   </p>
 
   <h2>The pixi v8 path</h2>
