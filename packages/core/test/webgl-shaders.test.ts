@@ -117,3 +117,36 @@ describe('interpreted render shader — atlas playback', () => {
     expect(RENDER_VS).toContain('clamp(floor(tN * u_grid.x), 0.0, u_grid.x - 1.0)'); // once, no fps
   });
 });
+
+/**
+ * Spawn shapes live in one helper shared by both update shaders, so the two
+ * spawn paths cannot drift apart — they did, quietly, for four of the six
+ * shapes: only circle and rect were branched on and everything else fell
+ * through to a point.
+ */
+describe('interpreted shader — spawn shapes', () => {
+  it('branches on all six shape codes, in both shaders', () => {
+    for (const src of build()) {
+      expect(src).toContain('vec2 shapeOffset(float s, float t)');
+      for (const code of [1, 2, 3, 4, 5]) expect(src, `u_shape == ${code}`).toContain(`u_shape == ${code}`);
+      // the point is the fallthrough, and it returns its offset rather than zero
+      expect(src).toContain('return u_shapeA; // point, at its offset');
+    }
+  });
+
+  it('lays the burst ring out by spawn index where there is one', () => {
+    // the emit shader spawns into a numbered window, so the ring is even
+    expect(updateVs()).toContain('shapeOffset(s, rel / max(u_spawnCount, 1.0))');
+    // a sub-emitter spawns on parent deaths instead: no index, random angle
+    expect(updateVsSub()).toContain('shapeOffset(s, -1.0)');
+    // unless it is a death BURST, where the copy number spaces them out
+    expect(updateVsSub(undefined, true, 'death')).toContain('float(u_burstK) / max(float(burstN), 1.0)');
+  });
+
+  it('declares the two per-shape vectors in both shaders', () => {
+    for (const src of build()) {
+      expect(src).toContain('uniform vec2  u_shapeA');
+      expect(src).toContain('uniform vec2  u_shapeB');
+    }
+  });
+});

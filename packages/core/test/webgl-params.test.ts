@@ -576,3 +576,73 @@ describe('extractParams — a constant on a look port', () => {
     expect(p.rotFrom).toBe(0);
   });
 });
+
+/**
+ * Spawn shapes. The catalog offers six and the compiled backend implements all
+ * six; this one read circle and rectangle, so torus, burstRing and
+ * polygonalChain silently spawned at a point — you picked a shape and nothing
+ * changed — and `shape.point` dropped its own offset.
+ */
+describe('extractParams — every spawn shape', () => {
+  const withShape = (kind: string, values: Node['values']): System => ({
+    id: 's1', name: 'shape', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 },
+    graph: {
+      nodes: [
+        { id: 'sh', kind, values },
+        { id: 'sp', kind: 'output.spawnPosition' },
+        { id: 'li', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } },
+      ],
+      edges: [{ id: 'e', from: { nodeId: 'sh', portId: 'pos' }, to: { nodeId: 'sp', portId: 'pos' } }],
+    },
+  });
+
+  it('point carries its offset', () => {
+    const p = extractParams(withShape('shape.point', { offset: { t: 'vec2', v: [12, -34] } }), [], {});
+    expect(p.shape).toBe(0);
+    expect(p.shapeA).toEqual([12, -34]);
+  });
+
+  it('circle reads its radius', () => {
+    const p = extractParams(withShape('shape.circle', { radius: { t: 'f32', v: 25 } }), [], {});
+    expect(p.shape).toBe(1);
+    expect(p.shapeRadius).toBe(25);
+  });
+
+  it('rectangle reads its size', () => {
+    const p = extractParams(withShape('shape.rectangle', { size: { t: 'vec2', v: [40, 9] } }), [], {});
+    expect(p.shape).toBe(2);
+    expect(p.shapeSize).toEqual([40, 9]);
+  });
+
+  it('torus reads both radii, in order', () => {
+    const p = extractParams(
+      withShape('shape.torus', { innerRadius: { t: 'f32', v: 30 }, outerRadius: { t: 'f32', v: 90 } }),
+      [], {},
+    );
+    expect(p.shape).toBe(3);
+    expect(p.shapeA).toEqual([30, 90]);
+  });
+
+  it('burst ring reads its radius', () => {
+    const p = extractParams(withShape('shape.burstRing', { radius: { t: 'f32', v: 64 } }), [], {});
+    expect(p.shape).toBe(4);
+    expect(p.shapeRadius).toBe(64);
+  });
+
+  it('polygonal chain reads both ends', () => {
+    const p = extractParams(
+      withShape('shape.polygonalChain', { start: { t: 'vec2', v: [-50, 0] }, end: { t: 'vec2', v: [50, 20] } }),
+      [], {},
+    );
+    expect(p.shape).toBe(5);
+    expect(p.shapeA).toEqual([-50, 0]);
+    expect(p.shapeB).toEqual([50, 20]);
+  });
+
+  it('falls back to the catalog default, not an invented one', () => {
+    // shape.circle's schema default radius is 50; this file used to say 40
+    const p = extractParams(withShape('shape.circle', {}), [], {});
+    expect(p.shapeRadius).toBe(50);
+  });
+});

@@ -33,9 +33,14 @@ export interface EngineParams {
   velMax: [number, number];
   lifeMin: number;
   lifeMax: number;
-  shape: 0 | 1 | 2;
+  /** 0 point, 1 circle, 2 rect, 3 torus, 4 burstRing, 5 polygonal chain */
+  shape: 0 | 1 | 2 | 3 | 4 | 5;
   shapeRadius: number;
   shapeSize: [number, number];
+  /** per-shape: point offset | torus (inner, outer) | chain start */
+  shapeA: [number, number];
+  /** per-shape: chain end */
+  shapeB: [number, number];
   colorFrom: [number, number, number, number];
   colorTo: [number, number, number, number];
   colorEase: number;
@@ -226,8 +231,12 @@ export function extractParams(
     lifeMin: 1,
     lifeMax: 1.5,
     shape: 0,
-    shapeRadius: 40,
-    shapeSize: [80, 80],
+    // schema defaults, so a node with an empty port behaves the way the
+    // catalog says it does rather than the way this file used to guess
+    shapeRadius: 50,
+    shapeSize: [100, 100],
+    shapeA: [0, 0],
+    shapeB: [100, 0],
     colorFrom: [1, 1, 1, 1],
     colorTo: [1, 1, 1, 1],
     colorEase: 0,
@@ -250,13 +259,41 @@ export function extractParams(
     subOn: 'death',
   };
 
+  /**
+   * Spawn shape. All six the catalog offers, matching the compiled backend:
+   * only circle and rectangle used to be read, so torus, burstRing and
+   * polygonalChain silently spawned at a point — you picked a shape in the
+   * editor and nothing changed — and `shape.point`'s own offset was dropped.
+   */
   const shapeNode = source(byKind('output.spawnPosition')?.id, 'pos');
-  if (shapeNode?.kind === 'shape.circle') {
-    p.shape = 1;
-    p.shapeRadius = fk(shapeNode, 'radius', 40);
-  } else if (shapeNode?.kind === 'shape.rectangle') {
-    p.shape = 2;
-    p.shapeSize = v2(shapeNode.values?.size, [80, 80]);
+  switch (shapeNode?.kind) {
+    case 'shape.circle':
+      p.shape = 1;
+      p.shapeRadius = fk(shapeNode, 'radius', 50);
+      break;
+    case 'shape.rectangle':
+      p.shape = 2;
+      p.shapeSize = vk(shapeNode, 'size', [100, 100]);
+      break;
+    case 'shape.torus':
+      p.shape = 3;
+      p.shapeA = [fk(shapeNode, 'innerRadius', 20), fk(shapeNode, 'outerRadius', 50)];
+      break;
+    case 'shape.burstRing':
+      p.shape = 4;
+      p.shapeRadius = fk(shapeNode, 'radius', 50);
+      break;
+    case 'shape.polygonalChain':
+      p.shape = 5;
+      p.shapeA = vk(shapeNode, 'start', [0, 0]);
+      p.shapeB = vk(shapeNode, 'end', [100, 0]);
+      break;
+    case 'shape.point':
+      p.shape = 0;
+      p.shapeA = vk(shapeNode, 'offset', [0, 0]);
+      break;
+    default:
+      break;
   }
 
   /**

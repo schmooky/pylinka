@@ -413,6 +413,8 @@ export class WebGL2Engine {
     gl.uniform1i(u.get('u_shape')!, p.shape);
     gl.uniform1f(u.get('u_shapeR')!, p.shapeRadius);
     gl.uniform2f(u.get('u_shapeSize')!, p.shapeSize[0], p.shapeSize[1]);
+    gl.uniform2f(u.get('u_shapeA')!, p.shapeA[0], p.shapeA[1]);
+    gl.uniform2f(u.get('u_shapeB')!, p.shapeB[0], p.shapeB[1]);
 
     const pf = p.pointFields;
     gl.uniform1f(u.get('u_pfCount')!, Math.min(pf.length, 4));
@@ -650,6 +652,8 @@ const UPDATE_UNIFORMS = [
   'u_shape',
   'u_shapeR',
   'u_shapeSize',
+  'u_shapeA',
+  'u_shapeB',
   'u_pfCount',
   'u_pfA',
   'u_pfB',
