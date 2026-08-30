@@ -58,16 +58,22 @@ export function Systems() {
                 ? 'border-x border-t border-border text-foreground'
                 : 'border-x border-t border-transparent text-muted-foreground hover:bg-accent/40'
             } ${sys.enabled ? '' : 'opacity-50'}`}
-            style={
-              active
-                ? {
-                    background: 'var(--color-background)',
-                    // sit ON the strip's bottom border so the tab opens into the canvas
-                    marginBottom: -1,
-                    paddingBottom: 7,
-                  }
-                : { marginBottom: -1, paddingBottom: 6 }
-            }>
+            style={active ? { background: 'var(--color-background)' } : undefined}>
+            {/*
+              The strip's bottom border runs the full width and would draw a
+              line right under the active tab, cutting it off from the canvas it
+              is a handle on. This paints that one row back in the canvas colour
+              for exactly the tab's width. A negative margin got close and left a
+              hairline at fractional device pixel ratios; covering the row is
+              exact at any DPR.
+            */}
+            {active && (
+              <span
+                aria-hidden
+                className="absolute inset-x-0 h-px"
+                style={{ bottom: -1, background: 'var(--color-background)' }}
+              />
+            )}
             <button title={sys.enabled ? 'Enabled — click to mute' : 'Muted — click to enable'}
               onClick={(e) => { e.stopPropagation(); toggleSystem(sys.id); }}
               className="h-1.5 w-1.5 shrink-0 rounded-full"
@@ -105,8 +111,7 @@ export function Systems() {
         );
       })}
       <button onClick={addSystem} title="Add an emitter"
-        style={{ marginBottom: -1 }}
-        className="ml-1 shrink-0 rounded-t-md px-2.5 py-1.5 pb-[6px] text-muted-foreground hover:bg-accent/40 hover:text-foreground">
+        className="ml-1 shrink-0 rounded-t-md px-2.5 py-1.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         + Emitter
       </button>
       {/* per-emitter configuration — including where its particles come from —
@@ -114,8 +119,7 @@ export function Systems() {
       <button
         onClick={() => openConfig(`emitter:${activeId}`)}
         title="Configure this emitter"
-        style={{ marginBottom: -1 }}
-        className="ml-auto shrink-0 rounded-t-md px-2.5 py-1.5 pb-[6px] text-muted-foreground hover:bg-accent/40 hover:text-foreground">
+        className="ml-auto shrink-0 rounded-t-md px-2.5 py-1.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         Configure
       </button>
     </div>
