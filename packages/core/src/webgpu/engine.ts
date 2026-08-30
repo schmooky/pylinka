@@ -634,6 +634,8 @@ export async function createParticles(
   if (system === undefined) throw new Error('Project has no systems.');
 
   let zoom = opts.zoom ?? 1;
+  let viewX = 0;
+  let viewY = 0;
   const sizeScale = opts.sizeScale ?? 1;
   const maxDt = opts.maxDt ?? 0.05;
   const uploadable = await toUploadable(opts.atlas);
@@ -703,7 +705,9 @@ export async function createParticles(
       });
       const w = canvas.width * zoom;
       const h = canvas.height * zoom;
-      sim.draw(pass, 2 / w, -2 / h, -1, 1, sizeScale);
+      // the two translation arguments carry the view offset — a shifted
+      // window over the same particles, with no shader change
+      sim.draw(pass, 2 / w, -2 / h, -1 - (2 * viewX) / w, 1 + (2 * viewY) / h, sizeScale);
       pass.end();
       const wantStats = sim.maybeEncodeStats(encoder);
       device.queue.submit([encoder.finish()]);
@@ -711,11 +715,22 @@ export async function createParticles(
       sim.endFrame(dt);
     },
     setEmitter(x: number, y: number, teleport = false) {
-      sim.clock.ex = x * zoom;
-      sim.clock.ey = y * zoom;
+      // canvas pixels -> world, through the same mapping the renderer draws
+      // with, so a panned view does not drag the emitter with it
+      sim.clock.ex = x * zoom + viewX;
+      sim.clock.ey = y * zoom + viewY;
       if (teleport) {
         sim.clock.px = sim.clock.ex;
         sim.clock.py = sim.clock.ey;
+      }
+    },
+    get viewOffset(): [number, number] {
+      return [viewX, viewY];
+    },
+    set viewOffset(v: [number, number]) {
+      if (Number.isFinite(v[0]) && Number.isFinite(v[1])) {
+        viewX = v[0];
+        viewY = v[1];
       }
     },
     get zoom() {

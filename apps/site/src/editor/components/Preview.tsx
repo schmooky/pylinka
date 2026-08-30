@@ -100,9 +100,20 @@ export function Preview() {
   const toolRef = useRef(tool);
   toolRef.current = tool;
   const mouseRef = useRef<[number, number] | null>(null);
-  // preview view transform — a pure CSS zoom/pan of the canvas (no engine cost).
-  const [view, setView] = useState({ z: 1, x: 0, y: 0 });
-  const panRef = useRef<{ cx: number; cy: number; vx: number; vy: number } | null>(null);
+  /**
+   * The view, as the world point under the middle of the canvas plus a zoom.
+   *
+   * It used to be a CSS transform on the canvas element, which is the wrong
+   * place for both halves: zooming magnified a finished image, and panning sild
+   * the drawn area out of its own viewport and left an empty margin. Both go to
+   * the renderer now — `zoom` picks how much world the canvas shows, and
+   * `viewOffset` slides the window it shows it through — so the canvas element
+   * itself is never transformed. Storing the CENTRE rather than an offset is
+   * what makes zoom-about-a-point a two-line calculation.
+   */
+  const [view, setView] = useState({ z: 1, cx: 0, cy: 0 });
+  /** a drag in progress: where the pointer went down (screen) and where the view was (world) */
+  const panRef = useRef<{ sx: number; sy: number; wx: number; wy: number } | null>(null);
   // interactive spawn tester — spawn a burst on the ACTIVE emitter on demand
   // (the runtime API a dev calls: handle.spawnBurst(n)). Optionally at a click.
   const activeSystemId = useEditor((s) => s.activeSystemId);
@@ -131,34 +142,33 @@ export function Preview() {
   bgRef.current = bg;
   const backdropRef = useRef<ReturnType<typeof createBackdrop> | null>(null);
   const dprRef = useRef(1);
-  /** the current canvas sizer, so a zoom step can re-run it */
-  const sizeRef = useRef<(() => void) | null>(null);
-  const viewZRef = useRef(1);
-  /**
-   * How many device pixels the canvas holds per CSS pixel of its own box.
-   *
-   * The preview zooms with a CSS transform, which magnifies a finished image:
-   * at 3x you were looking at a 1x render blown up, and it showed. The buffer
-   * grows with the zoom instead, so there are always at least as many pixels
-   * as the display asks for. Quantised to whole steps and capped, because this
-   * reallocates GPU buffers and a wheel gesture would otherwise do it sixty
-   * times a second, at 9x the area by the end of it.
-   */
-  const density = () => Math.min(3, Math.max(1, Math.ceil(viewZRef.current)));
+  const viewRef = useRef({ z: 1, cx: 0, cy: 0 });
+  /** the loop is registered once; the converter it calls changes with the view */
+  const worldPxRef = useRef<(x: number, y: number) => [number, number]>(() => [0, 0]);
 
   /**
-   * World units per canvas pixel, pushed to the running handles.
+   * Push the view onto the running handles.
    *
-   * The buffer is `dpr x density` device pixels per CSS pixel, and this is the
-   * reciprocal, so one world unit is one CSS pixel of the canvas box however
-   * dense the buffer is underneath. That also fixes a size bug that had
-   * nothing to do with zoom: world units used to be DEVICE pixels, so an
-   * effect authored at 100px covered 100 CSS px on a 1x display and 50 on a
-   * Retina one — the same project, half the size, depending on the screen.
+   * `zoom` is world units per canvas PIXEL. The buffer holds `dpr` device
+   * pixels per CSS pixel, so `1 / (dpr * z)` makes one world unit one CSS
+   * pixel at zoom 1 — which also fixes a sizing bug that had nothing to do
+   * with the view: world units used to be DEVICE pixels, so an effect authored
+   * at 100px covered 100 CSS px on a 1x display and 50 on a Retina one.
+   *
+   * `viewOffset` is the top-left of the visible window, in world units. The
+   * canvas shows `size / z` world units, centred on the view.
    */
-  const applyZoom = () => {
-    const z = 1 / (dprRef.current * density());
-    for (const h of fxRef.current) h.zoom = z;
+  const applyView = () => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const { z, cx, cy } = viewRef.current;
+    const zoom = 1 / (dprRef.current * z);
+    const halfW = c.clientWidth / (2 * z);
+    const halfH = c.clientHeight / (2 * z);
+    for (const h of fxRef.current) {
+      h.zoom = zoom;
+      h.viewOffset = [cx - halfW, cy - halfH];
+    }
   };
   // the choice lives in the preview store: the graph reads it too, to mark the
   // nodes the interpreted backend will ignore
@@ -235,7 +245,7 @@ export function Preview() {
           });
           byId.set(sys.id, wh);
           h = wh;
-          wh.zoom = 1 / (dprRef.current * viewZRef.current);
+          applyView();
         } else {
           // compiled path: the whole graph runs as generated GPU code —
           // animated atlases, emission masks, and sub-emitters all supported.
@@ -262,7 +272,7 @@ export function Preview() {
             onRecompile: flashRecompile,
           });
           byId.set(sys.id, ch);
-          ch.zoom = 1 / (dprRef.current * viewZRef.current);
+          applyView();
           h = ch;
         }
         // the backdrop pass owns the clear — see backdrop.ts for why it has to
@@ -289,16 +299,16 @@ export function Preview() {
       // re-read the ratio every time: dragging the window to a display of a
       // different density changes it, and a stale one renders soft
       dprRef.current = Math.min(window.devicePixelRatio || 1, 2);
-      const px = dprRef.current * density();
-      const w = Math.floor(canvas.clientWidth * px);
-      const h = Math.floor(canvas.clientHeight * px);
+      const w = Math.floor(canvas.clientWidth * dprRef.current);
+      const h = Math.floor(canvas.clientHeight * dprRef.current);
       if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
         canvas.width = w;
         canvas.height = h;
       }
-      applyZoom();
+      // the visible window is measured from the canvas box, so a resize is a
+      // view change too
+      applyView();
     };
-    sizeRef.current = size;
     size();
     const ro = new ResizeObserver(size);
     ro.observe(canvas);
@@ -334,7 +344,7 @@ export function Preview() {
       if (handles.length) {
         let ex: number, ey: number;
         if (toolRef.current === 'follow' && mouseRef.current) [ex, ey] = mouseRef.current;
-        else { ex = canvas.width / 2; ey = canvas.height / 2; }
+        else [ex, ey] = worldPxRef.current(0, 0); // the world origin, wherever the view is
         const alive = 0;
         for (let i = 0; i < handles.length; i++) {
           const fx = handles[i]!;
@@ -343,11 +353,18 @@ export function Preview() {
           const sysId = fxSysRef.current[i];
           const path = sysId ? (projRef.current.systemPaths ?? {})[sysId] : null;
           if (path && path.points.length >= 2) {
-            const key = JSON.stringify(path) + canvas.width + 'x' + canvas.height;
+            const v = viewRef.current;
+            const key = `${JSON.stringify(path)}|${canvas.width}x${canvas.height}|${v.z}|${v.cx}|${v.cy}`;
             let entry = driversRef.current.get(sysId!);
             if (!entry || entry.key !== key) {
-              const pts = path.points.map(
-                (p) => [p[0] * canvas.width, p[1] * canvas.height] as [number, number],
+              // normalised 0..1 across the canvas AT ZOOM 1, converted to world
+              // and back through the current view — the trajectory belongs to
+              // the effect, so panning must not drag it
+              const pts = path.points.map((p) =>
+                worldPxRef.current(
+                  (p[0] - 0.5) * canvas.clientWidth,
+                  (p[1] - 0.5) * canvas.clientHeight,
+                ),
               );
               entry = {
                 key,
@@ -421,26 +438,47 @@ export function Preview() {
     }
   }, [rev]);
 
-  // client coords → canvas pixels (correct under the CSS zoom transform)
-  // the render loop reads the view through refs; the zoom also has to reach the
-  // handles, which is a write rather than a read
+  // the view is a render parameter now, so a change is a write to the handles
   useEffect(() => {
-    const was = density();
-    viewZRef.current = view.z;
-    // crossing a density step is a buffer reallocation; anything else is just
-    // a different world scale
-    if (density() !== was) sizeRef.current?.();
-    else applyZoom();
-  }, [view.z]);
+    viewRef.current = view;
+    applyView();
+  }, [view]);
 
+  /**
+   * Pointer → canvas pixels, which is what the runtime's `setEmitter` takes.
+   * It maps them to world through the same zoom and view offset the renderer
+   * draws with, so this stays a plain box measurement.
+   */
   const canvasPx = (e: { clientX: number; clientY: number }): [number, number] => {
     const c = canvasRef.current!;
     const r = c.getBoundingClientRect();
     return [((e.clientX - r.left) / r.width) * c.width, ((e.clientY - r.top) / r.height) * c.height];
   };
+
+  /**
+   * WORLD → canvas pixels, the inverse of what `setEmitter` will do with it.
+   *
+   * The emitter has to sit at a fixed point in the WORLD — otherwise panning
+   * drags the effect around with the window and the pan does nothing visible.
+   */
+  const worldPx = (wx: number, wy: number): [number, number] => {
+    const c = canvasRef.current!;
+    const { z, cx, cy } = viewRef.current;
+    const zoom = 1 / (dprRef.current * z);
+    return [(wx - (cx - c.clientWidth / (2 * z))) / zoom, (wy - (cy - c.clientHeight / (2 * z))) / zoom];
+  };
+  worldPxRef.current = worldPx;
+
   const onMove = (e: React.PointerEvent) => {
     if (panRef.current) {
-      setView((v) => ({ ...v, x: panRef.current!.vx + (e.clientX - panRef.current!.cx), y: panRef.current!.vy + (e.clientY - panRef.current!.cy) }));
+      // a drag of one CSS pixel moves the world by 1/z, in the opposite
+      // direction: dragging right brings what is left of the view into it
+      const p = panRef.current;
+      setView((v) => ({
+        ...v,
+        cx: p.wx - (e.clientX - p.sx) / v.z,
+        cy: p.wy - (e.clientY - p.sy) / v.z,
+      }));
       return;
     }
     if (toolRef.current === 'follow') mouseRef.current = canvasPx(e);
@@ -452,7 +490,7 @@ export function Preview() {
       return;
     }
     if (toolRef.current !== 'pan') return; // follow doesn't drag the view
-    panRef.current = { cx: e.clientX, cy: e.clientY, vx: view.x, vy: view.y };
+    panRef.current = { sx: e.clientX, sy: e.clientY, wx: view.cx, wy: view.cy };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
   const onPanUp = (e: React.PointerEvent) => {
@@ -476,14 +514,27 @@ export function Preview() {
       const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));
       setView((v) => {
         const nz = Math.min(8, Math.max(0.25, v.z * factor));
-        const k = nz / v.z;
-        return { z: nz, x: cx * (1 - k) + v.x * k, y: cy * (1 - k) + v.y * k };
+        // hold the world point under the cursor still: it sits `cx / z` world
+        // units from the centre before, and has to sit there after
+        return { z: nz, cx: v.cx + cx / v.z - cx / nz, cy: v.cy + cy / v.z - cy / nz };
       });
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
-  const fitView = () => setView({ z: 1, x: 0, y: 0 });
+  const fitView = () => setView({ z: 1, cx: 0, cy: 0 });
+
+  /**
+   * The same view as a CSS transform, for the DOM layers over the canvas.
+   *
+   * A layer that draws world point `w` at its own CSS offset `w` needs
+   * `scale(z)` about the centre plus a translation that puts `view.cx` there.
+   */
+  const cssView = {
+    z: view.z,
+    x: -view.cx * view.z,
+    y: -view.cy * view.z,
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -505,12 +556,22 @@ export function Preview() {
           canvas and the preview pans instead. So the overlays name their layer
           explicitly rather than relying on document order.
         */}
-        <ReferenceLayer view={view} draggable={refOpen} />
+        {/*
+          The reference image is a DOM element, so it does move with a CSS
+          transform — it is the one layer that has to, and the numbers come
+          from the same view the renderer got, so the two stay registered.
+        */}
+        <ReferenceLayer view={cssView} draggable={refOpen} />
         <canvas
           key={backend}
           ref={canvasRef}
           className="relative z-[1] block h-full w-full"
-          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, transformOrigin: 'center' }}
+          /*
+            No transform. Pan and zoom are render parameters on the handles
+            (`viewOffset` and `zoom`), so the canvas always covers its own box
+            at exactly its own resolution — a transformed canvas either
+            magnifies a finished image or slides its drawn area out of view.
+          */
         />
         <PathOverlay editing={pathEdit} />
         {pathEdit && (
@@ -552,7 +613,7 @@ export function Preview() {
         ))}
         <button
           onClick={fitView}
-          disabled={view.z === 1 && view.x === 0 && view.y === 0}
+          disabled={view.z === 1 && view.cx === 0 && view.cy === 0}
           title={`Fit — reset zoom & pan · ${Math.round(view.z * 100)}%`}
           aria-label="Fit"
           className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-muted-foreground hover:bg-accent/60 disabled:opacity-30 disabled:hover:bg-transparent">

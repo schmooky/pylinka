@@ -610,6 +610,8 @@ export function createParticles(
 
   const canvas = gl.canvas as HTMLCanvasElement;
   let zoom = opts.zoom ?? 1;
+  let viewX = 0;
+  let viewY = 0;
   const sizeScale = opts.sizeScale ?? 1;
   const maxDt = opts.maxDt ?? 0.05;
   const maskTable = buildMaskTable(opts.emissionMask);
@@ -685,14 +687,27 @@ export function createParticles(
       }
       const w = canvas.width * zoom;
       const h = canvas.height * zoom;
-      sim.draw(2 / w, -2 / h, -1, 1, sizeScale);
+      // the last two arguments are the clip-space translation, so the view
+      // offset rides along for free: no shader change, just a shifted window
+      sim.draw(2 / w, -2 / h, -1 - (2 * viewX) / w, 1 + (2 * viewY) / h, sizeScale);
     },
     setEmitter(x: number, y: number, teleport = false) {
-      sim.clock.ex = x * zoom;
-      sim.clock.ey = y * zoom;
+      // canvas pixels -> world, through the same mapping the renderer draws
+      // with, so a panned view does not drag the emitter with it
+      sim.clock.ex = x * zoom + viewX;
+      sim.clock.ey = y * zoom + viewY;
       if (teleport) {
         sim.clock.px = sim.clock.ex;
         sim.clock.py = sim.clock.ey;
+      }
+    },
+    get viewOffset(): [number, number] {
+      return [viewX, viewY];
+    },
+    set viewOffset(v: [number, number]) {
+      if (Number.isFinite(v[0]) && Number.isFinite(v[1])) {
+        viewX = v[0];
+        viewY = v[1];
       }
     },
     get zoom() {

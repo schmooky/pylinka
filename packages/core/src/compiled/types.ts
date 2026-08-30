@@ -55,6 +55,15 @@ export interface CompiledParticlesHandle {
    * any level. Emitter coordinates stay in canvas pixels.
    */
   zoom: number;
+  /**
+   * Slide the view without moving the effect, in world units.
+   *
+   * Panning by transforming the canvas ELEMENT moves finished pixels: the drawn
+   * area slides out of the viewport and leaves an empty margin, and it does not
+   * combine with a rendered zoom. This shifts the window the renderer draws
+   * through instead.
+   */
+  viewOffset: [number, number];
   autoClear: boolean;
   /**
    * What `autoClear` clears to, as straight (non-premultiplied) `[r,g,b,a]` in

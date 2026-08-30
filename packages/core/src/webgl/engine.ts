@@ -527,12 +527,13 @@ export class WebGL2Engine {
   }
 
   /** Draw the current state into the bound framebuffer at the given size. */
-  render(width: number, height: number, p: EngineParams): void {
+  render(width: number, height: number, p: EngineParams, viewX = 0, viewY = 0): void {
     if (this.lost || this.needsRebuild) return;
     const gl = this.gl;
     const u = this.uRender;
     gl.useProgram(this.renderProg);
     gl.uniform2f(u.get('u_resolution')!, width, height);
+    gl.uniform2f(u.get('u_viewOffset')!, viewX, viewY);
     gl.uniform4fv(u.get('u_colorFrom')!, p.colorFrom);
     gl.uniform4fv(u.get('u_colorTo')!, p.colorTo);
     gl.uniform1f(u.get('u_sizeFrom')!, p.sizeFrom * this.sizeScale);
@@ -678,6 +679,7 @@ const UPDATE_UNIFORMS = [
 ];
 const RENDER_UNIFORMS = [
   'u_resolution',
+  'u_viewOffset',
   'u_colorFrom',
   'u_colorTo',
   'u_sizeFrom',

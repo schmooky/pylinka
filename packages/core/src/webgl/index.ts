@@ -151,6 +151,15 @@ export interface ParticlesHandle {
    * pixels; they are converted for you.
    */
   zoom: number;
+  /**
+   * Slide the view without moving the effect, in world units.
+   *
+   * Panning by transforming the canvas ELEMENT moves finished pixels: the
+   * drawn area slides away from the viewport and leaves an empty margin, and
+   * it cannot be combined with a rendered zoom. This shifts the window the
+   * renderer draws through instead. `[0, 0]` is the default.
+   */
+  viewOffset: [number, number];
   /** Whether the canvas should be cleared each frame (default true). */
   autoClear: boolean;
   /**
@@ -311,6 +320,8 @@ export function createParticles(
 
   const canvas = gl.canvas as HTMLCanvasElement;
   let zoom = opts.zoom ?? 1;
+  let viewX = 0;
+  let viewY = 0;
   let ex = (canvas.width * zoom) / 2;
   let ey = (canvas.height * zoom) / 2;
   let px = ex;
@@ -339,14 +350,17 @@ export function createParticles(
         gl.clearColor(cr * ca, cg * ca, cb * ca, ca);
         gl.clear(gl.COLOR_BUFFER_BIT);
       }
-      engine.render(canvas.width * zoom, canvas.height * zoom, params);
+      engine.render(canvas.width * zoom, canvas.height * zoom, params, viewX, viewY);
 
       px = ex;
       py = ey;
     },
     setEmitter(x: number, y: number, teleport = false) {
-      ex = x * zoom;
-      ey = y * zoom;
+      // canvas pixels -> world, through the SAME mapping the renderer draws
+      // with: without the view offset, panning would drag the emitter along
+      // with the window instead of moving the window over it
+      ex = x * zoom + viewX;
+      ey = y * zoom + viewY;
       if (teleport) {
         px = ex;
         py = ey;
@@ -384,6 +398,15 @@ export function createParticles(
       scheduler.setEmitter(sys.emitter);
       recomputeWind();
       return true;
+    },
+    get viewOffset(): [number, number] {
+      return [viewX, viewY];
+    },
+    set viewOffset(v: [number, number]) {
+      if (Number.isFinite(v[0]) && Number.isFinite(v[1])) {
+        viewX = v[0];
+        viewY = v[1];
+      }
     },
     get zoom() {
       return zoom;

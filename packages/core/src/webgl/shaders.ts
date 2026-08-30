@@ -496,6 +496,12 @@ layout(location = 3) in float a_life;
 layout(location = 4) in float a_seed;    // [0,1) per particle
 
 uniform vec2  u_resolution;
+// Pans the view WITHOUT moving the effect: subtracted from world position, so
+// the same particles are drawn through a window that slid. An editor that
+// panned by transforming the canvas element instead was moving finished
+// pixels, which leaves the drawn area behind and cannot be combined with a
+// rendered zoom.
+uniform vec2  u_viewOffset;
 uniform vec4  u_colorFrom;
 uniform vec4  u_colorTo;
 uniform float u_sizeFrom;
@@ -556,7 +562,8 @@ void main() {
   float rs = sin(rot);
   vec2 off = a_corner * size;
   vec2 world = a_pos + vec2(off.x * rc - off.y * rs, off.x * rs + off.y * rc);
-  vec2 clip = vec2(world.x / u_resolution.x * 2.0 - 1.0, 1.0 - world.y / u_resolution.y * 2.0);
+  vec2 vp = world - u_viewOffset;
+  vec2 clip = vec2(vp.x / u_resolution.x * 2.0 - 1.0, 1.0 - vp.y / u_resolution.y * 2.0);
   gl_Position = vec4(clip, 0.0, 1.0);
 
   if (u_textured > 0.5) {
