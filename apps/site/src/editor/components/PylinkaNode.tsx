@@ -5,6 +5,8 @@ import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { useEditor } from '../store';
 import { NS_TINT } from '../nsMeta';
 import { useDiagnostics } from '../diagnostics';
+import { usePreview } from '../previewStore';
+import { isInterpreted } from '@pylinka/core/webgl';
 import { EaseControl } from './CurvePicker';
 
 const HEADER_H = 30;
@@ -117,6 +119,14 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
   const unbindKnob = useEditor((s) => s.unbindKnob);
   const toggleNodeDisabled = useEditor((s) => s.toggleNodeDisabled);
   const muted = useEditor((s) => s.project.disabledNodes?.includes(nodeId) ?? false);
+  /*
+   * The interpreted backend recognises node PATTERNS rather than evaluating the
+   * graph, so a kind it does not know contributes nothing — silently, until you
+   * notice the effect is wrong. Compiled backends run the whole catalog. Say
+   * which nodes are inert, and only while that backend is the one running.
+   */
+  const backend = usePreview((s) => s.backend);
+  const inert = backend === 'webgl' && node !== undefined && !isInterpreted(node.kind);
   const problems = useDiagnostics().byNode.get(nodeId) ?? [];
   const worst = problems.some((d) => d.severity === 'error') ? 'error' : problems.length ? 'warning' : null;
 
@@ -150,8 +160,8 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
             ? tint
             : 'var(--color-border)',
         boxShadow: selected ? `0 0 0 1px ${tint}, 0 8px 24px -8px color-mix(in oklab, ${tint} 35%, transparent)` : undefined,
-        opacity: muted ? 0.45 : 1,
-        filter: muted ? 'grayscale(0.6)' : undefined,
+        opacity: muted ? 0.45 : inert ? 0.7 : 1,
+        filter: muted ? 'grayscale(0.6)' : inert ? 'grayscale(0.5)' : undefined,
       }}>
       <div className="flex items-center gap-2 rounded-t-lg px-2.5 py-1.5"
         style={{
@@ -167,6 +177,17 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
           onClick={() => toggleNodeDisabled(node.id)}
         />
         <span className="truncate font-medium">{schema.label}{muted ? ' (muted)' : ''}</span>
+        {inert && (
+          <span
+            className="shrink-0 cursor-help rounded px-1 text-[9px] leading-[14px]"
+            style={{
+              color: 'var(--color-muted-foreground)',
+              background: 'var(--color-accent)',
+            }}
+            title={`The interpreted WebGL backend does not run ${schema.label} — it recognises node patterns rather than evaluating the graph, so this node has no effect on the preview. Switch the backend under the preview to WebGL2 or WebGPU, which run the whole catalog.`}>
+            inert
+          </span>
+        )}
         {/* the validator knows which node is wrong; this is where it says so */}
         {worst !== null && (
           <span

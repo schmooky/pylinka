@@ -9,7 +9,7 @@ import { createCompiledParticles, type CompiledParticlesHandle } from '@pylinka/
 import { createPathDriver, type PathDriver } from '@pylinka/core';
 import type { System } from '@pylinka/graph';
 import { useEditor } from '../store';
-import { usePreview } from '../previewStore';
+import { usePreview, type BackendChoice } from '../previewStore';
 import { frameSize, type EditorProject } from '../types';
 import { PathOverlay } from './PathOverlay';
 import { ReferenceLayer } from './ReferenceLayer';
@@ -60,18 +60,11 @@ export function effective(proj: EditorProject): EditorProject {
 /** Both engines expose the same driving surface — this is the slice we use. */
 type AnyHandle = ParticlesHandle | CompiledParticlesHandle;
 
-type BackendChoice = 'webgl' | 'webgpu' | 'webgl2';
-const BACKEND_KEY = 'pylinka.editor.backend';
 const BACKEND_LABEL: Record<BackendChoice, string> = {
   webgl: 'WebGL · interpreted',
   webgpu: 'WebGPU · compiled',
   webgl2: 'WebGL2 · compiled',
 };
-
-function initialBackend(): BackendChoice {
-  const v = typeof localStorage !== 'undefined' ? localStorage.getItem(BACKEND_KEY) : null;
-  return v === 'webgpu' || v === 'webgl2' ? v : 'webgl';
-}
 
 /** The single active pointer tool for the preview. Scroll always zooms; Fit resets. */
 type Tool = 'pan' | 'follow' | 'spawn';
@@ -137,7 +130,10 @@ export function Preview() {
   const bgRef = useRef(bg);
   bgRef.current = bg;
   const backdropRef = useRef<ReturnType<typeof createBackdrop> | null>(null);
-  const [backend, setBackend] = useState<BackendChoice>(initialBackend);
+  // the choice lives in the preview store: the graph reads it too, to mark the
+  // nodes the interpreted backend will ignore
+  const backend = usePreview((s) => s.backend);
+  const setBackend = usePreview((s) => s.setBackend);
   const backendRef = useRef(backend);
   backendRef.current = backend;
   const [recompiled, setRecompiled] = useState('');
@@ -256,7 +252,6 @@ export function Preview() {
   // FRESH element comes up (a canvas can only ever hold one context type:
   // webgl2 and webgpu can't share an element).
   useEffect(() => {
-    localStorage.setItem(BACKEND_KEY, backend);
     const canvas = canvasRef.current!;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const size = () => {

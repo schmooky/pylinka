@@ -247,6 +247,7 @@ export interface AtlasOptions {
 
 export { extractParams, parseColor, type EngineParams, type KnobValues } from './params.js';
 export { WebGL2Engine } from './engine.js';
+export { INTERPRETED_KINDS, isInterpreted, unsupportedNodes } from './support.js';
 
 /** Handle → engine, so a sub-emitter can reach its parent's GPU buffers. */
 const engineOf = new WeakMap<ParticlesHandle, WebGL2Engine>();

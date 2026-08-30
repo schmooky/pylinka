@@ -8,7 +8,29 @@
  */
 import { create } from 'zustand';
 
+/** Which simulation backend the preview runs. Persisted per browser. */
+export type BackendChoice = 'webgl' | 'webgpu' | 'webgl2';
+const BACKEND_KEY = 'pylinka.editor.backend';
+
+function initialBackend(): BackendChoice {
+  try {
+    const v = localStorage.getItem(BACKEND_KEY);
+    if (v === 'webgl' || v === 'webgpu' || v === 'webgl2') return v;
+  } catch {
+    /* no storage — the default is fine */
+  }
+  return 'webgl';
+}
+
 interface PreviewState {
+  /**
+   * The running backend. It lives here rather than inside the preview because
+   * the GRAPH needs it too: the interpreted backend recognises node patterns
+   * instead of evaluating the graph, so which nodes are inert depends on this,
+   * and a node has to be able to say so.
+   */
+  backend: BackendChoice;
+  setBackend(b: BackendChoice): void;
   /** live knob values by NAME (falls back to each knob's default) */
   knobs: Record<string, number>;
   /** the Emitter tab's "draw trajectory" mode — the preview overlays a spline editor */
@@ -22,6 +44,15 @@ interface PreviewState {
 }
 
 export const usePreview = create<PreviewState>((set, get) => ({
+  backend: initialBackend(),
+  setBackend: (backend) => {
+    set({ backend });
+    try {
+      localStorage.setItem(BACKEND_KEY, backend);
+    } catch {
+      /* the choice just will not survive a reload */
+    }
+  },
   knobs: {},
   pathEdit: false,
   apply: () => {},
