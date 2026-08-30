@@ -51,7 +51,7 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
           </div>
           <div className="mb-3 flex flex-wrap items-center gap-1.5">
             <select
-              className="sel"
+              className="sel sel-wide"
               value={parentId}
               onChange={(e) => setSubParent(activeId, e.target.value || null)}>
               <option value="">the cursor / this emitter</option>
@@ -63,7 +63,7 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
             </select>
             {parentId !== '' && (
               <select
-                className="sel"
+                className="sel sel-wide"
                 value={trigger}
                 title="Which moment in the parent particle's life spawns one of these"
                 onChange={(e) => setSubTrigger(e.target.value as 'death' | 'birth')}>

@@ -164,7 +164,7 @@ export function ConfigModal() {
               <Group title={sys.name} hint="Spawning, where particles are born, and how this emitter moves.">
                 <Field label="blend mode">
                   <select
-                    className="sel"
+                    className="sel sel-wide"
                     value={sys.blendMode}
                     onChange={(e) => setActiveBlend(e.target.value as typeof sys.blendMode)}>
                     <option value="normal">normal</option>

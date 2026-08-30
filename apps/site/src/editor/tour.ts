@@ -11,7 +11,8 @@
  * skipped instead of throwing.
  */
 import { driver, type DriveStep } from 'driver.js';
-import 'driver.js/dist/driver.css';
+// driver.css is imported from editor.css, ahead of the overrides that darken it
+// — imported here it would load after them and win, leaving a white card.
 
 const STEPS: { anchor?: string; title: string; text: string }[] = [
   {

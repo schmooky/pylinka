@@ -457,7 +457,7 @@ export function Preview() {
         Tools sit under the canvas rather than floating over it: they were
         covering the very thing they act on, and a bar has room for labels.
       */}
-      <div className="flex items-center gap-1 border-t border-border px-2 py-1.5 text-xs">
+      <div data-tour="preview-tools" className="flex items-center gap-1 border-t border-border px-2 py-1.5 text-xs">
         {TOOLS.map((tl) => (
           <button
             key={tl.id}

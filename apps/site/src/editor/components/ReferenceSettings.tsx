@@ -24,8 +24,7 @@ export function ReferenceSettings() {
       <label className="flex items-center gap-3">
         <span className="w-24 shrink-0 text-muted-foreground">image</span>
         <select
-          className="sel"
-          style={{ maxWidth: 260 }}
+          className="sel sel-wide"
           value={ref.id ?? ''}
           onChange={(e) => setReference({ id: e.target.value || null })}>
           <option value="">— none —</option>

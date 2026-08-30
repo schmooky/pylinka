@@ -4,6 +4,7 @@
  * sticky note with the recipe's one-liner — so a forked recipe explains itself.
  */
 import { getSchema, V1_CATALOG, type Graph, type PylinkaProject } from '@pylinka/graph';
+import { NS_TINT } from './nsMeta';
 import type { Annotations, CommentFrame, StickyNote } from './types';
 
 /**
@@ -26,6 +27,9 @@ export const NODE_W = 210;
 /** Rendered height of a PylinkaNode (mirror of the component's row constants;
  *  the `ease` structural row is taller because it draws its curve inline). */
 export function estimateNodeHeight(kind: string): number {
+  // a knob draws its own face — header, scrub readout, output row — rather than
+  // a row per port, so the generic sum would put a frame's edge through it
+  if (kind === 'param.ref') return 96;
   const s = getSchema(V1_CATALOG, kind);
   if (!s) return 80;
   const structuralH = s.structural.reduce((a, sp) => a + (sp.key === 'ease' ? 56 : 30), 0);
@@ -69,10 +73,15 @@ function groupOfOutput(kind: string): 'spawn' | 'forces' | 'look' | undefined {
   return undefined;
 }
 
+/**
+ * A generated frame borrows the tint of the family it is wrapped around, so a
+ * group and the nodes inside it agree at a glance rather than being two
+ * unrelated colour schemes stacked on each other.
+ */
 const GROUP_META: Record<'spawn' | 'forces' | 'look', { title: string; color: string }> = {
-  spawn: { title: 'Spawn — where & how particles are born', color: 'oklch(0.82 0 0)' },
-  forces: { title: 'Forces — motion while alive', color: 'oklch(0.66 0 0)' },
-  look: { title: 'Look — color & size over life', color: 'oklch(0.50 0 0)' },
+  spawn: { title: 'Spawn — where & how particles are born', color: NS_TINT.shape! },
+  forces: { title: 'Forces — motion while alive', color: NS_TINT.field! },
+  look: { title: 'Look — color & size over life', color: NS_TINT.gen! },
 };
 
 let annId = 0;
