@@ -149,6 +149,8 @@ export function Preview() {
   const viewRef = useRef({ z: 1, cx: 0, cy: 0 });
   /** the pixi path, when a compiled backend is running; null on the raw one */
   const stageRef = useRef<PixiStage | null>(null);
+  /** bumped by every recreate; an older run that finishes later throws its work away */
+  const genRef = useRef(0);
   /** the loop is registered once; the converter it calls changes with the view */
   const worldPxRef = useRef<(x: number, y: number) => [number, number]>(() => [0, 0]);
 
@@ -205,6 +207,19 @@ export function Preview() {
   const recreate = async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    /*
+     * Only the newest build may land.
+     *
+     * This is async — it loads atlases and masks, and on the pixi path it
+     * builds a whole Application — and it is called from several places, one
+     * of which is every graph edit that cannot be applied live. Two overlapping
+     * runs would BOTH finish, and only the later assignment is remembered: the
+     * earlier set is never destroyed, so its GPU buffers stay allocated and —
+     * on the pixi path — a second renderer keeps drawing into the same canvas.
+     * A leak and a flicker at once.
+     */
+    const gen = ++genRef.current;
+    const stale = () => gen !== genRef.current;
     for (const h of fxRef.current) h.destroy();
     fxRef.current = [];
     stageRef.current?.destroy();
@@ -231,8 +246,9 @@ export function Preview() {
           /* texture/mask failed to load → soft sprite / analytic shape */
         }
       }
+      if (stale()) return;
       try {
-        stageRef.current = await createPixiStage({
+        const built = await createPixiStage({
           canvas,
           project: effective(proj),
           backend: backendRef.current,
@@ -240,6 +256,12 @@ export function Preview() {
           masks,
           backdrop: bgRef.current,
         });
+        // a newer build (or an unmount) started while this one was loading
+        if (stale()) {
+          built.destroy();
+          return;
+        }
+        stageRef.current = built;
         stageRef.current.resize(canvas.clientWidth, canvas.clientHeight, dprRef.current);
         fxSysRef.current = stageRef.current.order;
         for (const [n, v] of Object.entries(usePreview.getState().knobs)) {
@@ -276,6 +298,11 @@ export function Preview() {
     const handles: AnyHandle[] = [];
     const sysIds: string[] = [];
     const chosen = backendRef.current;
+    /** abandon a superseded build, taking whatever it managed to create with it */
+    const abandon = () => {
+      for (const h of handles) h.destroy();
+      handles.length = 0;
+    };
     for (let i = 0; i < ordered.length; i++) {
       const sys = ordered[i]!;
       let atlas: AtlasOptions | undefined;
@@ -286,6 +313,7 @@ export function Preview() {
       } catch {
         /* texture/mask failed to load → soft sprite / analytic shape */
       }
+      if (stale()) return abandon();
       const parId = parentOf(sys.id);
       const subParent = parId ? byId.get(parId) : undefined;
       try {
@@ -339,6 +367,7 @@ export function Preview() {
         setError(String(e));
       }
     }
+    if (stale()) return abandon();
     fxRef.current = handles;
     fxSysRef.current = sysIds;
   };
@@ -525,6 +554,10 @@ export function Preview() {
       fxRef.current = [];
       stageRef.current?.destroy();
       stageRef.current = null;
+      // anything still loading belongs to a preview that no longer exists
+      genRef.current++;
+      // and the store must not keep a closure over destroyed handles
+      usePreview.getState().setApply(() => {});
     };
   }, [backend]);
 
@@ -540,13 +573,20 @@ export function Preview() {
   // change / after a failed create, so an invalid edit can be edited back out)
   useEffect(() => {
     const handles = fxRef.current;
-    if (!handles.length) {
+    const stage = stageRef.current;
+    /*
+     * Nothing built yet? Build it. The pixi path keeps its systems in the
+     * stage rather than in `fxRef`, so testing only the handles meant every
+     * value edit on a compiled backend rebuilt the entire renderer instead of
+     * applying — a pixi Application, a GPU context and every pipeline, per
+     * slider tick.
+     */
+    if (!handles.length && stage === null) {
       if (project.systems.some((s) => s.enabled)) void recreate();
       return;
     }
     const eff = effective(project);
     try {
-      const stage = stageRef.current;
       if (stage !== null) {
         if (!stage.apply(eff)) void recreate();
         return;
