@@ -518,3 +518,61 @@ describe('extractParams — lifetime from a knob', () => {
     expect(p.lifeMax).toBe(4);
   });
 });
+
+/**
+ * The look ports, when a ramp is not what is behind them.
+ *
+ * Size, alpha and rotation were read from `gen.*OverLife` nodes only. A
+ * constant on the port — a literal, or a knob a game drives at runtime — was
+ * ignored, so a knob-driven size came out at the 8px default no matter what
+ * the knob said. A constant is a ramp that does not move.
+ */
+describe('extractParams — a constant on a look port', () => {
+  const look = (kind: string, port: string, knobId: string): System => ({
+    id: 's1', name: 'look', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 },
+    graph: {
+      nodes: [
+        { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } },
+        { id: 'w', kind, knobBindings: { [port]: knobId } },
+      ],
+      edges: [],
+    },
+  });
+  /** One f32 knob. Its DEFAULT is deliberately 0 — the live value is what the
+   *  test asserts on, so a pass cannot come from the default by accident. */
+  const knob = (name: string): ParamDef[] => [
+    { id: 'p1', name, type: 'f32', min: 0, max: 100, scale: 'linear', default: { t: 'f32', v: 0 } },
+  ];
+
+  it('takes size from a knob on output.writeScale', () => {
+    const p = extractParams(look('output.writeScale', 'scale', 'p1'), knob('size'), { size: 3 });
+    expect(p.sizeFrom).toBe(24); // 3 x the 8px base sprite
+    expect(p.sizeTo).toBe(24);
+  });
+
+  it('takes alpha from a knob on output.writeAlpha', () => {
+    const p = extractParams(look('output.writeAlpha', 'alpha', 'p1'), knob('fade'), { fade: 0.25 });
+    expect(p.alphaFrom).toBe(0.25);
+    expect(p.alphaTo).toBe(0.25);
+  });
+
+  it('holds an angle from a knob on output.writeRotation', () => {
+    const p = extractParams(look('output.writeRotation', 'rot', 'p1'), knob('tilt'), { tilt: 1.5 });
+    expect(p.rotFrom).toBe(1.5);
+    expect(p.rotTo).toBe(1.5);
+  });
+
+  it('leaves them alone when the output is not there at all', () => {
+    const bare: System = {
+      id: 's1', name: 'bare', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+      emitter: { mode: 'flow', rate: 10 },
+      graph: { nodes: [{ id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } }], edges: [] },
+    };
+    const p = extractParams(bare, [], {});
+    expect(p.sizeTo).toBe(p.sizeFrom);
+    expect(p.alphaFrom).toBe(1);
+    expect(p.alphaTo).toBe(1);
+    expect(p.rotFrom).toBe(0);
+  });
+});

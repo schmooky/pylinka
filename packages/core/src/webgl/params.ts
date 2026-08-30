@@ -436,10 +436,18 @@ export function extractParams(
     (wiredScale?.kind === 'gen.numberOverLife' || wiredScale?.kind === 'gen.curveOverLife'
       ? wiredScale
       : undefined);
+  const scaleOut = byKind('output.writeScale');
   if (scaleNode) {
     p.sizeFrom = fk(scaleNode, 'from', 1) * 8;
     p.sizeTo = fk(scaleNode, 'to', 0) * 8;
     p.sizeEase = easeFor(scaleNode, EASE_CH_SIZE);
+  } else if (scaleOut !== undefined) {
+    // Not a ramp: a literal or a knob on the port itself. A constant size is a
+    // ramp that does not move, and reading only the ramp kinds meant a size
+    // driven by a knob was ignored and every particle came out 8px.
+    const v = fk(scaleOut, 'scale', 1) * 8;
+    p.sizeFrom = v;
+    p.sizeTo = v;
   }
 
   // Alpha ramp: gen.alphaOverLife anywhere, else whatever ramp feeds
@@ -450,10 +458,15 @@ export function extractParams(
     (wiredAlpha?.kind === 'gen.numberOverLife' || wiredAlpha?.kind === 'gen.curveOverLife'
       ? wiredAlpha
       : undefined);
+  const alphaOut = byKind('output.writeAlpha');
   if (alphaNode) {
     p.alphaFrom = fk(alphaNode, 'from', 1);
     p.alphaTo = fk(alphaNode, 'to', 0);
     p.alphaEase = easeFor(alphaNode, EASE_CH_ALPHA);
+  } else if (alphaOut !== undefined) {
+    const v = fk(alphaOut, 'alpha', 1);
+    p.alphaFrom = v;
+    p.alphaTo = v;
   }
 
   // ---- rotation ------------------------------------------------------------
@@ -473,10 +486,16 @@ export function extractParams(
     (wiredRot?.kind === 'gen.numberOverLife' || wiredRot?.kind === 'gen.curveOverLife'
       ? wiredRot
       : undefined);
+  const rotOut = byKind('output.writeRotation');
   if (rotRamp) {
     p.rotFrom = fk(rotRamp, 'from', 0);
     p.rotTo = fk(rotRamp, 'to', 0);
     p.rotEase = easeFor(rotRamp, EASE_CH_ROT);
+  } else if (rotOut !== undefined) {
+    // a held angle, knob included — `angleRange` also follows a math.radians hop
+    const [a, b] = angleRange(rotOut, 'rot', [0, 0]);
+    p.rotFrom = a;
+    p.rotTo = b;
   }
 
   const burstNode = byKind('output.deathBurst');
