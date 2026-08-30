@@ -29,11 +29,14 @@ function readLib(): LibEntry[] {
   return [];
 }
 
-function writeLib(lib: LibEntry[]) {
+/** Returns whether the write landed — the caller must not claim a save it did not get. */
+function writeLib(lib: LibEntry[]): boolean {
   try {
     localStorage.setItem(LIB_KEY, JSON.stringify(lib));
+    return true;
   } catch (e) {
     alert('Could not save to the project library (storage full?): ' + (e as Error).message);
+    return false;
   }
 }
 
@@ -45,6 +48,7 @@ export function ProjectsMenu() {
   const projectName = useEditor((s) => s.project.name);
   const setConfigOpen = useEditor((s) => s.setConfigOpen);
   const setConfigSection = useEditor((s) => s.setConfigSection);
+  const markSaved = useEditor((s) => s.markSaved);
   const [open, setOpen] = useState(false);
   const [lib, setLib] = useState<LibEntry[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -65,7 +69,7 @@ export function ProjectsMenu() {
     const p = snapshot();
     const entry: LibEntry = { id: p.id, name: p.name, updatedAt: new Date().toISOString(), data: p };
     const next = [entry, ...readLib().filter((e) => e.id !== p.id)].slice(0, 30);
-    writeLib(next);
+    if (writeLib(next)) markSaved();
     setLib(next);
   };
 
@@ -88,7 +92,8 @@ export function ProjectsMenu() {
     setOpen(false);
   };
 
-  // export stripped of comment frames / sticky notes (the header Export keeps them)
+  // export stripped of comment frames / sticky notes — they are notes to the
+  // person editing, not part of the effect a game loads
   const exportWithoutNotes = () => {
     const p = snapshot();
     delete p.annotations;
@@ -98,6 +103,9 @@ export function ProjectsMenu() {
     a.download = `${(p.name || 'effect').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.pylinka.json`;
     a.click();
     URL.revokeObjectURL(a.href);
+    // a file on disk outlives this browser, so it closes the same gap the
+    // library does — the header should stop saying the work is unsaved
+    markSaved();
     setOpen(false);
   };
 

@@ -303,6 +303,26 @@ interface EditorState {
   setReference(patch: Partial<ReferenceSettings>): void;
   /** patch the preview's backdrop (grid or solid, and its colour) */
   setPreviewBackground(patch: Partial<PreviewBackground>): void;
+  // saving
+  /**
+   * Why the last autosave failed, or null. Autosave writes the working copy on
+   * every edit; when it starts throwing (a full quota, a browser with storage
+   * disabled) the work only exists in this tab, and closing it loses the lot.
+   */
+  saveError: string | null;
+  /**
+   * Edits since the last time this project was written somewhere that outlives
+   * the working copy — the library, or a file.
+   *
+   * This is NOT "unsaved" in the usual sense: the working copy is written on
+   * every edit and comes back on reload. It is the gap between "this browser
+   * still has it" and "I could open it again from somewhere else".
+   */
+  dirty: boolean;
+  /** when that last real save happened (ISO), or null if it never has */
+  savedAt: string | null;
+  /** the project was written to the library or a file — the gap is closed */
+  markSaved(): void;
   // undo / redo
   /** how many steps are on each stack — the header buttons read these */
   past: number;
@@ -339,13 +359,31 @@ const COALESCE_MS = 700;
 
 const initial = load();
 
-function persist(project: EditorProject, positions: Record<string, XY>, activeSystemId: string) {
+/**
+ * Write the working copy to localStorage, and SAY whether it worked.
+ *
+ * This used to swallow the failure. That is the one case where the editor is
+ * genuinely lying: textures and reference images are base64 inside the project,
+ * so a few sprite sheets can push past the ~5MB origin quota, and every write
+ * from then on throws QuotaExceededError. The editor kept looking fine, and the
+ * work was gone at the next reload. Returns the message, or null on success.
+ */
+function persist(
+  project: EditorProject,
+  positions: Record<string, XY>,
+  activeSystemId: string,
+): string | null {
   const out = structuredClone(project);
   out.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: positions, activeSystemId };
   try {
     localStorage.setItem(KEY, JSON.stringify(out));
-  } catch {
-    /* ignore */
+    return null;
+  } catch (e) {
+    const msg = (e as Error).message;
+    // the quota case is the one worth naming, since the fix is a specific one
+    return /quota|exceeded/i.test(msg)
+      ? 'Browser storage is full — remove a texture or a reference image, or export this project to a file.'
+      : msg;
   }
 }
 
@@ -410,11 +448,13 @@ export const useEditor = create<EditorState>((set, get) => {
         extra?.(project, { positions: s.positions, activeSystemId: s.activeSystemId }) ?? {};
       const positions = more.positions ?? s.positions;
       const activeSystemId = more.activeSystemId ?? s.activeSystemId;
-      persist(project, positions, activeSystemId);
+      const saveError = persist(project, positions, activeSystemId);
       return {
         project,
         positions,
         activeSystemId,
+        saveError,
+        dirty: true,
         ...(more.selectedNodeId !== undefined ? { selectedNodeId: more.selectedNodeId } : {}),
         rev: s.rev + 1,
         past: past.length,
@@ -436,8 +476,8 @@ export const useEditor = create<EditorState>((set, get) => {
       future.length = 0;
       lastKey = null;
       const positions = next(s.positions);
-      persist(s.project, positions, s.activeSystemId);
-      return { positions, past: past.length, future: future.length };
+      const saveError = persist(s.project, positions, s.activeSystemId);
+      return { positions, saveError, dirty: true, past: past.length, future: future.length };
     });
   };
 
@@ -459,10 +499,14 @@ export const useEditor = create<EditorState>((set, get) => {
         ...(s.project.textures ? { textures: s.project.textures } : {}),
         ...(s.project.references ? { references: s.project.references } : {}),
       };
-      persist(project, snap.positions, snap.activeSystemId);
+      const saveError = persist(project, snap.positions, snap.activeSystemId);
       return {
         project,
         positions: snap.positions,
+        saveError,
+        // stepping back through history still leaves you somewhere the library
+        // has never seen; undo is not a way of un-editing a project
+        dirty: true,
         activeSystemId: project.systems.some((x) => x.id === snap.activeSystemId)
           ? snap.activeSystemId
           : project.systems[0]!.id,
@@ -485,13 +529,15 @@ export const useEditor = create<EditorState>((set, get) => {
       project.editor?.nodePositions && Object.keys(project.editor.nodePositions).length
         ? { ...project.editor.nodePositions }
         : project.systems.reduce<Record<string, XY>>((acc, s) => Object.assign(acc, autoLayout(s.graph)), {});
-    persist(project, positions, activeSystemId);
+    const saveError = persist(project, positions, activeSystemId);
     // a different project is a different timeline — do not let Ctrl+Z walk back
     // into the one that was open before it
     past.length = 0;
     future.length = 0;
     lastKey = null;
-    set((s) => ({ project, positions, activeSystemId, rev: s.rev + 1, texRev: s.texRev + 1, selectedNodeId: null, past: 0, future: 0 }));
+    // what was just loaded matches its source (a library entry, a file), so
+    // there is nothing to warn about until it is edited
+    set((s) => ({ project, positions, activeSystemId, rev: s.rev + 1, texRev: s.texRev + 1, selectedNodeId: null, saveError, dirty: false, past: 0, future: 0 }));
   };
 
   const initActive =
@@ -506,12 +552,19 @@ export const useEditor = create<EditorState>((set, get) => {
     selectedNodeId: null,
     rev: 0,
     texRev: 0,
+    saveError: null,
+    // a project restored from the working copy is as unsaved as it was when the
+    // tab closed; treating a reload as a save would hide exactly the gap this
+    // is here to show
+    dirty: false,
+    savedAt: null,
     past: 0,
     future: 0,
     assetsOpen: false,
     configOpen: false,
     configSection: 'project',
     system: () => activeSysOf(get().project),
+    markSaved: () => set({ dirty: false, savedAt: new Date().toISOString() }),
     snapshot: () => {
       const out = structuredClone(get().project);
       out.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: get().positions, activeSystemId: get().activeSystemId };
@@ -621,8 +674,7 @@ export const useEditor = create<EditorState>((set, get) => {
 
     setActiveSystem(id) {
       if (!get().project.systems.some((s) => s.id === id)) return;
-      set({ activeSystemId: id, selectedNodeId: null });
-      persist(get().project, get().positions, id);
+      set({ activeSystemId: id, selectedNodeId: null, saveError: persist(get().project, get().positions, id) });
     },
 
     addSystem() {

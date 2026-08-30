@@ -26,6 +26,8 @@ import { portType } from './ports';
 import { Preview } from './components/Preview';
 import { Systems } from './components/Systems';
 import { ProjectsMenu } from './components/ProjectsMenu';
+import { SaveState } from './components/SaveState';
+import { Shortcuts } from './components/Shortcuts';
 import { AssetManager } from './components/AssetManager';
 
 const nodeTypes = { pylinka: PylinkaNode, param: ParamNode, comment: CommentNode, note: NoteNode };
@@ -60,6 +62,9 @@ function EditorApp() {
   const pastCount = useEditor((s) => s.past);
   const futureCount = useEditor((s) => s.future);
   const positions = useEditor((s) => s.positions);
+  const dirty = useEditor((s) => s.dirty);
+  const saveError = useEditor((s) => s.saveError);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
 
   const onImportFile = (file: File) => {
@@ -108,7 +113,14 @@ function EditorApp() {
       return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
     };
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || isTyping(e.target)) return;
+      if (isTyping(e.target)) return;
+      // the one binding with no modifier: everything else here is Ctrl/Cmd
+      if (e.key === '?') {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+        return;
+      }
+      if (!(e.metaKey || e.ctrlKey)) return;
       const k = e.key.toLowerCase();
       if (k === 'z') {
         e.preventDefault();
@@ -165,6 +177,30 @@ function EditorApp() {
       window.removeEventListener('drop', drop);
     };
   }, []);
+
+  /**
+   * Ask before closing the tab on work that is not somewhere it can be opened
+   * from again.
+   *
+   * Two different situations, and only the second is a real loss. A `dirty`
+   * project IS still in localStorage and comes back on reload — the warning is
+   * about the copy that outlives this browser, which is the library or a file.
+   * A `saveError` means even that fell through and closing loses everything.
+   *
+   * Browsers ignore custom text here and show their own wording, so there is no
+   * point writing any; the indicator in the header is where the distinction
+   * gets explained.
+   */
+  useEffect(() => {
+    if (!dirty && saveError === null) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Safari and older Chrome still want returnValue set to something
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty, saveError]);
 
   const [menu, setMenu] = useState<MenuTarget | null>(null);
   // the shortcut handler is registered once, so it reads these through refs
@@ -287,7 +323,16 @@ function EditorApp() {
           title="Walk through building an effect: emitters, nodes and how to link them">
           Tutorial
         </button>
-        <div data-tour="undo" className="ml-auto flex items-center gap-0.5">
+        <button
+          onClick={() => setShortcutsOpen(true)}
+          className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="Keyboard shortcuts (?)">
+          Keys
+        </button>
+        <div className="ml-auto flex items-center gap-1">
+          <SaveState />
+        </div>
+        <div data-tour="undo" className="flex items-center gap-0.5">
           <button
             onClick={undo}
             disabled={pastCount === 0}
@@ -341,6 +386,10 @@ function EditorApp() {
             }
             fitView
             minZoom={0.2}
+            // React Flow only binds Backspace by default, so Delete — the key
+            // most people reach for, and the only one on a full keyboard that
+            // says what it does — did nothing
+            deleteKeyCode={['Backspace', 'Delete']}
             defaultEdgeOptions={{ animated: true }}
           >
             <Background gap={22} color="color-mix(in oklab, var(--color-border) 70%, transparent)" />
@@ -372,6 +421,7 @@ function EditorApp() {
       </div>
       <AssetManager />
       <ConfigModal />
+      {shortcutsOpen && <Shortcuts onClose={() => setShortcutsOpen(false)} />}
     </div>
   );
 }
