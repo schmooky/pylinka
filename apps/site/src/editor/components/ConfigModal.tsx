@@ -28,6 +28,8 @@ export function ConfigModal() {
   const removeSystem = useEditor((s) => s.removeSystem);
   const addSystem = useEditor((s) => s.addSystem);
   const moveSystem = useEditor((s) => s.moveSystem);
+  const duplicateSystem = useEditor((s) => s.duplicateSystem);
+  const toggleSystem = useEditor((s) => s.toggleSystem);
   const setActiveBlend = useEditor((s) => s.setActiveBlend);
   const activeSystemId = useEditor((s) => s.activeSystemId);
   const pathEdit = usePreview((s) => s.pathEdit);
@@ -125,7 +127,7 @@ export function ConfigModal() {
             {section === 'emitters' && (
               <Group
                 title="Emitters"
-                hint="Each emitter is one particle system with its own graph, and this list is the DRAW ORDER — top of the list is drawn first, so it sits furthest back.">
+                hint="Each emitter is one particle system with its own graph, and this list is the DRAW ORDER — top of the list is drawn first, so it sits furthest back. Duplicate one to try a change on the copy, and mute the original while you compare.">
                 <div className="flex flex-col gap-1">
                   {project.systems.map((s, i) => (
                     <div
@@ -159,6 +161,18 @@ export function ConfigModal() {
                           ↓
                         </button>
                       </span>
+                      <button
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                        title={s.enabled ? 'Mute — keep it in the project, leave it out of the preview' : 'Unmute'}
+                        onClick={() => toggleSystem(s.id)}>
+                        {s.enabled ? 'mute' : 'muted'}
+                      </button>
+                      <button
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                        title="Duplicate — try a change on the copy and mute the original"
+                        onClick={() => duplicateSystem(s.id)}>
+                        duplicate
+                      </button>
                       <button
                         className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
                         onClick={() => pick(`emitter:${s.id}`)}>

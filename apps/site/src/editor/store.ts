@@ -7,6 +7,24 @@ import { RECIPES, type RecipeAtlas } from '../recipes/data';
 import type { CommentFrame, EditorProject, EditorTexture, EmissionMaskData, EmitterPathData, PreviewBackground, ReferenceImage, ReferenceSettings, StickyNote } from './types';
 import { DEFAULT_PREVIEW_BACKGROUND, DEFAULT_REFERENCE } from './types';
 import { generateAnnotations } from './annotate';
+import { copyEmitter, type ClipboardPayload } from './clipboard';
+
+type NodesPayload = Extract<ClipboardPayload, { kind: 'nodes' }>;
+type EmitterPayload = Extract<ClipboardPayload, { kind: 'emitter' }>;
+
+/** Edge ids only have to be unique; the graph never reads meaning out of them. */
+function nextEdgeId(): string {
+  return `e${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+}
+
+/** "spark" -> "spark copy" -> "spark copy 2", so a duplicate is findable. */
+function uniqueSystemName(p: EditorProject, base: string): string {
+  const taken = new Set(p.systems.map((s) => s.name));
+  if (!taken.has(base)) return base;
+  const stem = `${base} copy`;
+  if (!taken.has(stem)) return stem;
+  for (let i = 2; ; i++) if (!taken.has(`${stem} ${i}`)) return `${stem} ${i}`;
+}
 
 const KEY = 'pylinka.editor.project';
 type XY = { x: number; y: number };
@@ -244,6 +262,16 @@ interface EditorState {
   addNote(at?: { x: number; y: number }): void;
   updateNote(id: string, patch: Partial<Omit<StickyNote, 'id' | 'systemId'>>): void;
   removeNote(id: string): void;
+  /**
+   * Paste a clipboard payload into the ACTIVE system, at `at` in flow
+   * coordinates. Ids are rewritten, so pasting into the project you copied from
+   * makes a copy rather than merging into the original. Returns the new node ids.
+   */
+  pasteNodes(payload: NodesPayload, at: { x: number; y: number }): string[];
+  /** Copy a whole emitter into the project as a new one, and make it active. */
+  duplicateSystem(id: string): void;
+  /** Add an emitter from a clipboard payload, and make it active. */
+  pasteEmitter(payload: EmitterPayload): void;
   /** lock/unlock EVERY annotation on the active system in one go */
   lockAnnotations(locked: boolean): void;
   // scene reference (project-level asset library + how it sits under the preview)
@@ -943,6 +971,145 @@ export const useEditor = create<EditorState>((set, get) => {
       commit((p) => {
         if (p.annotations) p.annotations.notes = p.annotations.notes.filter((x) => x.id !== id);
       });
+    },
+
+    pasteNodes(payload, at) {
+      const fresh: string[] = [];
+      commit(
+        (p, sys) => {
+          // knobs first: a pasted param.ref has to point at something, and a
+          // knob of the same NAME already here is the one it should reuse
+          const paramIdMap = new Map<string, string>();
+          for (const src of payload.params) {
+            const existing = p.params.find((x) => x.name === src.name);
+            if (existing) {
+              paramIdMap.set(src.id, existing.id);
+              continue;
+            }
+            const id = nextParamId(p);
+            p.params.push({ ...structuredClone(src), id, name: uniqueParamName(p, src.name) });
+            paramIdMap.set(src.id, id);
+          }
+
+          const nodeIdMap = new Map<string, string>();
+          for (const src of payload.nodes) {
+            // safe to ask each time here: the node IS pushed before the next
+            // call, so the scan sees it
+            const id = nextNodeId(p);
+            nodeIdMap.set(src.id, id);
+            const node: Node = structuredClone(src);
+            node.id = id;
+            if (node.structural?.param) {
+              node.structural = {
+                ...node.structural,
+                param: paramIdMap.get(node.structural.param) ?? '',
+              };
+            }
+            if (node.knobBindings) {
+              node.knobBindings = Object.fromEntries(
+                Object.entries(node.knobBindings).map(([port, pid]) => [
+                  port,
+                  paramIdMap.get(pid) ?? pid,
+                ]),
+              );
+            }
+            sys.graph.nodes.push(node);
+            fresh.push(id);
+          }
+
+          for (const e of payload.edges) {
+            const from = nodeIdMap.get(e.from.nodeId);
+            const to = nodeIdMap.get(e.to.nodeId);
+            if (from === undefined || to === undefined) continue;
+            sys.graph.edges.push({
+              id: nextEdgeId(),
+              from: { nodeId: from, portId: e.from.portId },
+              to: { nodeId: to, portId: e.to.portId },
+            });
+          }
+        },
+        false,
+        undefined,
+        (_p, prev) => {
+          const positions = { ...prev.positions };
+          payload.nodes.forEach((src, i) => {
+            const id = fresh[i];
+            if (id === undefined) return;
+            const off = payload.offsets[src.id] ?? { x: 0, y: 0 };
+            positions[id] = { x: at.x + off.x, y: at.y + off.y };
+          });
+          return { positions, selectedNodeId: fresh[0] ?? null };
+        },
+      );
+      return fresh;
+    },
+
+    duplicateSystem(id) {
+      const payload = copyEmitter(get().project, id);
+      if (payload) get().pasteEmitter(payload);
+    },
+
+    pasteEmitter(payload) {
+      let newId = '';
+      const idMap = new Map<string, string>();
+      commit(
+        (p) => {
+          const paramIdMap = new Map<string, string>();
+          for (const src of payload.params) {
+            const existing = p.params.find((x) => x.name === src.name);
+            if (existing) {
+              paramIdMap.set(src.id, existing.id);
+              continue;
+            }
+            const pid = nextParamId(p);
+            p.params.push({ ...structuredClone(src), id: pid, name: uniqueParamName(p, src.name) });
+            paramIdMap.set(src.id, pid);
+          }
+
+          newId = `s${Date.now().toString(36)}`;
+          const sys: System = structuredClone(payload.system);
+          sys.id = newId;
+          sys.name = uniqueSystemName(p, payload.system.name);
+          // node ids are unique across the WHOLE project (positions are keyed by
+          // bare node id), so every node in the copy needs a fresh one
+          // `nextNodeId` scans the project for the highest n<number>, and the
+          // copy is not in the project yet — so take the number once and count
+          // up locally rather than asking for the same id every iteration
+          let next = Number(/\d+/.exec(nextNodeId(p))?.[0] ?? '1');
+          for (const n of sys.graph.nodes) {
+            const id = `n${next++}`;
+            idMap.set(n.id, id);
+            n.id = id;
+            if (n.structural?.param) {
+              n.structural = { ...n.structural, param: paramIdMap.get(n.structural.param) ?? '' };
+            }
+            if (n.knobBindings) {
+              n.knobBindings = Object.fromEntries(
+                Object.entries(n.knobBindings).map(([port, pid]) => [port, paramIdMap.get(pid) ?? pid]),
+              );
+            }
+          }
+          sys.graph.edges = sys.graph.edges.map((e) => ({
+            id: nextEdgeId(),
+            from: { nodeId: idMap.get(e.from.nodeId) ?? e.from.nodeId, portId: e.from.portId },
+            to: { nodeId: idMap.get(e.to.nodeId) ?? e.to.nodeId, portId: e.to.portId },
+          }));
+          p.systems.push(sys);
+          if (payload.texture) p.systemTextures = { ...(p.systemTextures ?? {}), [newId]: payload.texture };
+          if (payload.mask) p.systemMasks = { ...(p.systemMasks ?? {}), [newId]: structuredClone(payload.mask) };
+          if (payload.path) p.systemPaths = { ...(p.systemPaths ?? {}), [newId]: structuredClone(payload.path) };
+        },
+        true,
+        undefined,
+        (_p, prev) => {
+          const positions = { ...prev.positions };
+          for (const [oldId, id] of idMap) {
+            const at = payload.positions[oldId];
+            if (at) positions[id] = { ...at };
+          }
+          return { positions, activeSystemId: newId, selectedNodeId: null };
+        },
+      );
     },
 
     lockAnnotations(locked) {

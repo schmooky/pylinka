@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   Controls,
@@ -21,6 +21,7 @@ import { GraphMenu, type MenuTarget } from './components/GraphMenu';
 import { ConfigModal } from './components/ConfigModal';
 import { startTour } from './tour';
 import { useDiagnostics } from './diagnostics';
+import { copyNodes, readClipboard, writeClipboard } from './clipboard';
 import { portType } from './ports';
 import { Preview } from './components/Preview';
 import { Systems } from './components/Systems';
@@ -73,6 +74,25 @@ function EditorApp() {
     r.readAsText(file);
   };
 
+  /** Graph nodes currently selected on the canvas, annotations excluded. */
+  const selectedGraphIds = () =>
+    rfNodesRef.current.filter((n) => n.selected && !n.id.includes(':')).map((n) => n.id);
+
+  /**
+   * Where a paste lands: under the pointer if it is over the canvas, else the
+   * middle of the view. Pasting into the corner you cannot see is the classic
+   * way to lose a copy.
+   */
+  const pasteAt = () => {
+    const r = document.querySelector('.react-flow')?.getBoundingClientRect();
+    const p = pointerRef.current;
+    if (r && p && p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom)
+      return screenToFlowPosition({ x: p.x, y: p.y });
+    return r
+      ? screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 })
+      : { x: 0, y: 0 };
+  };
+
   /**
    * Undo / redo. Deliberately NOT while the caret is in a text field: the
    * browser's own undo is better there (it steps through what you typed), and
@@ -97,6 +117,29 @@ function EditorApp() {
       } else if (k === 'y') {
         e.preventDefault();
         redo();
+      } else if (k === 'c' || k === 'd') {
+        const s = useEditor.getState();
+        const sys = s.project.systems.find((x) => x.id === s.activeSystemId) ?? s.project.systems[0]!;
+        const ids = selectedGraphIds();
+        if (ids.length === 0) return;
+        e.preventDefault();
+        const payload = copyNodes(s.project, sys, s.positions, ids);
+        if (k === 'c') void writeClipboard(payload);
+        else {
+          // duplicate lands beside the original rather than on top of it, so
+          // the copy is visible without dragging it off first
+          const at = s.positions[ids[0]!] ?? { x: 0, y: 0 };
+          s.pasteNodes(payload, { x: at.x + 40, y: at.y + 40 });
+        }
+      } else if (k === 'v') {
+        e.preventDefault();
+        void (async () => {
+          const payload = await readClipboard();
+          if (!payload) return;
+          const s = useEditor.getState();
+          if (payload.kind === 'emitter') s.pasteEmitter(payload);
+          else s.pasteNodes(payload, pasteAt());
+        })();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -124,6 +167,9 @@ function EditorApp() {
   }, []);
 
   const [menu, setMenu] = useState<MenuTarget | null>(null);
+  // the shortcut handler is registered once, so it reads these through refs
+  const rfNodesRef = useRef<RFNode[]>([]);
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
   const { screenToFlowPosition } = useReactFlow();
@@ -183,6 +229,15 @@ function EditorApp() {
   useEffect(() => {
     setRfNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === selectedNodeId })));
   }, [selectedNodeId, setRfNodes]);
+
+  rfNodesRef.current = rfNodes;
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      pointerRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener('pointermove', move);
+    return () => window.removeEventListener('pointermove', move);
+  }, []);
 
   const diags = useDiagnostics();
 

@@ -17,6 +17,7 @@ export function Systems() {
   const removeSystem = useEditor((s) => s.removeSystem);
   const renameSystem = useEditor((s) => s.renameSystem);
   const toggleSystem = useEditor((s) => s.toggleSystem);
+  const duplicateSystem = useEditor((s) => s.duplicateSystem);
   const setConfigOpen = useEditor((s) => s.setConfigOpen);
   const setConfigSection = useEditor((s) => s.setConfigSection);
   const [editing, setEditing] = useState<string | null>(null);
@@ -88,6 +89,10 @@ export function Systems() {
                 {sys.name}
               </button>
             )}
+            <button
+              title="Duplicate this emitter — try a change on the copy and mute the original"
+              onClick={(e) => { e.stopPropagation(); duplicateSystem(sys.id); }}
+              className="text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100">⧉</button>
             {systems.length > 1 && (
               <button title="Remove emitter" onClick={() => removeSystem(sys.id)}
                 className="text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100">✕</button>

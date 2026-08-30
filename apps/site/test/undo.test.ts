@@ -13,6 +13,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useEditor } from '../src/editor/store';
+import { copyNodes } from '../src/editor/clipboard';
 
 /**
  * Everything an undo step is supposed to restore. `updatedAt` is a timestamp
@@ -331,4 +332,62 @@ describe('undo — the documented exclusions', () => {
     store().undo();
     expect(store().project.textures?.some((t) => t.id === id)).toBe(true);
   });
+});
+
+describe('copy, paste and duplicate', () => {
+  it('pasting nodes rewrites ids instead of merging into the originals', () => {
+    const sys = store().project.systems[0]!;
+    const payload = copyNodes(store().project, sys, store().positions, ['n1', 'n2']);
+    const before = sys.graph.nodes.length;
+    const fresh = store().pasteNodes(payload, { x: 500, y: 500 });
+    expect(fresh).toHaveLength(2);
+    expect(fresh).not.toContain('n1');
+    const after = store().project.systems[0]!.graph.nodes;
+    expect(after).toHaveLength(before + 2);
+    // the original is untouched and the copy carries its values
+    expect(after.find((n) => n.id === 'n1')).toBeDefined();
+    expect(after.find((n) => n.id === fresh[0])!.kind).toBe('shape.point');
+  });
+
+  it('carries the edges BETWEEN the copied nodes, and no half-edges', () => {
+    const sys = store().project.systems[0]!;
+    // n1 -> n2 is an edge inside the pair; n3 -> n4 is outside it
+    const payload = copyNodes(store().project, sys, store().positions, ['n1', 'n2']);
+    expect(payload.edges).toHaveLength(1);
+    const before = sys.graph.edges.length;
+    store().pasteNodes(payload, { x: 0, y: 0 });
+    expect(store().project.systems[0]!.graph.edges).toHaveLength(before + 1);
+  });
+
+  it('a copied knob node reuses a knob of the same name rather than making another', () => {
+    const sys = store().project.systems[0]!;
+    const payload = copyNodes(store().project, sys, store().positions, ['n9']); // param.ref -> windPower
+    const before = store().project.params.length;
+    const [id] = store().pasteNodes(payload, { x: 0, y: 0 });
+    expect(store().project.params).toHaveLength(before); // no duplicate knob
+    const pasted = store().project.systems[0]!.graph.nodes.find((n) => n.id === id)!;
+    expect(pasted.structural?.param).toBe('p1');
+  });
+
+  it('paste is one undo step', () => {
+    const sys = store().project.systems[0]!;
+    const payload = copyNodes(store().project, sys, store().positions, ['n1', 'n2']);
+    roundTrip(() => store().pasteNodes(payload, { x: 300, y: 300 }));
+  });
+
+  it('duplicating an emitter copies its graph under fresh ids and names it apart', () => {
+    const before = store().project.systems.length;
+    store().duplicateSystem('s1');
+    const systems = store().project.systems;
+    expect(systems).toHaveLength(before + 1);
+    const copy = systems.at(-1)!;
+    expect(copy.name).not.toBe(systems[0]!.name);
+    expect(copy.graph.nodes).toHaveLength(systems[0]!.graph.nodes.length);
+    // node ids are unique across the whole project — positions are keyed by them
+    const all = systems.flatMap((s) => s.graph.nodes.map((n) => n.id));
+    expect(new Set(all).size).toBe(all.length);
+    expect(store().activeSystemId).toBe(copy.id);
+  });
+
+  it('duplicating an emitter is one undo step', () => roundTrip(() => store().duplicateSystem('s1')));
 });
