@@ -15,6 +15,7 @@ import { PathOverlay } from './PathOverlay';
 import { ReferenceLayer } from './ReferenceLayer';
 import { usePreviewBackground } from '../reference';
 import { createBackdrop } from '../backdrop';
+import { createPixiStage, type PixiStage } from '../pixiStage';
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
@@ -140,9 +141,14 @@ export function Preview() {
   const bg = usePreviewBackground();
   const bgRef = useRef(bg);
   bgRef.current = bg;
+  useEffect(() => {
+    stageRef.current?.setBackdrop(bg);
+  }, [bg]);
   const backdropRef = useRef<ReturnType<typeof createBackdrop> | null>(null);
   const dprRef = useRef(1);
   const viewRef = useRef({ z: 1, cx: 0, cy: 0 });
+  /** the pixi path, when a compiled backend is running; null on the raw one */
+  const stageRef = useRef<PixiStage | null>(null);
   /** the loop is registered once; the converter it calls changes with the view */
   const worldPxRef = useRef<(x: number, y: number) => [number, number]>(() => [0, 0]);
 
@@ -162,6 +168,11 @@ export function Preview() {
     const c = canvasRef.current;
     if (!c) return;
     const { z, cx, cy } = viewRef.current;
+    // the pixi path carries the view on its world Container
+    if (stageRef.current !== null) {
+      stageRef.current.setView(z, cx, cy);
+      return;
+    }
     const zoom = 1 / (dprRef.current * z);
     const halfW = c.clientWidth / (2 * z);
     const halfH = c.clientHeight / (2 * z);
@@ -196,7 +207,50 @@ export function Preview() {
     if (!canvas) return;
     for (const h of fxRef.current) h.destroy();
     fxRef.current = [];
+    stageRef.current?.destroy();
+    stageRef.current = null;
     const proj = projRef.current;
+
+    /*
+     * Compiled backends run inside a pixi renderer, the way a game runs them —
+     * which is also what makes the view a Container transform rather than a
+     * CSS one. The interpreted backend cannot join them: pixi owns the canvas
+     * context and a canvas has exactly one.
+     */
+    if (backendRef.current !== 'webgl') {
+      const textures: Record<string, never> = {};
+      const masks: Record<string, never> = {};
+      for (const sys of proj.systems) {
+        if (!sys.enabled) continue;
+        try {
+          const atlas = await buildAtlas(proj, sys);
+          if (atlas) (textures as Record<string, unknown>)[sys.name] = atlas;
+          const mask = await buildMask(proj, sys);
+          if (mask) (masks as Record<string, unknown>)[sys.name] = mask;
+        } catch {
+          /* texture/mask failed to load → soft sprite / analytic shape */
+        }
+      }
+      try {
+        stageRef.current = await createPixiStage({
+          canvas,
+          project: effective(proj),
+          backend: backendRef.current,
+          textures,
+          masks,
+          backdrop: bgRef.current,
+        });
+        stageRef.current.resize(canvas.clientWidth, canvas.clientHeight, dprRef.current);
+        fxSysRef.current = stageRef.current.order;
+        for (const [n, v] of Object.entries(usePreview.getState().knobs)) {
+          for (const view of stageRef.current.views.values()) view.params.set(n, v);
+        }
+        applyView();
+      } catch (e) {
+        setError(String(e));
+      }
+      return;
+    }
     const enabled = proj.systems.filter((s) => s.enabled);
     const enabledIds = new Set(enabled.map((s) => s.id));
     const links = proj.subEmitters ?? {};
@@ -299,11 +353,17 @@ export function Preview() {
       // re-read the ratio every time: dragging the window to a display of a
       // different density changes it, and a stale one renders soft
       dprRef.current = Math.min(window.devicePixelRatio || 1, 2);
-      const w = Math.floor(canvas.clientWidth * dprRef.current);
-      const h = Math.floor(canvas.clientHeight * dprRef.current);
-      if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
-        canvas.width = w;
-        canvas.height = h;
+      // the pixi path owns its own canvas sizing (pixi writes canvas.width from
+      // the CSS size and the resolution it was given)
+      if (stageRef.current !== null) {
+        stageRef.current.resize(canvas.clientWidth, canvas.clientHeight, dprRef.current);
+      } else {
+        const w = Math.floor(canvas.clientWidth * dprRef.current);
+        const h = Math.floor(canvas.clientHeight * dprRef.current);
+        if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
+          canvas.width = w;
+          canvas.height = h;
+        }
       }
       // the visible window is measured from the canvas box, so a resize is a
       // view change too
@@ -321,7 +381,11 @@ export function Preview() {
     const cur = usePreview.getState().knobs;
     setKnobsStore(Object.keys(cur).length > 0 ? cur : init);
     // let a knob node on the canvas push live values into the running handles
-    usePreview.getState().setApply((name, v) => fxRef.current.forEach((h) => h.setKnob(name, v)));
+    usePreview.getState().setApply((name, v) => {
+      const stage = stageRef.current;
+      if (stage !== null) for (const view of stage.views.values()) view.params.set(name, v);
+      else fxRef.current.forEach((h) => h.setKnob(name, v));
+    });
     setError('');
     void recreate();
 
@@ -333,38 +397,70 @@ export function Preview() {
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
       t += dt;
-      // backdrop first: it clears, and the particles add to what it left
-      const gl = canvas.getContext('webgl2');
-      if (gl) {
-        if (!backdropRef.current) backdropRef.current = createBackdrop(gl);
-        gl.viewport(0, 0, canvas.width, canvas.height);
-        backdropRef.current.draw(bgRef.current);
+      const stage = stageRef.current;
+      // the raw path draws its own backdrop into the framebuffer before the
+      // particles; the pixi stage owns its own, as a tiling sprite under the
+      // world container
+      if (stage === null) {
+        const gl = canvas.getContext('webgl2');
+        if (gl) {
+          if (!backdropRef.current) backdropRef.current = createBackdrop(gl);
+          gl.viewport(0, 0, canvas.width, canvas.height);
+          backdropRef.current.draw(bgRef.current);
+        }
       }
       const handles = fxRef.current;
-      if (handles.length) {
+      if (handles.length || stage !== null) {
+        // WORLD coordinates from here down; each driver converts at its edge
         let ex: number, ey: number;
         if (toolRef.current === 'follow' && mouseRef.current) [ex, ey] = mouseRef.current;
-        else [ex, ey] = worldPxRef.current(0, 0); // the world origin, wherever the view is
+        else [ex, ey] = [0, 0]; // the world origin, wherever the view is
         const alive = 0;
-        for (let i = 0; i < handles.length; i++) {
-          const fx = handles[i]!;
+        /*
+         * One driving surface over both paths. A raw handle takes CANVAS pixels
+         * and maps them back through its own zoom and view offset; a pixi view
+         * takes its container's local space, which IS world. Converting here
+         * keeps the loop in one coordinate system.
+         */
+        const driven: { sysId: string | undefined; place(x: number, y: number, cut?: boolean): void; burst(n: number): void }[] =
+          stage !== null
+            ? stage.order.map((id) => {
+                const v = stage.views.get(id)!;
+                return {
+                  sysId: id,
+                  place: (x, y) => v.setEmitterPosition(x, y),
+                  burst: (n) => v.spawnBurst(n),
+                };
+              })
+            : handles.map((fx, i) => ({
+                sysId: fxSysRef.current[i],
+                place: (x, y, cut) => {
+                  const [px2, py2] = worldPxRef.current(x, y);
+                  fx.setEmitter(px2, py2, cut);
+                },
+                burst: (n) => fx.spawnBurst(n),
+              }));
+        for (let i = 0; i < driven.length; i++) {
+          const fx = driven[i]!;
           // a system with a trajectory spline follows it; the rest sit at the
           // centre, or follow the cursor
-          const sysId = fxSysRef.current[i];
+          const sysId = fx.sysId;
           const path = sysId ? (projRef.current.systemPaths ?? {})[sysId] : null;
           if (path && path.points.length >= 2) {
             const v = viewRef.current;
-            const key = `${JSON.stringify(path)}|${canvas.width}x${canvas.height}|${v.z}|${v.cx}|${v.cy}`;
+            void v;
+            const key = `${JSON.stringify(path)}|${canvas.clientWidth}x${canvas.clientHeight}`;
             let entry = driversRef.current.get(sysId!);
             if (!entry || entry.key !== key) {
-              // normalised 0..1 across the canvas AT ZOOM 1, converted to world
-              // and back through the current view — the trajectory belongs to
-              // the effect, so panning must not drag it
-              const pts = path.points.map((p) =>
-                worldPxRef.current(
-                  (p[0] - 0.5) * canvas.clientWidth,
-                  (p[1] - 0.5) * canvas.clientHeight,
-                ),
+              // normalised 0..1 across the canvas at zoom 1, in WORLD units —
+              // the trajectory belongs to the effect, so it must not move when
+              // the view does
+              const pts = path.points.map(
+                (p) =>
+                  [(p[0] - 0.5) * canvas.clientWidth, (p[1] - 0.5) * canvas.clientHeight] as [
+                    number,
+                    number,
+                  ],
               );
               entry = {
                 key,
@@ -373,13 +469,13 @@ export function Preview() {
               driversRef.current.set(sysId!, entry);
             }
             const [px2, py2] = entry.drv.at(t);
-            fx.setEmitter(px2, py2);
+            fx.place(px2, py2);
           } else {
             // Spawn cuts the emitter around rather than moving it: without
             // teleport, `rateOverDistance` reads every jump as travel and fires
             // a spawn proportional to it — one at the click, another when it
             // snaps back, both far larger than the burst you asked for.
-            fx.setEmitter(ex, ey, toolRef.current === 'spawn');
+            fx.place(ex, ey, toolRef.current === 'spawn');
           }
           /*
            * A click is ONE burst at that point, and nothing else moves. Making
@@ -389,11 +485,15 @@ export function Preview() {
            * effect. The tool tests a burst; it does not re-place the emitter.
            */
           if (sysId === activeSysRef.current && spawnReq.current) {
-            fx.setEmitter(spawnReq.current.x, spawnReq.current.y, true);
-            fx.spawnBurst(burstCountRef.current);
+            fx.place(spawnReq.current.x, spawnReq.current.y, true);
+            fx.burst(burstCountRef.current);
           }
-          fx.update(dt);
         }
+        // stepping is per-path: raw handles each step and draw themselves, in
+        // creation order so a sub-emitter follows its parent; the pixi stage
+        // steps every system and draws the frame once
+        if (stage !== null) stage.frame(dt);
+        else for (const h of handles) h.update(dt);
         spawnReq.current = null;
         // the fps / alive readout is gone for now, so nothing reads these back
         // from the GPU each half-second — aliveCount() is a synchronous stall
@@ -410,6 +510,8 @@ export function Preview() {
       backdropRef.current = null;
       for (const h of fxRef.current) h.destroy();
       fxRef.current = [];
+      stageRef.current?.destroy();
+      stageRef.current = null;
     };
   }, [backend]);
 
@@ -431,6 +533,11 @@ export function Preview() {
     }
     const eff = effective(project);
     try {
+      const stage = stageRef.current;
+      if (stage !== null) {
+        if (!stage.apply(eff)) void recreate();
+        return;
+      }
       if (!handles.every((fx) => fx.apply(eff))) void recreate();
     } catch (e) {
       setError(String(e));
@@ -445,22 +552,21 @@ export function Preview() {
   }, [view]);
 
   /**
-   * Pointer → canvas pixels, which is what the runtime's `setEmitter` takes.
-   * It maps them to world through the same zoom and view offset the renderer
-   * draws with, so this stays a plain box measurement.
+   * Pointer → WORLD.
+   *
+   * Everything the tools do — placing a burst, following the cursor — is in
+   * world units, and each path converts at its own boundary: the pixi stage
+   * takes them as they are (they are its container's local space), the raw
+   * handles take canvas pixels and map them back through zoom and offset.
    */
-  const canvasPx = (e: { clientX: number; clientY: number }): [number, number] => {
+  const screenToWorld = (e: { clientX: number; clientY: number }): [number, number] => {
     const c = canvasRef.current!;
     const r = c.getBoundingClientRect();
-    return [((e.clientX - r.left) / r.width) * c.width, ((e.clientY - r.top) / r.height) * c.height];
+    const { z, cx, cy } = viewRef.current;
+    return [cx + (e.clientX - r.left - r.width / 2) / z, cy + (e.clientY - r.top - r.height / 2) / z];
   };
 
-  /**
-   * WORLD → canvas pixels, the inverse of what `setEmitter` will do with it.
-   *
-   * The emitter has to sit at a fixed point in the WORLD — otherwise panning
-   * drags the effect around with the window and the pan does nothing visible.
-   */
+  /** WORLD → canvas pixels, the inverse of what a raw handle's setEmitter does. */
   const worldPx = (wx: number, wy: number): [number, number] => {
     const c = canvasRef.current!;
     const { z, cx, cy } = viewRef.current;
@@ -481,11 +587,11 @@ export function Preview() {
       }));
       return;
     }
-    if (toolRef.current === 'follow') mouseRef.current = canvasPx(e);
+    if (toolRef.current === 'follow') mouseRef.current = screenToWorld(e);
   };
   const onPanDown = (e: React.PointerEvent) => {
     if (toolRef.current === 'spawn') {
-      const [x, y] = canvasPx(e); // one burst here, consumed by the next frame
+      const [x, y] = screenToWorld(e); // one burst here, consumed by the next frame
       spawnReq.current = { x, y };
       return;
     }
