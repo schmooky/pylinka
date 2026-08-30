@@ -14,6 +14,7 @@
 import type { ParamDef, PylinkaProject, System } from '@pylinka/graph';
 import type { KnobStore } from '../knobs.js';
 import type { CompiledAtlasOptions } from '../compiled/sprite.js';
+import type { MaskTable } from '../compiled/mask.js';
 
 /** A 2×3 affine (pixi worldTransform: a, b, c, d, tx, ty). */
 export interface Affine {
@@ -72,6 +73,16 @@ export interface SimBackendDeps {
   /** resolved texture/atlas for this system (single sprite or animated sheet);
    *  the backend resolves it to sprite + anim. Absent → the soft-disc sprite. */
   atlas?: CompiledAtlasOptions;
+  /** rasterised emission mask: opaque texels of a painted image become spawn
+   *  positions, replacing the graph's analytic shape. Absent → the shape. */
+  mask?: MaskTable;
+  /**
+   * The SimBackend of this system's sub-emitter PARENT: this system's
+   * particles are born from that one's, at the event its `output.deathBurst`
+   * names. The backends read each other's GPU buffers directly, so a parent
+   * must be built — and stepped — before its children.
+   */
+  subParent?: SimBackend;
 }
 
 export type SimBackendFactory = (deps: SimBackendDeps) => SimBackend;

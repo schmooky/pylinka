@@ -15,6 +15,7 @@ import { ParticleView } from './particle-view.js';
 import { getSimBackendFactory, type SimBackend, type SimStats } from './sim.js';
 import { resolveTexture, type TextureInput } from './texture.js';
 import type { CompiledAtlasOptions } from '../compiled/sprite.js';
+import { buildMaskTable, type CompiledMaskOptions, type MaskTable } from '../compiled/mask.js';
 import type { AtlasPlay } from '../atlas.js';
 
 export interface CreateOptions {
@@ -32,6 +33,24 @@ export interface CreateOptions {
   texture?: TextureInput;
   /** Per-system textures keyed by System.name — overrides `texture`. */
   textures?: Record<string, TextureInput>;
+  /**
+   * Emit only inside a painted area: opaque texels of the image become spawn
+   * positions, replacing the graph's analytic spawn shape. The mask is centred
+   * on the emitter and moves with it.
+   */
+  emissionMask?: CompiledMaskOptions;
+  /** Per-system emission masks keyed by System.name — overrides `emissionMask`. */
+  emissionMasks?: Record<string, CompiledMaskOptions>;
+  /**
+   * Sub-emitter links, `child system name` → `parent system name`: the child's
+   * particles are born from the parent's, at the event the child's
+   * `output.deathBurst` names. Parents are built and stepped before their
+   * children, since the two share GPU buffers.
+   *
+   * An editor project carries these under `subEmitters` keyed by system ID;
+   * they are read from there when this option is absent.
+   */
+  subEmitters?: Record<string, string>;
 }
 
 /** Editor-exported project JSON carries per-system textures (not part of the
@@ -96,7 +115,8 @@ export interface PylinkaRuntime {
 class SystemHandle implements ParticleSystemView {
   readonly view: ParticleView;
   readonly params: KnobBus;
-  private readonly sim: SimBackend;
+  /** Readable so a sub-emitter child can bind to this system's buffers. */
+  readonly sim: SimBackend;
   private target: Followable | undefined;
   private destroyed = false;
 
@@ -155,12 +175,18 @@ class SystemHandle implements ParticleSystemView {
   }
 }
 
+/** The mask a system should use (per-system name → whole-project fallback). */
+function maskFor(system: System, opts: CreateOptions): MaskTable | undefined {
+  return buildMaskTable(opts.emissionMasks?.[system.name] ?? opts.emissionMask);
+}
+
 function buildSystem(
   system: System,
   project: Pick<PylinkaProject, 'params'>,
   knobs: KnobStore,
   opts: CreateOptions,
   atlas: CompiledAtlasOptions | undefined,
+  subParent?: SimBackend,
 ): SystemHandle {
   registerCompiledBackends();
   const resolved = resolveBackend(opts.renderer as Parameters<typeof resolveBackend>[0]);
@@ -175,6 +201,7 @@ function buildSystem(
     );
   }
   const view = new ParticleView();
+  const mask = maskFor(system, opts);
   const sim = factory({
     backend: resolved.kind,
     device: resolved.device,
@@ -184,6 +211,8 @@ function buildSystem(
     knobs,
     ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
     ...(atlas !== undefined ? { atlas } : {}),
+    ...(mask !== undefined ? { mask } : {}),
+    ...(subParent !== undefined ? { subParent } : {}),
   });
   view.sim = sim;
   return new SystemHandle(view, sim, knobs);
@@ -207,6 +236,52 @@ export async function createParticleSystem(
   return buildSystem(bundle.system, { params: bundle.params }, knobs, opts, atlas);
 }
 
+/**
+ * Sub-emitter links by system NAME, from the option or the project's own map.
+ *
+ * A project stores them keyed by system ID because names are editable; the
+ * option is by name because that is how every other per-system option here is
+ * keyed. A link to a system that is absent or disabled is dropped rather than
+ * throwing: muting one emitter should not take its children down with it.
+ */
+function linksByName(project: PylinkaProject, opts: CreateOptions): Map<string, string> {
+  const enabled = new Map(project.systems.filter((s) => s.enabled).map((s) => [s.id, s.name]));
+  const out = new Map<string, string>();
+  if (opts.subEmitters !== undefined) {
+    const names = new Set(enabled.values());
+    for (const [child, parent] of Object.entries(opts.subEmitters)) {
+      if (names.has(child) && names.has(parent) && child !== parent) out.set(child, parent);
+    }
+    return out;
+  }
+  const fromProject = (project as PylinkaProject & { subEmitters?: Record<string, string> }).subEmitters;
+  for (const [childId, parentId] of Object.entries(fromProject ?? {})) {
+    const child = enabled.get(childId);
+    const parent = enabled.get(parentId);
+    if (child !== undefined && parent !== undefined && child !== parent) out.set(child, parent);
+  }
+  return out;
+}
+
+/** Parents before children. A cycle keeps its systems, in declaration order. */
+function parentsFirst(systems: System[], links: Map<string, string>): System[] {
+  const out: System[] = [];
+  const placed = new Set<string>();
+  let guard = systems.length + 1;
+  while (out.length < systems.length && guard-- > 0) {
+    for (const s of systems) {
+      if (placed.has(s.name)) continue;
+      const parent = links.get(s.name);
+      if (parent === undefined || placed.has(parent)) {
+        out.push(s);
+        placed.add(s.name);
+      }
+    }
+  }
+  for (const s of systems) if (!placed.has(s.name)) out.push(s);
+  return out;
+}
+
 /** Build every enabled system of a project (§11.5). */
 export async function createPylinka(
   project: PylinkaProject,
@@ -216,11 +291,16 @@ export async function createPylinka(
   watchDeviceLost(opts);
   const systems: Record<string, ParticleSystemView> = {};
   const handles: SystemHandle[] = [];
-  for (const sys of project.systems) {
-    if (!sys.enabled) continue;
+  const links = linksByName(project, opts);
+  const handleByName = new Map<string, SystemHandle>();
+  const enabled = project.systems.filter((s) => s.enabled);
+  for (const sys of parentsFirst(enabled, links)) {
     const atlas = await atlasFor(project, sys, opts);
-    const h = buildSystem(sys, project, knobs, opts, atlas);
+    const parentName = links.get(sys.name);
+    const parent = parentName !== undefined ? handleByName.get(parentName)?.sim : undefined;
+    const h = buildSystem(sys, project, knobs, opts, atlas, parent);
     systems[sys.name] = h;
+    handleByName.set(sys.name, h);
     handles.push(h);
   }
 
@@ -246,3 +326,6 @@ export async function createPylinka(
     },
   };
 }
+
+/** Internals under test — the GPU parts need a device, the wiring does not. */
+export const __testing = { linksByName, parentsFirst };

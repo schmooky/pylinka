@@ -62,7 +62,9 @@ function projScaleOffset(p: Mat2D, m: Affine): [number, number, number, number] 
 }
 
 class WebGPUSimBackend implements SimBackend {
-  private readonly sim: WebGPUSystemSim;
+  /** Readable by a sibling: a sub-emitter child binds to its parent's buffers
+   *  directly, and only the concrete sim has them. */
+  readonly sim: WebGPUSystemSim;
   private readonly device: GPUDevice;
   private readonly renderer: WebGPURenderer;
   private readonly queue: QueuedStep[] = [];
@@ -73,12 +75,19 @@ class WebGPUSimBackend implements SimBackend {
     const gpu = (navigator as { gpu?: GPU }).gpu;
     const format: GPUTextureFormat = gpu?.getPreferredCanvasFormat() ?? 'bgra8unorm';
     const antialias = (this.renderer as unknown as { view?: { antialias?: boolean } }).view?.antialias === true;
+    const parent = deps.subParent instanceof WebGPUSimBackend ? deps.subParent.sim : undefined;
     this.sim = new WebGPUSystemSim(this.device, deps.system, deps.params, {
       format,
       multisample: antialias ? 4 : 1,
       knobs: deps.knobs,
+      // the child reads the parent's live buffers, so it binds to them rather
+      // than to the parent object
+      ...(parent !== undefined
+        ? { subParent: { hot: parent.hotBuffer, meta: parent.metaBuffer, capacity: parent.capacity } }
+        : {}),
       ...(deps.seed !== undefined ? { seed: deps.seed } : {}),
       ...spriteOpts(deps),
+      ...(deps.mask !== undefined ? { mask: deps.mask } : {}),
     });
   }
 
@@ -179,17 +188,21 @@ class WebGPUSimBackend implements SimBackend {
 }
 
 class WebGL2SimBackend implements SimBackend {
-  private readonly sim: WebGL2CompiledSim;
+  /** Readable by a sibling — see WebGPUSimBackend.sim. */
+  readonly sim: WebGL2CompiledSim;
   private readonly renderer: Renderer;
   private readonly queue: QueuedStep[] = [];
   private statClock = 0;
 
   constructor(deps: SimBackendDeps) {
     this.renderer = deps.renderer as Renderer;
+    const parent = deps.subParent instanceof WebGL2SimBackend ? deps.subParent.sim : undefined;
     this.sim = new WebGL2CompiledSim(deps.device as WebGL2RenderingContext, deps.system, deps.params, {
       knobs: deps.knobs,
+      ...(parent !== undefined ? { subParent: parent } : {}),
       ...(deps.seed !== undefined ? { seed: deps.seed } : {}),
       ...spriteOpts(deps),
+      ...(deps.mask !== undefined ? { mask: deps.mask } : {}),
     });
   }
 
