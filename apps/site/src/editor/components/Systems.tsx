@@ -31,7 +31,7 @@ export function Systems() {
   return (
     <div
       data-tour="emitters"
-      className="tabstrip flex items-end gap-0.5 overflow-x-auto pr-2 pt-1.5 text-xs"
+      className="tabstrip flex items-end gap-0.5 overflow-x-auto pr-2 pt-1 text-xs"
       style={{ background: 'var(--color-card)' }}>
       {/* the line has to start at the very edge, or the first tab's corner
           curves into nothing */}
@@ -40,12 +40,20 @@ export function Systems() {
         const active = sys.id === activeId;
         return (
           <div key={sys.id}
-            className={`group relative flex shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 py-1.5 ${
-              active
-                ? 'border-border text-foreground'
-                : 'border-b border-transparent border-b-border text-muted-foreground hover:bg-accent/40'
+            className={`group relative flex shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 py-1 ${
+              active ? 'text-foreground' : 'border-b text-muted-foreground hover:bg-accent/40'
             } ${sys.enabled ? '' : 'opacity-50'}`}
-            style={active ? { background: 'var(--color-background)' } : undefined}>
+            /*
+             * Border colours are set here rather than with `border-transparent`:
+             * editor.css carries an unlayered `* { border-color }`, and unlayered
+             * rules beat Tailwind's layered utilities, so the class never won and
+             * every inactive tab kept a full outline.
+             */
+            style={
+              active
+                ? { background: 'var(--color-background)', borderColor: 'var(--color-border)' }
+                : { borderColor: 'transparent', borderBottomColor: 'var(--color-border)' }
+            }>
             {/*
               The active tab met the line at a right angle, which reads as a box
               parked on a rule rather than a tab opening into the canvas. These
@@ -83,7 +91,7 @@ export function Systems() {
         );
       })}
       <button onClick={addSystem} title="Add an emitter"
-        className="ml-1 shrink-0 rounded-t-md border-b border-border px-2.5 py-1.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
+        className="ml-1 shrink-0 rounded-t-md border-b border-border px-2.5 py-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         + Emitter
       </button>
       {/*
@@ -99,7 +107,7 @@ export function Systems() {
       <button
         onClick={() => openConfig(`emitter:${activeId}`)}
         title="Configure this emitter"
-        className="shrink-0 rounded-t-md border-b border-border px-2.5 py-1.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
+        className="shrink-0 rounded-t-md border-b border-border px-2.5 py-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         Configure
       </button>
     </div>

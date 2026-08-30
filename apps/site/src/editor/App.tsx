@@ -195,19 +195,19 @@ function EditorApp() {
         deeper in Project, and the product name is not information the person
         using the editor needs on screen.
       */}
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
+      <header className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <span data-tour="project">
           <ProjectsMenu />
         </span>
         <button
           onClick={() => setAssetsOpen(true)}
-          className="rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
           title="Textures, sprite sequences and scene references">
           Assets
         </button>
         <button
           onClick={startTour}
-          className="rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
           title="Walk through building an effect: emitters, nodes and how to link them">
           Tutorial
         </button>
@@ -217,7 +217,7 @@ function EditorApp() {
             disabled={pastCount === 0}
             title={`Undo (${modKey ? '\u2318' : 'Ctrl+'}Z) — ${pastCount} step${pastCount === 1 ? '' : 's'} back`}
             aria-label="Undo"
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-25 disabled:hover:bg-transparent">
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-25 disabled:hover:bg-transparent">
             <HistoryIcon />
           </button>
           <button
@@ -225,7 +225,7 @@ function EditorApp() {
             disabled={futureCount === 0}
             title={`Redo (${modKey ? '\u21e7\u2318' : 'Ctrl+Shift+'}Z) — ${futureCount} step${futureCount === 1 ? '' : 's'} forward`}
             aria-label="Redo"
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-25 disabled:hover:bg-transparent">
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-25 disabled:hover:bg-transparent">
             <HistoryIcon flip />
           </button>
         </div>

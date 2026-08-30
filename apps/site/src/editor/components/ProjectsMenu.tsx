@@ -130,7 +130,7 @@ export function ProjectsMenu() {
     <div ref={rootRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className={`rounded-md px-2.5 py-1.5 text-xs ${open ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
+        className={`rounded-md px-2 py-1 text-[11px] ${open ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
         Project ▾
       </button>
       {open && (

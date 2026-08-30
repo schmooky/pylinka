@@ -482,7 +482,7 @@ export function Preview() {
         Tools sit under the canvas rather than floating over it: they were
         covering the very thing they act on, and a bar has room for labels.
       */}
-      <div data-tour="preview-tools" className="flex items-center gap-1 border-t border-border px-2 py-1.5 text-xs">
+      <div data-tour="preview-tools" className="flex items-center gap-1 border-t border-border px-2 py-1 text-[11px]">
         {TOOLS.map((tl) => (
           <button
             key={tl.id}
@@ -492,7 +492,7 @@ export function Preview() {
             }}
             title={`${tl.label} — ${tl.hint}`}
             aria-label={tl.label}
-            className={`flex items-center gap-1.5 rounded-md px-2 py-1 ${
+            className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 ${
               tool === tl.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60'
             }`}>
             <span aria-hidden className="text-[13px] leading-none">{tl.icon}</span>
@@ -504,7 +504,7 @@ export function Preview() {
           disabled={view.z === 1 && view.x === 0 && view.y === 0}
           title={`Fit — reset zoom & pan · ${Math.round(view.z * 100)}%`}
           aria-label="Fit"
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/60 disabled:opacity-30 disabled:hover:bg-transparent">
+          className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-muted-foreground hover:bg-accent/60 disabled:opacity-30 disabled:hover:bg-transparent">
           <span aria-hidden className="text-[13px] leading-none">⛶</span>
           <span>Fit</span>
         </button>
