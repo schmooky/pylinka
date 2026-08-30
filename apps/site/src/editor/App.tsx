@@ -14,6 +14,7 @@ import {
 } from '@xyflow/react';
 import { useEditor } from './store';
 import { toFlow, FRAME_PREFIX, NOTE_PREFIX } from './graphAdapter';
+import { geometryOf, geometrySignature, reconcilePositions } from './reconcile';
 import { nodesBBox } from './annotate';
 import { PylinkaNode } from './components/PylinkaNode';
 import { CommentNode, NoteNode } from './components/AnnotationNodes';
@@ -60,6 +61,7 @@ function EditorApp() {
   const redo = useEditor((s) => s.redo);
   const pastCount = useEditor((s) => s.past);
   const futureCount = useEditor((s) => s.future);
+  const positions = useEditor((s) => s.positions);
 
   const exportJson = () => {
     const proj = snapshot();
@@ -202,6 +204,23 @@ function EditorApp() {
     setRfNodes(f.nodes);
     setRfEdges(f.edges);
   }, [structureSig]);
+
+  /**
+   * Keep the canvas's coordinates in step with the store's — for ANY change,
+   * not just an undo. React Flow owns the position of the nodes it draws and
+   * only takes ours when the structure changes, so anything that moves a node
+   * without adding or removing one (undo/redo of a move, an import, a reset, a
+   * re-layout) would otherwise rewind the store behind a canvas still drawing
+   * the old place. See reconcile.ts for why this is a no-op during a drag.
+   */
+  const geomSig = useMemo(
+    () => geometrySignature(positions, project.annotations),
+    [positions, project.annotations],
+  );
+  useEffect(() => {
+    const want = geometryOf(useEditor.getState().positions, useEditor.getState().project.annotations);
+    setRfNodes((ns) => reconcilePositions(ns, want));
+  }, [geomSig, setRfNodes]);
 
   useEffect(() => {
     setRfNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === selectedNodeId })));
