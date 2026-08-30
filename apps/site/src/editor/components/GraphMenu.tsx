@@ -91,7 +91,7 @@ export function GraphMenu({ target, onClose }: { target: MenuTarget; onClose(): 
       (NS_LABEL[s.namespace] ?? s.namespace).toLowerCase().includes(query);
     const order: readonly string[] = NS_ORDER;
     return order.flatMap((ns) =>
-      V1_SCHEMAS.filter((s) => s.namespace === ns && hit(s))
+      V1_SCHEMAS.filter((s) => s.namespace === ns && hit(s) && s.kind !== 'param.ref')
         .sort((a, b) => a.label.localeCompare(b.label))
         .map((s) => ({ kind: s.kind, label: s.label, ns })),
     );
@@ -100,6 +100,16 @@ export function GraphMenu({ target, onClose }: { target: MenuTarget; onClose(): 
   const drop = (kind: string) => {
     // the node's own top-left, so it lands under the cursor rather than beside it
     addNode(kind, target.flow.x - 105, target.flow.y - 14);
+    onClose();
+  };
+
+  /**
+   * A knob is not a node you look up by name — it is a thing you decide to add.
+   * It sat in the node list as "Param", which is both the wrong word and the
+   * wrong shelf, so it has its own button down with the other canvas actions.
+   */
+  const addKnob = () => {
+    addNode('param.ref', target.flow.x - 105, target.flow.y - 14);
     onClose();
   };
 
@@ -175,8 +185,11 @@ export function GraphMenu({ target, onClose }: { target: MenuTarget; onClose(): 
         ))}
       </div>
 
-      {/* canvas actions — annotations and locking, on the spot they apply to */}
+      {/* canvas actions — knobs, annotations and locking, on the spot they apply to */}
       <div className="border-t border-border p-1">
+        <Row onClick={addKnob} hint="live control">
+          Add knob
+        </Row>
         <Row
           onClick={() => {
             addFrame({ x: target.flow.x - 210, y: target.flow.y - 130, w: 420, h: 260 });

@@ -27,9 +27,10 @@ export const NODE_W = 210;
 /** Rendered height of a PylinkaNode (mirror of the component's row constants;
  *  the `ease` structural row is taller because it draws its curve inline). */
 export function estimateNodeHeight(kind: string): number {
-  // a knob draws its own face — header, scrub readout, output row — rather than
-  // a row per port, so the generic sum would put a frame's edge through it
-  if (kind === 'param.ref') return 96;
+  // a knob draws its own face — header, scrub readout, three range rows and an
+  // output row — rather than a row per port, so the generic sum would put a
+  // frame's edge through it
+  if (kind === 'param.ref') return 180;
   const s = getSchema(V1_CATALOG, kind);
   if (!s) return 80;
   const structuralH = s.structural.reduce((a, sp) => a + (sp.key === 'ease' ? 56 : 30), 0);

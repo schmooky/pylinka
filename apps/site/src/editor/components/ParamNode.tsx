@@ -11,7 +11,7 @@
  * preview's knob bus, the same path a game would use at runtime. Name, min, max
  * and default are the definition and do go through the store, so they undo.
  */
-import { memo, useRef, useState } from 'react';
+import { memo, useRef } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useEditor } from '../store';
 import { usePreview } from '../previewStore';
@@ -53,7 +53,6 @@ function ParamNodeInner({ data, selected }: NodeProps) {
   const setStructural = useEditor((s) => s.setStructural);
   const knobs = usePreview((s) => s.knobs);
   const setKnob = usePreview((s) => s.setKnob);
-  const [open, setOpen] = useState(false);
 
   const param = params.find((p) => p.id === node?.structural?.param);
   const tint = NS_TINT.param ?? 'var(--color-foreground)';
@@ -94,13 +93,6 @@ function ParamNodeInner({ data, selected }: NodeProps) {
           <span className="min-w-0 flex-1 truncate text-muted-foreground">no knob</span>
         )}
         <button
-          className="nodrag shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
-          title={open ? 'Hide range' : 'Edit range and default'}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => setOpen(!open)}>
-          {open ? '▴' : '▾'}
-        </button>
-        <button
           className="nodrag hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-black/20 hover:text-foreground group-hover/node:flex"
           title="Delete node"
           onPointerDown={(e) => e.stopPropagation()}
@@ -134,25 +126,27 @@ function ParamNodeInner({ data, selected }: NodeProps) {
                 className="absolute inset-y-0 left-0"
                 style={{ width: `${pct}%`, background: `color-mix(in oklab, ${tint} 22%, transparent)` }}
               />
-              <div className="relative flex h-full items-center justify-between px-2">
+              {/* the range used to be printed here too — it is a row below now */}
+              <div className="relative flex h-full items-center px-2">
                 <span className="font-mono text-[12px]">{value.toFixed(rangeDigits(min, max))}</span>
-                <span className="text-[9px] text-muted-foreground">
-                  {min} … {max}
-                </span>
               </div>
             </div>
 
-            {open && (
-              <div className="mt-2 grid grid-cols-3 gap-1.5">
-                <Num label="min" v={min} on={(v) => updateParam(param.id, { min: v })} />
-                <Num label="max" v={max} on={(v) => updateParam(param.id, { max: v })} />
-                <Num
-                  label="default"
-                  v={fallback}
-                  on={(v) => updateParam(param.id, { default: { t: 'f32', v } })}
-                />
-              </div>
-            )}
+            {/*
+              One field per row, always shown. These three numbers decide what
+              the knob even means; hiding them behind a disclosure made the node
+              look configured when it was not, and a grid of three cramped
+              inputs made them read as one setting rather than three.
+            */}
+            <div className="mt-2 flex flex-col">
+              <Num label="min" v={min} on={(v) => updateParam(param.id, { min: v })} />
+              <Num label="max" v={max} on={(v) => updateParam(param.id, { max: v })} />
+              <Num
+                label="default"
+                v={fallback}
+                on={(v) => updateParam(param.id, { default: { t: 'f32', v } })}
+              />
+            </div>
           </>
         )}
 
@@ -175,11 +169,11 @@ function rangeDigits(min: number, max: number): number {
 
 function Num({ label, v, on }: { label: string; v: number; on(v: number): void }) {
   return (
-    <label className="flex flex-col gap-0.5">
-      <span className="text-[9px] text-muted-foreground">{label}</span>
+    <label className="flex items-center justify-between gap-2" style={{ height: 24 }}>
+      <span className="text-muted-foreground">{label}</span>
       <input
         className="nodrag num"
-        style={{ width: '100%' }}
+        style={{ width: 76 }}
         type="number"
         value={v}
         onPointerDown={(e) => e.stopPropagation()}
