@@ -65,15 +65,17 @@ fn fs(in: VSOut) -> @location(0) vec4f {
 /** §13.1 blend states, premultiplied output assumed. */
 export function blendState(mode: 'normal' | 'add' | 'screen'): GPUBlendState {
   switch (mode) {
+    // the light modes keep the destination alpha — see webgl/engine.ts render()
+    // for why touching it made `add` composite exactly like `normal`
     case 'add':
       return {
         color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
-        alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+        alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' },
       };
     case 'screen':
       return {
         color: { srcFactor: 'one', dstFactor: 'one-minus-src', operation: 'add' },
-        alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+        alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' },
       };
     default:
       return {

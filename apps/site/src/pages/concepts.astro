@@ -146,6 +146,23 @@ import DocsLayout from '../layouts/DocsLayout.astro';
     texture with a visible orientation.
   </p>
 
+  <h2>Blend modes and draw order</h2>
+  <p>
+    An emitter draws with one of three blend modes. <strong>normal</strong> composites the sprite
+    over what is behind it. <strong>add</strong> and <strong>screen</strong> are light modes: they
+    add to what is behind rather than covering it, which is what turns a glow drawn on a black
+    background into light instead of a black box. Both leave the canvas&rsquo;s alpha alone, so the
+    scene behind the effect shows through the parts of a sprite that are dark — an opaque asset on
+    black keys itself out with no cutout needed.
+  </p>
+  <p>
+    Emitters draw in the order they appear in the project, which is the order of the tab strip and
+    of the list in <em>Project → Settings → Emitters</em>, where it can be reordered. The first is
+    drawn first and therefore sits furthest back. One exception is structural rather than a choice:
+    an emitter born from another one always draws after its parent, because it reads the parent's
+    particles on the frame they are born or die and so cannot run before it.
+  </p>
+
   <h2>Sub-emitters: spawning from another emitter</h2>
   <p>
     A system can be born from another system's particles instead of from the cursor. Point its

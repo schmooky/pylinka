@@ -97,6 +97,20 @@ describe('undo — emitters', () => {
 
   it('rename an emitter', () => roundTrip(() => store().renameSystem('s1', 'renamed')));
 
+  it('reorder emitters — the list is the draw order', () => {
+    store().addSystem();
+    const moved = store().activeSystemId;
+    roundTrip(() => store().moveSystem(moved, -1));
+  });
+
+  it('a reorder at either end is a no-op, not a wrap-around', () => {
+    const only = store().project.systems[0]!.id;
+    const before = store().project.systems.map((s) => s.id);
+    store().moveSystem(only, -1);
+    store().moveSystem(only, 1);
+    expect(store().project.systems.map((s) => s.id)).toEqual(before);
+  });
+
   it('mute an emitter', () => roundTrip(() => store().toggleSystem('s1')));
 
   it('change the blend mode', () => roundTrip(() => store().setActiveBlend('screen')));

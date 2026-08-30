@@ -27,6 +27,7 @@ export function ConfigModal() {
   const setActiveSystem = useEditor((s) => s.setActiveSystem);
   const removeSystem = useEditor((s) => s.removeSystem);
   const addSystem = useEditor((s) => s.addSystem);
+  const moveSystem = useEditor((s) => s.moveSystem);
   const setActiveBlend = useEditor((s) => s.setActiveBlend);
   const activeSystemId = useEditor((s) => s.activeSystemId);
   const pathEdit = usePreview((s) => s.pathEdit);
@@ -124,12 +125,15 @@ export function ConfigModal() {
             {section === 'emitters' && (
               <Group
                 title="Emitters"
-                hint="Each emitter is one particle system with its own graph. Pick one on the left to configure it.">
+                hint="Each emitter is one particle system with its own graph, and this list is the DRAW ORDER — top of the list is drawn first, so it sits furthest back.">
                 <div className="flex flex-col gap-1">
                   {project.systems.map((s, i) => (
                     <div
                       key={s.id}
                       className="flex items-center gap-2 rounded border border-border px-2 py-1.5 text-xs">
+                      <span className="w-10 shrink-0 text-[10px] text-muted-foreground">
+                        {i === 0 ? 'back' : i === project.systems.length - 1 ? 'front' : `#${i + 1}`}
+                      </span>
                       <input
                         className="num min-w-0 flex-1"
                         style={{ width: 'auto' }}
@@ -139,12 +143,28 @@ export function ConfigModal() {
                       <span className="shrink-0 text-[10px] text-muted-foreground">
                         {s.graph.nodes.length} nodes
                       </span>
+                      <span className="flex shrink-0 items-center">
+                        <button
+                          disabled={i === 0}
+                          title="Move back — drawn earlier, so behind the others"
+                          className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-25 disabled:hover:bg-transparent"
+                          onClick={() => moveSystem(s.id, -1)}>
+                          ↑
+                        </button>
+                        <button
+                          disabled={i === project.systems.length - 1}
+                          title="Move forward — drawn later, so on top"
+                          className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-25 disabled:hover:bg-transparent"
+                          onClick={() => moveSystem(s.id, 1)}>
+                          ↓
+                        </button>
+                      </span>
                       <button
                         className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
                         onClick={() => pick(`emitter:${s.id}`)}>
                         configure
                       </button>
-                      {project.systems.length > 1 && i > 0 && (
+                      {project.systems.length > 1 && (
                         <button
                           className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-destructive"
                           onClick={() => removeSystem(s.id)}>
@@ -155,7 +175,9 @@ export function ConfigModal() {
                   ))}
                 </div>
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  The first emitter is the one the project starts from and cannot be removed.
+                  An emitter born from another one is always drawn after its parent, whatever the
+                  order says — it reads the parent's particles on the frame they happen, so it
+                  cannot run first. A project keeps at least one emitter.
                 </p>
               </Group>
             )}

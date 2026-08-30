@@ -187,6 +187,12 @@ interface EditorState {
   toggleSystem(id: string): void;
   /** set the active system's blend mode (preview re-creates the engine) */
   setActiveBlend(mode: System['blendMode']): void;
+  /**
+   * Move an emitter one place in the project's order. That order IS the draw
+   * order — first is drawn first, so it ends up furthest back — and it is also
+   * what the tab strip shows.
+   */
+  moveSystem(id: string, dir: -1 | 1): void;
   /** make `childId` spawn on `parentId`'s particle deaths (null = born at cursor) */
   setSubParent(childId: string, parentId: string | null): void;
   /** which parent event the ACTIVE system spawns on ('death' by default) */
@@ -633,6 +639,19 @@ export const useEditor = create<EditorState>((set, get) => {
 
     setActiveBlend(mode) {
       commit((_p, sys) => { sys.blendMode = mode; }, true);
+    },
+
+    moveSystem(id, dir) {
+      // the preview builds one engine per emitter in this order and composites
+      // them in the order it built them, so a reorder is a re-create
+      commit((p) => {
+        const i = p.systems.findIndex((x) => x.id === id);
+        const j = i + dir;
+        if (i < 0 || j < 0 || j >= p.systems.length) return;
+        const moved = p.systems[i]!;
+        p.systems[i] = p.systems[j]!;
+        p.systems[j] = moved;
+      }, true);
     },
 
     setSubParent(childId, parentId) {
