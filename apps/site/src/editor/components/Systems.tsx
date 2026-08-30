@@ -1,7 +1,14 @@
 import { useState } from 'react';
 import { useEditor } from '../store';
 
-/** Emitter tab strip: switch / add / enable / rename / remove the systems in a project. */
+/**
+ * Emitter tabs.
+ *
+ * These are real tabs, not a row of buttons: the active one drops its bottom
+ * edge and takes the canvas colour, so the tab and the graph under it read as
+ * one surface. That is the whole point of the metaphor — the tab is a handle on
+ * the thing below it, and a floating pill says "button" instead.
+ */
 export function Systems() {
   const systems = useEditor((s) => s.project.systems);
   const activeId = useEditor((s) => s.activeSystemId);
@@ -40,25 +47,45 @@ export function Systems() {
   return (
     <div
       data-tour="emitters"
-      className="flex items-center gap-1 overflow-x-auto border-b border-border px-2 py-1.5 text-xs">
+      className="flex items-end gap-0.5 overflow-x-auto border-b border-border px-2 pt-1.5 text-xs"
+      style={{ background: 'var(--color-card)' }}>
       {systems.map((sys) => {
         const active = sys.id === activeId;
         return (
           <div key={sys.id}
-            className={`group flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 ${
-              active ? 'border-foreground/40 bg-accent' : 'border-border hover:bg-accent/50'
-            } ${sys.enabled ? '' : 'opacity-50'}`}>
+            className={`group relative flex shrink-0 items-center gap-1.5 rounded-t-md px-2.5 py-1.5 ${
+              active
+                ? 'border-x border-t border-border text-foreground'
+                : 'border-x border-t border-transparent text-muted-foreground hover:bg-accent/40'
+            } ${sys.enabled ? '' : 'opacity-50'}`}
+            style={
+              active
+                ? {
+                    background: 'var(--color-background)',
+                    // sit ON the strip's bottom border so the tab opens into the canvas
+                    marginBottom: -1,
+                    paddingBottom: 7,
+                  }
+                : { marginBottom: -1, paddingBottom: 6 }
+            }>
             <button title={sys.enabled ? 'Enabled — click to mute' : 'Muted — click to enable'}
               onClick={(e) => { e.stopPropagation(); toggleSystem(sys.id); }}
-              className={`h-2 w-2 shrink-0 rounded-full ${sys.enabled ? 'bg-emerald-400' : 'bg-muted-foreground/50'}`} />
+              className="h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{
+                background: sys.enabled
+                  ? 'color-mix(in oklab, var(--color-foreground) 70%, transparent)'
+                  : 'color-mix(in oklab, var(--color-muted-foreground) 45%, transparent)',
+              }} />
             {editing === sys.id ? (
               <input autoFocus defaultValue={sys.name}
                 className="w-24 bg-transparent outline-none"
                 onBlur={(e) => { renameSystem(sys.id, e.target.value || sys.name); setEditing(null); }}
                 onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditing(null); }} />
             ) : (
-              <button onClick={() => setActive(sys.id)} onDoubleClick={() => setEditing(sys.id)}
-                className={active ? 'text-foreground' : 'text-muted-foreground'}>
+              <button
+                title="Double-click to rename"
+                onClick={() => setActive(sys.id)}
+                onDoubleClick={() => setEditing(sys.id)}>
                 {sys.name}
               </button>
             )}
@@ -78,7 +105,8 @@ export function Systems() {
         );
       })}
       <button onClick={addSystem} title="Add an emitter"
-        className="ml-1 shrink-0 rounded-md border border-dashed border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+        style={{ marginBottom: -1 }}
+        className="ml-1 shrink-0 rounded-t-md px-2.5 py-1.5 pb-[6px] text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         + Emitter
       </button>
       {/* per-emitter configuration — including where its particles come from —
@@ -86,7 +114,8 @@ export function Systems() {
       <button
         onClick={() => openConfig(`emitter:${activeId}`)}
         title="Configure this emitter"
-        className="ml-auto shrink-0 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+        style={{ marginBottom: -1 }}
+        className="ml-auto shrink-0 rounded-t-md px-2.5 py-1.5 pb-[6px] text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         Configure
       </button>
     </div>

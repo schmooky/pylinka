@@ -211,22 +211,22 @@ function EditorApp() {
           title="Walk through building an effect: emitters, nodes and how to link them">
           Tutorial
         </button>
-        <div data-tour="undo" className="ml-auto flex items-center rounded-md border border-border">
+        <div data-tour="undo" className="ml-auto flex items-center gap-0.5">
           <button
             onClick={undo}
             disabled={pastCount === 0}
             title={`Undo (${modKey ? '\u2318' : 'Ctrl+'}Z) — ${pastCount} step${pastCount === 1 ? '' : 's'} back`}
             aria-label="Undo"
-            className="px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent">
-            ↶
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-25 disabled:hover:bg-transparent">
+            <HistoryIcon />
           </button>
           <button
             onClick={redo}
             disabled={futureCount === 0}
             title={`Redo (${modKey ? '\u21e7\u2318' : 'Ctrl+Shift+'}Z) — ${futureCount} step${futureCount === 1 ? '' : 's'} forward`}
             aria-label="Redo"
-            className="border-l border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent">
-            ↷
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-25 disabled:hover:bg-transparent">
+            <HistoryIcon flip />
           </button>
         </div>
       </header>
@@ -289,5 +289,32 @@ function EditorApp() {
       <AssetManager />
       <ConfigModal />
     </div>
+  );
+}
+
+/**
+ * Undo / redo. One shape, mirrored — an arrow curving back on itself, which is
+ * the gesture both actions describe. Drawn rather than typed: the arrow glyphs
+ * that read correctly here (↺ ↻ ⎌) pick up emoji presentation on some systems
+ * and land at a different weight from everything else in the bar.
+ */
+function HistoryIcon({ flip = false }: { flip?: boolean }) {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 15 15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      style={flip ? { transform: 'scaleX(-1)' } : undefined}>
+      {/* the arc: down the left, along the bottom, back up the right */}
+      <path d="M3.2 6.4a5 5 0 1 1 .6 5.1" />
+      {/* the head, sitting on the tail of the arc */}
+      <path d="M3.2 2.9v3.6h3.6" />
+    </svg>
   );
 }
