@@ -124,7 +124,7 @@ export function ProjectsMenu() {
   };
 
   const item =
-    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent text-foreground/90';
+    'flex w-full items-center gap-2 whitespace-nowrap rounded-md px-2 py-1.5 text-left hover:bg-accent text-foreground/90';
 
   return (
     <div ref={rootRef} className="relative">
@@ -134,17 +134,16 @@ export function ProjectsMenu() {
         Project ▾
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border border-border p-1.5 text-xs shadow-2xl" style={{ background: 'var(--color-popover)' }}>
+        <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-lg border border-border p-1.5 text-[11px] shadow-2xl" style={{ background: 'var(--color-popover)' }}>
           <button className={item} onClick={() => { setConfigSection('project'); setConfigOpen(true); setOpen(false); }}>
             Settings…
-            <span className="ml-auto text-[10px] text-muted-foreground">name · emitters · preview</span>
           </button>
           <div className="my-1 border-t border-border" />
           <button className={item} onClick={() => { newProject(); setOpen(false); }}>New project</button>
           <button className={item} onClick={duplicate}>Duplicate “{projectName}”</button>
           <button className={item} onClick={saveCurrent}>Save to library</button>
           <div className="my-1 border-t border-border" />
-          {lib.length === 0 && <div className="px-2 py-1.5 text-muted-foreground">Library is empty — save the current project.</div>}
+          {lib.length === 0 && <div className="px-2 py-1.5 text-muted-foreground">No saved projects yet.</div>}
           {lib.map((e) => (
             <div key={e.id} className="group flex items-center gap-1 rounded-md px-1 hover:bg-accent">
               <button className="min-w-0 flex-1 truncate px-1 py-1.5 text-left" title={new Date(e.updatedAt).toLocaleString()} onClick={() => load(e)}>
