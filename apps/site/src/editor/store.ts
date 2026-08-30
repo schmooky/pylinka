@@ -246,6 +246,13 @@ interface EditorState {
   /** how many steps are on each stack — the header buttons read these */
   past: number;
   future: number;
+  /**
+   * Bumped on every undo/redo. React Flow owns the node positions it renders and
+   * only re-reads them when the graph STRUCTURE changes, so a step that moved
+   * nothing but coordinates would revert the store and leave the canvas showing
+   * the old drag. The canvas watches this to resync.
+   */
+  histRev: number;
   undo(): void;
   redo(): void;
   reset(): void;
@@ -389,6 +396,7 @@ export const useEditor = create<EditorState>((set, get) => {
         selectedNodeId: null,
         rev: s.rev + 1,
         texRev: s.texRev + 1,
+        histRev: s.histRev + 1,
         past: past.length,
         future: future.length,
       };
@@ -428,6 +436,7 @@ export const useEditor = create<EditorState>((set, get) => {
     texRev: 0,
     past: 0,
     future: 0,
+    histRev: 0,
     assetsOpen: false,
     system: () => activeSysOf(get().project),
     snapshot: () => {
