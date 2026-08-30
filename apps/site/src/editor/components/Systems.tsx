@@ -47,33 +47,18 @@ export function Systems() {
   return (
     <div
       data-tour="emitters"
-      className="flex items-end gap-0.5 overflow-x-auto border-b border-border px-2 pt-1.5 text-xs"
+      className="flex items-end gap-0.5 overflow-x-auto px-2 pt-1.5 text-xs"
       style={{ background: 'var(--color-card)' }}>
       {systems.map((sys) => {
         const active = sys.id === activeId;
         return (
           <div key={sys.id}
-            className={`group relative flex shrink-0 items-center gap-1.5 rounded-t-md px-2.5 py-1.5 ${
+            className={`group flex shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 py-1.5 ${
               active
-                ? 'border-x border-t border-border text-foreground'
-                : 'border-x border-t border-transparent text-muted-foreground hover:bg-accent/40'
+                ? 'border-border text-foreground'
+                : 'border-b border-transparent border-b-border text-muted-foreground hover:bg-accent/40'
             } ${sys.enabled ? '' : 'opacity-50'}`}
             style={active ? { background: 'var(--color-background)' } : undefined}>
-            {/*
-              The strip's bottom border runs the full width and would draw a
-              line right under the active tab, cutting it off from the canvas it
-              is a handle on. This paints that one row back in the canvas colour
-              for exactly the tab's width. A negative margin got close and left a
-              hairline at fractional device pixel ratios; covering the row is
-              exact at any DPR.
-            */}
-            {active && (
-              <span
-                aria-hidden
-                className="absolute inset-x-0 h-px"
-                style={{ bottom: -1, background: 'var(--color-background)' }}
-              />
-            )}
             <button title={sys.enabled ? 'Enabled — click to mute' : 'Muted — click to enable'}
               onClick={(e) => { e.stopPropagation(); toggleSystem(sys.id); }}
               className="h-1.5 w-1.5 shrink-0 rounded-full"
@@ -111,15 +96,23 @@ export function Systems() {
         );
       })}
       <button onClick={addSystem} title="Add an emitter"
-        className="ml-1 shrink-0 rounded-t-md px-2.5 py-1.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
+        className="ml-1 shrink-0 rounded-t-md border-b border-border px-2.5 py-1.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         + Emitter
       </button>
+      {/*
+        The line under the strip is drawn by everything EXCEPT the active tab —
+        this spacer carries it across the empty stretch. Drawing it on the strip
+        and covering the tab's slice back over was the obvious way round and left
+        a hairline: the cover and the border never land on the same device pixel
+        at fractional DPRs. Nothing to cover if nothing draws it there.
+      */}
+      <div className="min-w-2 flex-1 border-b border-border" />
       {/* per-emitter configuration — including where its particles come from —
           lives in Project → Settings, so the strip stays a list of names */}
       <button
         onClick={() => openConfig(`emitter:${activeId}`)}
         title="Configure this emitter"
-        className="ml-auto shrink-0 rounded-t-md px-2.5 py-1.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
+        className="shrink-0 rounded-t-md border-b border-border px-2.5 py-1.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground">
         Configure
       </button>
     </div>
