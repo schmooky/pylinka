@@ -180,7 +180,7 @@ export function ReferencePanel({ onClose }: { onClose(): void }) {
               Reset fit
             </button>
             <button
-              className="rounded-md border px-2 py-1 text-muted-foreground hover:bg-black/20 hover:text-[#f87171]"
+              className="rounded-md border px-2 py-1 text-muted-foreground hover:bg-black/20 hover:text-destructive"
               style={{ borderColor: 'var(--color-border)' }}
               title="Remove this image from the project"
               onClick={() => ref.id && removeReference(ref.id)}>

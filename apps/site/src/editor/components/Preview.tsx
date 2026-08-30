@@ -253,7 +253,7 @@ export function Preview() {
     for (const p of projRef.current.params) if (p.default.t === 'f32') init[p.name] = p.default.v;
     const cur = usePreview.getState().knobs;
     setKnobsStore(Object.keys(cur).length > 0 ? cur : init);
-    // let the left-panel Knobs tab push live values into the running handles
+    // let a knob node on the canvas push live values into the running handles
     usePreview.getState().setApply((name, v) => fxRef.current.forEach((h) => h.setKnob(name, v)));
     setError('');
     void recreate();
@@ -438,7 +438,7 @@ export function Preview() {
         {refOpen && <ReferencePanel onClose={() => setRefOpen(false)} />}
         <PathOverlay editing={pathEdit} />
         {pathEdit && (
-          <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 px-2 py-1 text-[10px] text-[#c4b5fd]">
+          <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 px-2 py-1 text-[10px] text-foreground">
             drawing path — click to add · drag to move · double-click to delete
           </div>
         )}

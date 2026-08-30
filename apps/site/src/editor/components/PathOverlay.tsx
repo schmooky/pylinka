@@ -73,7 +73,7 @@ export function PathOverlay({ editing }: PathOverlayProps) {
         <polyline
           points={curve}
           fill="none"
-          stroke="#a78bfa"
+          stroke="oklch(0.86 0 0)"
           strokeOpacity={editing ? 0.9 : 0.45}
           strokeWidth={editing ? 0.6 : 0.4}
           vectorEffect="non-scaling-stroke"
@@ -87,7 +87,7 @@ export function PathOverlay({ editing }: PathOverlayProps) {
             cx={p[0] * VB}
             cy={p[1] * VB}
             r={1.6}
-            fill={i === 0 ? '#34d399' : '#a78bfa'}
+            fill={i === 0 ? 'oklch(0.98 0 0)' : 'oklch(0.62 0 0)'}
             stroke="#0a0a0b"
             style={{ cursor: 'grab', strokeWidth: 1, vectorEffect: 'non-scaling-stroke' as never }}
             onPointerDown={(e) => {

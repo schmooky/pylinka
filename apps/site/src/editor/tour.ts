@@ -26,7 +26,7 @@ const STEPS: { anchor?: string; title: string; text: string }[] = [
   {
     anchor: 'graph',
     title: 'Nodes come from the canvas',
-    text: 'Right-click anywhere here (or click empty space) for the node menu. Type to filter, Enter to drop — the node lands where you clicked. Comment frames, sticky notes and locking live in the same menu.',
+    text: 'Right-click anywhere here for the node menu. Type to filter, Enter to drop — the node lands where you clicked. Comment frames, sticky notes and locking live in the same menu.',
   },
   {
     anchor: 'graph',

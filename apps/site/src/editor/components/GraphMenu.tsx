@@ -4,8 +4,10 @@
  *
  * The node palette used to be a permanent 256px dock. You reach for it a few
  * times per session and it charged rent the whole time, so it now opens where
- * you clicked: right-click (or click empty canvas) gives a search box and the
- * node list, and a node lands under the cursor instead of at the view centre.
+ * you point: right-click gives a search box and the node list, and a node lands
+ * under the cursor instead of at the view centre. Left-click is left alone —
+ * it selects and deselects, and a menu that appeared every time you dismissed a
+ * selection would be in the way constantly.
  * Comment frames, sticky notes and locking live here too, for the same reason —
  * they are things you do to a spot on the canvas.
  */

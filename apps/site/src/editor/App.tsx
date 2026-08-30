@@ -15,6 +15,7 @@ import { useEditor } from './store';
 import { toFlow, FRAME_PREFIX, NOTE_PREFIX } from './graphAdapter';
 import { geometryOf, geometrySignature, reconcilePositions } from './reconcile';
 import { PylinkaNode } from './components/PylinkaNode';
+import { ParamNode } from './components/ParamNode';
 import { CommentNode, NoteNode } from './components/AnnotationNodes';
 import { GraphMenu, type MenuTarget } from './components/GraphMenu';
 import { ConfigModal } from './components/ConfigModal';
@@ -24,7 +25,7 @@ import { Systems } from './components/Systems';
 import { ProjectsMenu } from './components/ProjectsMenu';
 import { AssetManager } from './components/AssetManager';
 
-const nodeTypes = { pylinka: PylinkaNode, comment: CommentNode, note: NoteNode };
+const nodeTypes = { pylinka: PylinkaNode, param: ParamNode, comment: CommentNode, note: NoteNode };
 
 export function App() {
   return (
@@ -256,12 +257,7 @@ function EditorApp() {
             }
             onEdgesDelete={(es) => es.forEach((e) => deleteEdge(e.id))}
             onNodeClick={(_e, n) => select(n.id)}
-            onPaneClick={(e) => {
-              select(null);
-              // a plain click on empty canvas opens the menu too: the palette is
-              // no longer a dock, so this is the primary way to reach it
-              openMenu(e as unknown as React.MouseEvent);
-            }}
+            onPaneClick={() => select(null)}
             onPaneContextMenu={(e) => openMenu(e as unknown as React.MouseEvent)}
             onNodeContextMenu={(e, n) =>
               openMenu(e as unknown as React.MouseEvent, n.id.includes(':') ? n.id : undefined)

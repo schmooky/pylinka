@@ -163,7 +163,7 @@ export function generateAnnotations(
         w: 260,
         h: 150,
         text: noteText,
-        color: '#a78bfa',
+        color: 'oklch(0.82 0 0)',
       });
     }
   }

@@ -126,7 +126,7 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
   if (!node) return null;
   const schema = getSchema(V1_CATALOG, node.kind);
   if (!schema) {
-    return <div className="rounded-md border border-[#f87171] bg-card px-3 py-2 text-xs">{node.kind} (unknown)</div>;
+    return <div className="rounded-md border border-destructive bg-card px-3 py-2 text-xs">{node.kind} (unknown)</div>;
   }
 
   const inputs = schema.inputs;
@@ -194,7 +194,7 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
               )}
               {!isConnected && (bound ? (
                 <span className="nodrag flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px]"
-                  style={{ background: 'color-mix(in oklab, #a78bfa 20%, transparent)', color: '#c4b5fd' }}
+                  style={{ background: 'color-mix(in oklab, var(--color-foreground) 14%, transparent)', color: 'var(--color-foreground)' }}
                   title={`Driven by knob “${bound.name}”`}
                   onPointerDown={(e) => e.stopPropagation()}>
                   ◆ {bound.name}
@@ -204,7 +204,7 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
                 <span className="flex items-center gap-1">
                   {p.type === 'f32' && (
                     <button
-                      className="nodrag h-4 w-4 rounded text-[10px] leading-none text-muted-foreground opacity-0 transition-opacity hover:text-[#c4b5fd] group-hover/row:opacity-100"
+                      className="nodrag h-4 w-4 rounded text-[10px] leading-none text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/row:opacity-100"
                       title="Promote to knob (live slider in the preview)"
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={() => promoteValue(node.id, p.id)}>

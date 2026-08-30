@@ -72,7 +72,7 @@ export function seedProject(): PylinkaProject {
   (project as EditorProject).annotations = generateAnnotations(
     project,
     project.editor!.nodePositions!,
-    'Coin Spark Trail\n\nAn orbiting emitter leaves a cooling spark trail. Wind is knob-driven — try the sliders in the Knobs tab, or promote any ◆ value to a new knob.',
+    'Coin Spark Trail\n\nAn orbiting emitter leaves a cooling spark trail. Wind is knob-driven — drag the value on a ◆ knob node to scrub it live, or press the ◆ beside any number to promote it into one.',
   );
   return project;
 }

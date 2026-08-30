@@ -1,9 +1,10 @@
 /**
- * Small store for state SHARED between the preview and the left-panel tabs
- * (Knobs / Emitter), kept out of the project store so it never touches undo.
- * The Preview owns the live particle handles; it registers `apply` so a knob
- * write from the left panel reaches them, and it reads `pathEdit` to toggle the
- * trajectory overlay drawn on the canvas.
+ * Live state shared between the preview and the things that drive it — knob
+ * nodes on the canvas, and the trajectory editor in Settings. Kept out of the
+ * project store on purpose: a knob's VALUE is what the effect is doing right
+ * now, the same thing a game writes with setKnob() at runtime, so it is not
+ * part of the document and does not belong in undo. The knob's definition —
+ * name, range, default — does, and lives in the project.
  */
 import { create } from 'zustand';
 

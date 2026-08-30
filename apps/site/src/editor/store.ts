@@ -474,6 +474,22 @@ export const useEditor = create<EditorState>((set, get) => {
         for (const st of schema?.structural ?? []) structural[st.key] = st.default;
         const node: Node = { id: newId, kind, values };
         if (Object.keys(structural).length) node.structural = structural;
+        // A knob node with no knob behind it is a dead end, and making the user
+        // define one somewhere else first is exactly the split this node exists
+        // to close — so dropping one creates its knob.
+        if (kind === 'param.ref') {
+          const pid = nextParamId(p);
+          p.params.push({
+            id: pid,
+            name: uniqueParamName(p, 'knob'),
+            type: 'f32',
+            min: 0,
+            max: 1,
+            scale: 'linear',
+            default: { t: 'f32', v: 0.5 },
+          });
+          node.structural = { ...(node.structural ?? {}), param: pid };
+        }
         sys.graph.nodes.push(node);
       }, false, undefined, (_p, prev) => ({
         positions: { ...prev.positions, [newId]: { x, y } },
