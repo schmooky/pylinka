@@ -6,8 +6,20 @@
 import { getSchema, V1_CATALOG, type Graph, type PylinkaProject } from '@pylinka/graph';
 import type { Annotations, CommentFrame, StickyNote } from './types';
 
-/** Accent palette for frames & notes (mirrors the node namespace tints). */
-export const ANNOTATION_COLORS = ['#a78bfa', '#22d3ee', '#34d399', '#fbbf24', '#f87171', '#e879f9', '#94a3b8'];
+/**
+ * Accent palette for frames & notes — a grey ramp, like everything else in the
+ * editor. Frames are large and sit behind the graph, so on the old colour
+ * palette they were the loudest thing on screen, competing with the effect in
+ * the preview. Lightness separates them well enough to group by.
+ */
+export const ANNOTATION_COLORS = [
+  'oklch(0.92 0 0)',
+  'oklch(0.82 0 0)',
+  'oklch(0.72 0 0)',
+  'oklch(0.62 0 0)',
+  'oklch(0.52 0 0)',
+  'oklch(0.44 0 0)',
+];
 
 export const NODE_W = 210;
 
@@ -58,9 +70,9 @@ function groupOfOutput(kind: string): 'spawn' | 'forces' | 'look' | undefined {
 }
 
 const GROUP_META: Record<'spawn' | 'forces' | 'look', { title: string; color: string }> = {
-  spawn: { title: 'Spawn — where & how particles are born', color: '#fbbf24' },
-  forces: { title: 'Forces — motion while alive', color: '#34d399' },
-  look: { title: 'Look — color & size over life', color: '#22d3ee' },
+  spawn: { title: 'Spawn — where & how particles are born', color: 'oklch(0.82 0 0)' },
+  forces: { title: 'Forces — motion while alive', color: 'oklch(0.66 0 0)' },
+  look: { title: 'Look — color & size over life', color: 'oklch(0.50 0 0)' },
 };
 
 let annId = 0;

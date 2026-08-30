@@ -3,23 +3,36 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* shadcn zinc monochrome (dark) */
+/*
+ * Monochrome workbench palette — every colour is `oklch(L 0 0)`, i.e. zero
+ * chroma, so the whole editor is grey and the only colour on screen is the
+ * effect being authored. Lifted from the spine-benchmark workbench, which
+ * solved the same problem: a tool whose subject is colour cannot afford to
+ * have any of its own.
+ */
 :root {
-  --radius: 0.5rem;
-  --background: oklch(0.141 0.005 285.823);
+  --radius: 0.625rem;
+  --background: oklch(0.205 0 0);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --border: oklch(1 0 0 / 12%);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.21 0.006 285.885);
-  /* port type colors */
-  --t-f32: oklch(0.72 0.01 286);
-  --t-vec2: oklch(0.72 0.12 235);
-  --t-vec4: oklch(0.7 0.16 300);
-  --t-bool: oklch(0.8 0.13 85);
+  --card: oklch(0.24 0 0);
+  --popover: oklch(0.24 0 0);
+  --muted: oklch(0.27 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.32 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.72 0 0);
+  --primary: oklch(0.82 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.637 0.237 25.331);
+  /*
+   * Port types read as lightness steps rather than hues. A wire's type still
+   * separates at a glance, but nothing competes with the preview.
+   */
+  --t-f32: oklch(0.62 0 0);
+  --t-vec2: oklch(0.78 0 0);
+  --t-vec4: oklch(0.92 0 0);
+  --t-bool: oklch(0.45 0 0);
 }
 
 @theme inline {
@@ -32,6 +45,10 @@
   --color-border: var(--border);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-popover: var(--popover);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }

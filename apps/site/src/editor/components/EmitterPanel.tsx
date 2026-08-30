@@ -24,11 +24,57 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
   const setEmitter = useEditor((s) => s.setEmitter);
   const [maskOpen, setMaskOpen] = useState(false);
   const burst = emitter.burst ?? { count: 120, interval: 1.5 };
+  // where this emitter's particles come from: the cursor, or another emitter's
+  // particles at the moment they are born or die
+  const systems = useEditor((s) => s.project.systems);
+  const activeId = useEditor((s) => s.activeSystemId);
+  const parentId = useEditor((s) => (s.project.subEmitters ?? {})[s.activeSystemId] ?? '');
+  const setSubParent = useEditor((s) => s.setSubParent);
+  const setSubTrigger = useEditor((s) => s.setSubTrigger);
+  const trigger = useEditor((s) => {
+    const sys = s.project.systems.find((x) => x.id === s.activeSystemId);
+    return sys?.graph.nodes.find((n) => n.kind === 'output.deathBurst')?.structural?.on === 'birth'
+      ? 'birth'
+      : 'death';
+  });
+  const parentChoices = systems.filter((s) => s.id !== activeId);
 
   const patchPath = (patch: Partial<EmitterPathData>) => setPath({ ...(path ?? DEFAULT_PATH), ...patch });
 
   return (
     <div className="text-xs">
+      {/* ---- where particles come from ---- */}
+      {parentChoices.length > 0 && (
+        <>
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Born from
+          </div>
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <select
+              className="sel"
+              value={parentId}
+              onChange={(e) => setSubParent(activeId, e.target.value || null)}>
+              <option value="">the cursor / this emitter</option>
+              {parentChoices.map((s) => (
+                <option key={s.id} value={s.id}>
+                  particles of “{s.name}”
+                </option>
+              ))}
+            </select>
+            {parentId !== '' && (
+              <select
+                className="sel"
+                value={trigger}
+                title="Which moment in the parent particle's life spawns one of these"
+                onChange={(e) => setSubTrigger(e.target.value as 'death' | 'birth')}>
+                <option value="death">on their deaths</option>
+                <option value="birth">on their births</option>
+              </select>
+            )}
+          </div>
+        </>
+      )}
+
       {/* ---- spawn (how many & how) ---- */}
       <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         Spawn — “{systemName}”

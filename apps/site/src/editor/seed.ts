@@ -19,7 +19,7 @@ export function seedProject(): PylinkaProject {
     assets: [],
     systems: [
       {
-        id: 's1', name: 'sparks', capacity: 6000, blendMode: 'add', enabled: true, space: 'world',
+        id: 's1', name: 'default', capacity: 6000, blendMode: 'add', enabled: true, space: 'world',
         emitter: { mode: 'flow', rate: 420, rateOverDistance: 1.4 },
         graph: {
           nodes: [

@@ -74,10 +74,10 @@ function initialBackend(): BackendChoice {
 /** The single active pointer tool for the preview. Scroll always zooms; Fit resets. */
 type Tool = 'pan' | 'follow' | 'orbit' | 'spawn';
 const TOOLS: { id: Tool; icon: string; label: string; hint: string }[] = [
-  { id: 'pan', icon: '✋', label: 'Pan', hint: 'drag to move the view · scroll to zoom' },
+  { id: 'pan', icon: '⤧', label: 'Pan', hint: 'drag to move the view · scroll to zoom' },
   { id: 'follow', icon: '⌖', label: 'Follow', hint: 'the emitter tracks your cursor' },
-  { id: 'orbit', icon: '⟳', label: 'Orbit', hint: 'the emitter circles the centre' },
-  { id: 'spawn', icon: '✛', label: 'Spawn', hint: 'click the preview to burst there' },
+  { id: 'orbit', icon: '◌', label: 'Orbit', hint: 'the emitter circles the centre' },
+  { id: 'spawn', icon: '✳', label: 'Burst', hint: 'click the preview to burst there' },
 ];
 
 export function Preview() {
@@ -112,7 +112,12 @@ export function Preview() {
   const burstCountRef = useRef(burstCount);
   burstCountRef.current = burstCount;
   const spawnReq = useRef<{ x: number; y: number } | null>(null);
-  const [hud, setHud] = useState('');
+  /**
+   * Errors only. The fps / alive readout that used to live up here is gone for
+   * now, but a failed engine create still has to say so — silently rendering
+   * nothing is the worst version of that.
+   */
+  const [error, setError] = useState('');
   // scene reference: open panel = the image takes the pointer so it can be
   // dragged into place; closed = inert, and pan/spawn behave as before
   const [refOpen, setRefOpen] = useState(false);
@@ -221,7 +226,7 @@ export function Preview() {
         handles.push(h);
         sysIds.push(sys.id);
       } catch (e) {
-        setHud(String(e));
+        setError(String(e));
       }
     }
     fxRef.current = handles;
@@ -250,14 +255,13 @@ export function Preview() {
     setKnobsStore(Object.keys(cur).length > 0 ? cur : init);
     // let the left-panel Knobs tab push live values into the running handles
     usePreview.getState().setApply((name, v) => fxRef.current.forEach((h) => h.setKnob(name, v)));
-    setHud('');
+    setError('');
     void recreate();
 
     let raf = 0;
     let last = performance.now();
     let t = 0;
-    let acc = 0;
-    let frames = 0;
+
     const loop = (now: number) => {
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
@@ -271,7 +275,7 @@ export function Preview() {
           ex = canvas.width / 2 + Math.cos(t * 1.8) * r;
           ey = canvas.height / 2 + Math.sin(t * 1.8) * r;
         } else { ex = canvas.width / 2; ey = canvas.height / 2; }
-        let alive = 0;
+        const alive = 0;
         for (let i = 0; i < handles.length; i++) {
           const fx = handles[i]!;
           // a system with a trajectory spline follows it; others follow mouse/orbit
@@ -304,12 +308,9 @@ export function Preview() {
           fx.update(dt);
         }
         spawnReq.current = null;
-        acc += dt; frames++;
-        if (acc >= 0.5) {
-          for (const fx of handles) alive += fx.aliveCount();
-          setHud(`${Math.round(frames / acc)} fps · ${alive.toLocaleString()} alive`);
-          acc = 0; frames = 0;
-        }
+        // the fps / alive readout is gone for now, so nothing reads these back
+        // from the GPU each half-second — aliveCount() is a synchronous stall
+        void alive;
       }
       raf = requestAnimationFrame(loop);
     };
@@ -342,7 +343,7 @@ export function Preview() {
     try {
       if (!handles.every((fx) => fx.apply(eff))) void recreate();
     } catch (e) {
-      setHud(String(e));
+      setError(String(e));
       void recreate();
     }
   }, [rev]);
@@ -409,20 +410,6 @@ export function Preview() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-xs">
-        <span className="font-medium">Preview</span>
-        <select
-          value={backend}
-          onChange={(e) => setBackend(e.target.value as BackendChoice)}
-          className="rounded-md border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground"
-          title="Simulation backend — compiled backends run the graph as generated GPU code"
-        >
-          {(Object.keys(BACKEND_LABEL) as BackendChoice[]).map((k) => (
-            <option key={k} value={k}>{BACKEND_LABEL[k]}</option>
-          ))}
-        </select>
-        <span className="min-w-0 flex-1 truncate text-right font-mono text-muted-foreground">{hud}</span>
-      </div>
       <div
         ref={wrapRef}
         className="relative min-h-[340px] flex-1 overflow-hidden bg-black"
@@ -455,81 +442,78 @@ export function Preview() {
             drawing path — click to add · drag to move · double-click to delete
           </div>
         )}
+        {error !== '' && (
+          <div className="absolute inset-x-2 top-2 z-10 rounded-md border border-destructive/40 bg-black/80 px-2 py-1.5 text-[10px] text-destructive">
+            {error}
+          </div>
+        )}
         {recompiled !== '' && (
           <div className="pointer-events-none absolute right-2 top-2 z-10 rounded-md bg-black/70 px-2 py-1 text-[10px] text-amber-300">
             {recompiled}
           </div>
         )}
-        {/* vertical tool palette — one active pointer tool at a time */}
-        <div
-          className="absolute left-2 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-1 rounded-lg border p-1 shadow-lg"
-          style={{ background: 'color-mix(in oklab, var(--color-card) 85%, transparent)', borderColor: 'var(--color-border)' }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onWheel={(e) => e.stopPropagation()}>
-          {TOOLS.map((tl) => (
-            <button
-              key={tl.id}
-              onClick={() => { setTool(tl.id); if (tl.id !== 'follow') mouseRef.current = null; }}
-              title={`${tl.label} — ${tl.hint}`}
-              aria-label={tl.label}
-              className={`group relative grid h-8 w-8 place-items-center rounded-md text-sm ${tool === tl.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
-              <span aria-hidden>{tl.icon}</span>
-              <Tip>
-                <b>{tl.label}</b> · {tl.hint}
-              </Tip>
-            </button>
-          ))}
-          <span className="my-0.5 h-px w-full bg-border" />
-          <button
-            onClick={() => setRefOpen((v) => !v)}
-            title="Scene reference — drop the artwork this effect sits on under the preview"
-            aria-label="Scene reference"
-            className={`group relative grid h-8 w-8 place-items-center rounded-md text-sm ${refOpen ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
-            <span aria-hidden>🖼</span>
-            <Tip>
-              <b>Reference</b> · lay the real screen art under the effect · drag to place it
-            </Tip>
-          </button>
-          <button
-            onClick={fitView}
-            disabled={view.z === 1 && view.x === 0 && view.y === 0}
-            title="Fit — reset zoom & pan"
-            aria-label="Fit"
-            className="group relative grid h-8 w-8 place-items-center rounded-md text-sm text-muted-foreground hover:bg-accent disabled:opacity-40">
-            <span aria-hidden>⛶</span>
-            <Tip><b>Fit</b> · reset zoom &amp; pan · {Math.round(view.z * 100)}%</Tip>
-          </button>
-        </div>
       </div>
-      <div className="flex items-center gap-2 border-t border-border px-3 py-2 text-xs text-muted-foreground">
-        <span className="min-w-0 flex-1 truncate">
-          <b className="text-foreground">{TOOLS.find((t) => t.id === tool)?.label}</b> · {TOOLS.find((t) => t.id === tool)?.hint}
-        </span>
-        {/* fire a burst on the active emitter now (runtime: handle.spawnBurst(n)) */}
-        <span>burst</span>
-        <input
-          type="number" min={1} value={burstCount}
-          onChange={(e) => setBurstCount(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
-          className="num" style={{ width: 48 }}
-          title="Particles per manual burst" />
+      {/*
+        Tools sit under the canvas rather than floating over it: they were
+        covering the very thing they act on, and a bar has room for labels.
+      */}
+      <div className="flex items-center gap-1 border-t border-border px-2 py-1.5 text-xs">
+        {TOOLS.map((tl) => (
+          <button
+            key={tl.id}
+            onClick={() => {
+              setTool(tl.id);
+              if (tl.id !== 'follow') mouseRef.current = null;
+            }}
+            title={`${tl.label} — ${tl.hint}`}
+            aria-label={tl.label}
+            className={`flex items-center gap-1.5 rounded-md px-2 py-1 ${
+              tool === tl.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60'
+            }`}>
+            <span aria-hidden className="text-[13px] leading-none">{tl.icon}</span>
+            <span>{tl.label}</span>
+          </button>
+        ))}
         <button
-          className="rounded-md border border-border px-2 py-1 hover:bg-accent hover:text-foreground"
+          onClick={fitView}
+          disabled={view.z === 1 && view.x === 0 && view.y === 0}
+          title={`Fit — reset zoom & pan · ${Math.round(view.z * 100)}%`}
+          aria-label="Fit"
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/60 disabled:opacity-30 disabled:hover:bg-transparent">
+          <span aria-hidden className="text-[13px] leading-none">⛶</span>
+          <span>Fit</span>
+        </button>
+
+        <span className="mx-1 h-4 w-px bg-border" />
+
+        <input
+          type="number"
+          min={1}
+          value={burstCount}
+          onChange={(e) => setBurstCount(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
+          className="num"
+          style={{ width: 52 }}
+          title="Particles per manual burst"
+        />
+        <button
+          className="rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
           title="Spawn a burst on the active emitter now — the runtime API is handle.spawnBurst(n)"
           onClick={spawnActive}>
           Burst ▸
         </button>
+
+        <select
+          value={backend}
+          onChange={(e) => setBackend(e.target.value as BackendChoice)}
+          className="sel ml-auto"
+          title="Simulation backend — compiled backends run the graph as generated GPU code">
+          {(Object.keys(BACKEND_LABEL) as BackendChoice[]).map((k) => (
+            <option key={k} value={k}>
+              {BACKEND_LABEL[k]}
+            </option>
+          ))}
+        </select>
       </div>
     </div>
-  );
-}
-
-/** Hover tooltip for the vertical tool palette — appears to the right of a button. */
-function Tip({ children }: { children: React.ReactNode }) {
-  return (
-    <span
-      className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md border px-2 py-1 text-[10px] font-normal shadow-lg group-hover:block group-focus:block"
-      style={{ background: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-foreground)' }}>
-      {children}
-    </span>
   );
 }

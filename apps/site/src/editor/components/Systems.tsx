@@ -10,17 +10,8 @@ export function Systems() {
   const removeSystem = useEditor((s) => s.removeSystem);
   const renameSystem = useEditor((s) => s.renameSystem);
   const toggleSystem = useEditor((s) => s.toggleSystem);
-  const setSubParent = useEditor((s) => s.setSubParent);
-  const setSubTrigger = useEditor((s) => s.setSubTrigger);
-  const parentId = useEditor((s) => (s.project.subEmitters ?? {})[s.activeSystemId] ?? '');
-  // read the trigger off the graph so it stays in step when the node is edited
-  // directly on the canvas
-  const trigger = useEditor((s) => {
-    const sys = s.project.systems.find((x) => x.id === s.activeSystemId);
-    return sys?.graph.nodes.find((n) => n.kind === 'output.deathBurst')?.structural?.on === 'birth'
-      ? 'birth'
-      : 'death';
-  });
+  const setConfigOpen = useEditor((s) => s.setConfigOpen);
+  const setConfigSection = useEditor((s) => s.setConfigSection);
   const project = useEditor((s) => s.project);
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -33,13 +24,23 @@ export function Systems() {
     return out;
   };
 
-  const activeName = systems.find((s) => s.id === activeId)?.name ?? '';
-  // valid parents = every other system (the store rejects cycles on commit)
-  const parentChoices = systems.filter((s) => s.id !== activeId);
+  const openConfig = (section: string) => {
+    setConfigSection(section);
+    setConfigOpen(true);
+  };
+
+  /** A sub-emitter says so on its tab — it is not born at the cursor like the rest. */
+  const bornFrom = (sysId: string): string | undefined => {
+    const parent = (project.subEmitters ?? {})[sysId];
+    if (!parent) return undefined;
+    const name = project.systems.find((s) => s.id === parent)?.name;
+    return name ? `born from “${name}”` : undefined;
+  };
 
   return (
-    <div className="flex items-center gap-1 overflow-x-auto border-b border-border bg-card/40 px-2 py-1.5 text-xs">
-      <span className="mr-1 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Emitters</span>
+    <div
+      data-tour="emitters"
+      className="flex items-center gap-1 overflow-x-auto border-b border-border px-2 py-1.5 text-xs">
       {systems.map((sys) => {
         const active = sys.id === activeId;
         return (
@@ -61,6 +62,9 @@ export function Systems() {
                 {sys.name}
               </button>
             )}
+            {bornFrom(sys.id) !== undefined && (
+              <span title={bornFrom(sys.id)} className="shrink-0 text-[10px] leading-none opacity-70">↳</span>
+            )}
             {badges(sys.id).map((b) => (
               <span key={b.icon} title={`${b.label} — see the Emitter/Assets tabs`} className="text-[10px] leading-none opacity-80">
                 {b.icon}
@@ -77,34 +81,14 @@ export function Systems() {
         className="ml-1 shrink-0 rounded-md border border-dashed border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
         + Emitter
       </button>
-
-      {parentChoices.length > 0 && (
-        <div className="ml-auto flex shrink-0 items-center gap-1.5 pl-2 text-muted-foreground">
-          <label className="flex items-center gap-1.5" title={`Where “${activeName}” particles are born`}>
-            <span className="text-[10px] uppercase tracking-wider">“{activeName}” spawns from</span>
-            <select className="sel" value={parentId}
-              onChange={(e) => setSubParent(activeId, e.target.value || null)}>
-              <option value="">cursor / emitter</option>
-              {parentChoices.map((s) => (
-                <option key={s.id} value={s.id}>↳ “{s.name}”</option>
-              ))}
-            </select>
-          </label>
-          {/*
-            Which parent edge fires the child. Deaths give you debris where a
-            projectile ends; births give you a flash the instant one appears —
-            a lightning bolt and its light, born on the same frame.
-          */}
-          {parentId !== '' && (
-            <select className="sel" value={trigger}
-              title="Which moment in the parent's life spawns this emitter"
-              onChange={(e) => setSubTrigger(e.target.value as 'death' | 'birth')}>
-              <option value="death">on their deaths</option>
-              <option value="birth">on their births</option>
-            </select>
-          )}
-        </div>
-      )}
+      {/* per-emitter configuration — including where its particles come from —
+          lives in Project → Settings, so the strip stays a list of names */}
+      <button
+        onClick={() => openConfig(`emitter:${activeId}`)}
+        title="Configure this emitter"
+        className="ml-auto shrink-0 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+        Configure
+      </button>
     </div>
   );
 }

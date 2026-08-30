@@ -3,8 +3,12 @@ import { useEditor } from '../store';
 import type { EditorProject } from '../types';
 
 /**
- * "Projects" dropdown: a small localStorage library (save / load / delete /
- * duplicate) plus file import, export, copy-to-clipboard, and reset.
+ * The "Project" menu — the editor's only chrome besides Assets.
+ *
+ * It holds a small localStorage library (save / load / delete / duplicate),
+ * file import and export, and the door into Settings. Everything that is not
+ * an action you take constantly lives here rather than in the header, which is
+ * why the header has room to be almost empty.
  */
 const LIB_KEY = 'pylinka.editor.library';
 
@@ -39,6 +43,8 @@ export function ProjectsMenu() {
   const newProject = useEditor((s) => s.newProject);
   const reset = useEditor((s) => s.reset);
   const projectName = useEditor((s) => s.project.name);
+  const setConfigOpen = useEditor((s) => s.setConfigOpen);
+  const setConfigSection = useEditor((s) => s.setConfigSection);
   const [open, setOpen] = useState(false);
   const [lib, setLib] = useState<LibEntry[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -124,11 +130,16 @@ export function ProjectsMenu() {
     <div ref={rootRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className={`rounded-md border px-3 py-1.5 ${open ? 'border-foreground/40 text-foreground' : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
-        Projects ▾
+        className={`rounded-md px-2.5 py-1.5 text-xs ${open ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
+        Project ▾
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-border bg-card p-1.5 text-xs shadow-2xl">
+        <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border border-border p-1.5 text-xs shadow-2xl" style={{ background: 'var(--color-popover)' }}>
+          <button className={item} onClick={() => { setConfigSection('project'); setConfigOpen(true); setOpen(false); }}>
+            Settings…
+            <span className="ml-auto text-[10px] text-muted-foreground">name · emitters · preview</span>
+          </button>
+          <div className="my-1 border-t border-border" />
           <button className={item} onClick={() => { newProject(); setOpen(false); }}>New project</button>
           <button className={item} onClick={duplicate}>Duplicate “{projectName}”</button>
           <button className={item} onClick={saveCurrent}>Save to library</button>

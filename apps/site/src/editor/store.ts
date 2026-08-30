@@ -220,6 +220,11 @@ interface EditorState {
   // asset-manager modal (UI-only state, not part of the project / undo)
   assetsOpen: boolean;
   setAssetsOpen(open: boolean): void;
+  /** settings modal + which tree section it shows (UI-only, not undoable) */
+  configOpen: boolean;
+  configSection: string;
+  setConfigOpen(open: boolean): void;
+  setConfigSection(section: string): void;
   /** set/clear the painted emission area of the ACTIVE system */
   setMask(mask: EmissionMaskData | null): void;
   /** set/clear the emitter trajectory of the ACTIVE system (preview reads it live) */
@@ -448,6 +453,8 @@ export const useEditor = create<EditorState>((set, get) => {
     past: 0,
     future: 0,
     assetsOpen: false,
+    configOpen: false,
+    configSection: 'project',
     system: () => activeSysOf(get().project),
     snapshot: () => {
       const out = structuredClone(get().project);
@@ -550,7 +557,8 @@ export const useEditor = create<EditorState>((set, get) => {
       const p0 = get().project;
       const base = Number(/\d+/.exec(nextNodeId(p0))?.[0] ?? '1');
       const n = p0.systems.length + 1;
-      const sys = makeSystem(`emitter ${n}`, base);
+      // the first emitter in a project is "default"; the rest are numbered
+      const sys = makeSystem(p0.systems.length === 0 ? 'default' : `emitter ${n}`, base);
       const layout = autoLayout(sys.graph);
       commit(
         (p) => {
@@ -797,6 +805,14 @@ export const useEditor = create<EditorState>((set, get) => {
       set({ assetsOpen: open });
     },
 
+    setConfigOpen(open) {
+      set({ configOpen: open });
+    },
+
+    setConfigSection(section) {
+      set({ configSection: section });
+    },
+
     removeTexture(id) {
       commit((p) => {
         p.textures = (p.textures ?? []).filter((t) => t.id !== id);
@@ -845,7 +861,7 @@ export const useEditor = create<EditorState>((set, get) => {
           w: rect?.w ?? 420,
           h: rect?.h ?? 260,
           title: 'Comment',
-          color: '#a78bfa',
+          color: 'oklch(0.72 0 0)',
         });
       });
     },
@@ -874,7 +890,7 @@ export const useEditor = create<EditorState>((set, get) => {
           w: 220,
           h: 150,
           text: 'Double-click to edit…',
-          color: '#fbbf24',
+          color: 'oklch(0.82 0 0)',
         });
       });
     },
