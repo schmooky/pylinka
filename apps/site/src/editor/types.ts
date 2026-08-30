@@ -63,10 +63,15 @@ export interface ReferenceSettings {
   opacity: number;
   /** multiplier on the contain-fit size */
   scale: number;
-  /** px offset from the preview centre, in canvas CSS space */
+  /**
+   * px offset from the preview centre, in canvas CSS space.
+   *
+   * A reference always draws OVER the canvas. There is no "behind": the
+   * preview's backdrop is painted inside the canvas, which is opaque, so a
+   * reference under it would never be seen. Turn `opacity` down to read the
+   * effect through it.
+   */
   offset: [number, number];
-  /** draw ABOVE the particles — for checking what the effect has to read through */
-  front: boolean;
 }
 
 export const DEFAULT_REFERENCE: ReferenceSettings = {
@@ -75,7 +80,6 @@ export const DEFAULT_REFERENCE: ReferenceSettings = {
   opacity: 0.6,
   scale: 1,
   offset: [0, 0],
-  front: false,
 };
 
 /**

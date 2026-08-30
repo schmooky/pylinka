@@ -141,9 +141,6 @@ export function ReferenceSettings() {
             <Toggle on={ref.visible} onClick={() => setReference({ visible: !ref.visible })}>
               {ref.visible ? 'shown' : 'hidden'}
             </Toggle>
-            <Toggle on={ref.front} onClick={() => setReference({ front: !ref.front })}>
-              {ref.front ? 'in front' : 'behind'}
-            </Toggle>
             <button
               className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={() => setReference({ offset: [0, 0], scale: 1 })}>

@@ -12,7 +12,7 @@ import { useEditor } from '../store';
 import { usePreview } from '../previewStore';
 import { frameSize, type EditorProject } from '../types';
 import { PathOverlay } from './PathOverlay';
-import { ReferenceLayer, ReferencePanel } from './ReferenceLayer';
+import { ReferenceLayer } from './ReferenceLayer';
 import { usePreviewBackground } from '../reference';
 import { createBackdrop } from '../backdrop';
 
@@ -127,7 +127,12 @@ export function Preview() {
   const [error, setError] = useState('');
   // scene reference: open panel = the image takes the pointer so it can be
   // dragged into place; closed = inert, and pan/spawn behave as before
-  const [refOpen, setRefOpen] = useState(false);
+  /**
+   * The reference is draggable exactly while its controls are on screen —
+   * Settings, open on Preview. Any other time it is inert, so it never steals a
+   * pan or a spawn click.
+   */
+  const refOpen = useEditor((s) => s.configOpen && s.configSection === 'preview');
   const bg = usePreviewBackground();
   const bgRef = useRef(bg);
   bgRef.current = bg;
@@ -456,7 +461,6 @@ export function Preview() {
           className="relative z-[1] block h-full w-full"
           style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, transformOrigin: 'center' }}
         />
-        {refOpen && <ReferencePanel onClose={() => setRefOpen(false)} />}
         <PathOverlay editing={pathEdit} />
         {pathEdit && (
           <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-black/70 px-2 py-1 text-[10px] text-foreground">
