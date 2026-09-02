@@ -39,6 +39,8 @@ export function diagnose(project: EditorProject, system: System): NodeDiagnostic
   }
   const round = roundSpriteWarning(project, system);
   if (round) diags = [...diags, round];
+  const halfLinked = subEmitterWarning(project, system);
+  if (halfLinked) diags = [...diags, halfLinked];
   const byNode = new Map<string, Diagnostic[]>();
   const loose: Diagnostic[] = [];
   let errors = 0;
@@ -86,6 +88,39 @@ function roundSpriteWarning(project: EditorProject, system: System): Diagnostic 
       'This emitter rotates its particles but has no texture, and the default sprite is a round dot — a circle looks identical at every angle. Give it a texture in Assets to see the rotation.',
     nodeId: spins[0]!.id,
   };
+}
+
+/**
+ * A sub-emitter needs BOTH halves, and each half is silent without the other.
+ *
+ * The link says which emitter's particles this one is born from; the
+ * `output.deathBurst` node says how many and on which event. A burst node with
+ * no parent spawns nothing at all — the node is simply never reached — and a
+ * parent with no burst node gets one particle per event, which on a slow
+ * parent looks like nothing much. Both read as "sub-emitters do not work".
+ */
+function subEmitterWarning(project: EditorProject, system: System): Diagnostic | undefined {
+  const burst = system.graph.nodes.find((n) => n.kind === 'output.deathBurst');
+  const parentId = (project.subEmitters ?? {})[system.id];
+  const parent = parentId ? project.systems.find((s) => s.id === parentId) : undefined;
+
+  if (burst !== undefined && parent === undefined) {
+    return {
+      severity: 'warning',
+      code: 'W106_SUB_EMITTER_HALF_LINKED',
+      message:
+        'This emitter has a “Burst from parent” node but is not born from anything, so the burst never fires. Right-click its tab and pick an emitter under “Born from”.',
+      nodeId: burst.id,
+    };
+  }
+  if (burst === undefined && parent !== undefined) {
+    return {
+      severity: 'warning',
+      code: 'W106_SUB_EMITTER_HALF_LINKED',
+      message: `Born from “${parent.name}”, but with no “Burst from parent” node it spawns a single particle per event. Add one to choose how many, and whether they come on birth or on death.`,
+    };
+  }
+  return undefined;
 }
 
 /**

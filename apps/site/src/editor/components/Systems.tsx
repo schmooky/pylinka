@@ -17,6 +17,12 @@ export function Systems() {
   const setActive = useEditor((s) => s.setActiveSystem);
   const removeSystem = useEditor((s) => s.removeSystem);
   const renameSystem = useEditor((s) => s.renameSystem);
+  const links = useEditor((s) => s.project.subEmitters);
+  /** the name of the emitter this one is born from, if any */
+  const parentName = (id: string): string | undefined => {
+    const pid = (links ?? {})[id];
+    return pid === undefined ? undefined : systems.find((x) => x.id === pid)?.name;
+  };
   const toggleSystem = useEditor((s) => s.toggleSystem);
   const setConfigOpen = useEditor((s) => s.setConfigOpen);
   const setConfigSection = useEditor((s) => s.setConfigSection);
@@ -94,9 +100,25 @@ export function Systems() {
                 onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditing(null); }} />
             ) : (
               <button
-                title="Double-click to rename"
+                title={
+                  parentName(sys.id) === undefined
+                    ? 'Double-click to rename'
+                    : `Born from the particles of “${parentName(sys.id)}” — double-click to rename`
+                }
                 onClick={() => setActive(sys.id)}
                 onDoubleClick={() => setEditing(sys.id)}>
+                {/*
+                  A sub-emitter is a relationship between two tabs, and nothing
+                  in the strip showed it: the same tab whether its particles
+                  came from the cursor or from another emitter's deaths. The
+                  arrow is the whole difference, and the parent's name is on the
+                  tooltip.
+                */}
+                {parentName(sys.id) !== undefined && (
+                  <span aria-hidden className="mr-0.5 text-muted-foreground">
+                    ↳
+                  </span>
+                )}
                 {sys.name}
               </button>
             )}

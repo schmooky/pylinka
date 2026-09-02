@@ -48,28 +48,25 @@ fx.spawnBurst(300);</code></pre>
     once an effect gets serious — they evaluate the graph and cover the whole catalog.
   </p>
 
-  <h2>Projects with sub-emitters</h2>
+  <h2>Projects with several emitters</h2>
   <p>
-    A system whose particles are born from another system's — sparks from a rocket, embers from
-    smoke — is a LINK between two systems, and the two share GPU buffers, so the parent has to be
-    built and stepped first. <code>createParticles</code> builds one system at a time, so a project
-    with a link needs its systems built in the right order with each child handed its parent:
+    A project can hold more than one system, and one system's particles can be born from another's
+    — sparks from a rocket, embers from smoke. That link is part of the project, chosen when the
+    effect was authored, so loading the project is all it takes:
   </p>
-  <pre><code>import &#123; buildProject &#125; from '@pylinka/core';
-import &#123; createParticles &#125; from '@pylinka/core/webgl';
-
-const fx = await buildProject(project, (system, parent) =&gt;
-  createParticles(canvas, project, &#123;
-    systemName: system.name,
-    ...(parent ? &#123; subParent: parent &#125; : &#123;&#125;),
-  &#125;),
-);
-
-fx.update(1 / 60);   // steps every system, parents first
+  <pre><code>const fx = createParticles(canvas, project);   // every enabled system, linked
+fx.update(1 / 60);                             // steps them, parents first
 </code></pre>
   <p>
-    The links live in the project as <code>subEmitters</code>, so they travel with the file. The
-    pixi path below reads them itself and needs none of this.
+    The handle drives the whole project: <code>setKnob</code> and <code>setEmitter</code> reach
+    every system, <code>spawnBurst</code> reaches the ones that are not born from another (bursting
+    a sub-emitter means nothing — its particles come from its parent's), and the clear belongs to
+    the first so the rest composite on top.
+  </p>
+  <p>
+    Pass <code>systemName</code> to build a single system instead, and drive them yourself; the
+    order and the links are available as <code>systemsInBuildOrder(project)</code>, or
+    <code>buildProject(project, create)</code> if you want the walk done for you.
   </p>
 
   <h2>The pixi v8 path</h2>

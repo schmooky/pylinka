@@ -55,6 +55,7 @@ export function TabMenu({
   onTemplates(): void;
 }) {
   const project = useEditor((s) => s.project);
+  const setSubParent = useEditor((s) => s.setSubParent);
   const duplicateSystem = useEditor((s) => s.duplicateSystem);
   const pasteEmitter = useEditor((s) => s.pasteEmitter);
   const removeSystem = useEditor((s) => s.removeSystem);
@@ -79,6 +80,7 @@ export function TabMenu({
   }, [onClose]);
 
   const sys = target.systemId ? project.systems.find((s) => s.id === target.systemId) : undefined;
+  const parentOf = (id: string): string | undefined => (project.subEmitters ?? {})[id];
 
   const paste = async () => {
     const payload = await readClipboard();
@@ -123,6 +125,32 @@ export function TabMenu({
             }}>
             Copy
           </Row>
+          <div className="my-1 border-t border-border" />
+          {/*
+            Linking lived in a Settings tab, which is a strange place for a
+            relationship BETWEEN two tabs — you had to know sub-emitters existed
+            to go looking for it. It belongs on the tab, next to renaming and
+            muting it.
+          */}
+          <div className="px-2 pb-0.5 pt-1 text-[9px] uppercase tracking-wider text-muted-foreground">
+            Born from
+          </div>
+          <Row onClick={() => { setSubParent(sys.id, null); onClose(); }}>
+            {parentOf(sys.id) === undefined ? '✓ ' : ''}Its own emitter
+          </Row>
+          {project.systems
+            .filter((other) => other.id !== sys.id)
+            .map((other) => (
+              <Row
+                key={other.id}
+                onClick={() => {
+                  setSubParent(sys.id, other.id);
+                  onClose();
+                }}>
+                {parentOf(sys.id) === other.id ? '✓ ' : ''}
+                Particles of “{other.name}”
+              </Row>
+            ))}
           <div className="my-1 border-t border-border" />
           <Row
             onClick={() => {

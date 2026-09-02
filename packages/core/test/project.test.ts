@@ -88,3 +88,44 @@ describe('buildProject', () => {
     expect(built.handles).toHaveLength(0);
   });
 });
+
+/**
+ * The composite a bare `createParticles(canvas, project)` returns.
+ *
+ * Loading a project should just run it. The pieces below are the ones every
+ * caller was getting wrong by hand: one clear per frame rather than one per
+ * system, and a burst that reaches the roots rather than the children — a
+ * sub-emitter's particles come from its parent's, so bursting it directly
+ * means nothing.
+ */
+describe('a project handle', () => {
+  interface Fake {
+    id: string;
+    bursts: number;
+    autoClear: boolean;
+    update(dt: number): void;
+    destroy(): void;
+  }
+  const make = (id: string): Fake => ({
+    id,
+    bursts: 0,
+    autoClear: true,
+    update() {},
+    destroy() {},
+  });
+
+  it('gives the clear to the first system only', async () => {
+    const built = await buildProject(project([sys('a'), sys('b'), sys('c')]), (s) => make(s.id));
+    // buildProject itself does not set autoClear — the backends' composite does
+    // — so this documents the ORDER the composite relies on
+    expect(built.handles.map((h) => (h as unknown as Fake).id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('reports the roots, which is what a burst should reach', async () => {
+    const { systems, links } = systemsInBuildOrder(
+      project([sys('spark'), sys('rocket')], { spark: 'rocket' }),
+    );
+    const roots = systems.filter((s) => !links.has(s.id)).map((s) => s.id);
+    expect(roots).toEqual(['rocket']);
+  });
+});

@@ -24,6 +24,7 @@ import { featuresOf, WebGL2Engine, type AtlasConfig, type MaskConfig } from './e
 import { extractParams, type EngineParams, type KnobValues } from './params.js';
 import { playCode, type AtlasPlay } from '../atlas.js';
 import { pickSystem } from '../system.js';
+import { systemsInBuildOrder } from '../project.js';
 
 /**
  * Rasterize an emission mask into a point table: one emitter-relative offset
@@ -273,11 +274,116 @@ export { INTERPRETED_KINDS, isInterpreted, unsupportedNodes } from './support.js
 /** Handle → engine, so a sub-emitter can reach its parent's GPU buffers. */
 const engineOf = new WeakMap<ParticlesHandle, WebGL2Engine>();
 
+/**
+ * Run a project.
+ *
+ * With no `systemName`, this builds EVERY enabled system and wires the
+ * sub-emitter links the project declares — the thing an artist already set up
+ * when they chose what a system is born from. It used to build one system and
+ * leave the links to the caller, which meant a project that worked in the
+ * editor came back from a file as a set of unrelated effects unless the game
+ * happened to know it had to sort the systems and hand each child its parent.
+ * Nothing about that was discoverable, and it is not the caller's problem: the
+ * document says how the systems relate.
+ *
+ * Name a system to get just that one, the way this always behaved.
+ */
+/**
+ * One handle over several systems.
+ *
+ * Fan-out with two exceptions that matter. `spawnBurst` reaches only the roots:
+ * a sub-emitter's particles come from its parent's, so bursting it directly
+ * means nothing. And `autoClear` belongs to the first handle alone — every
+ * other one has to composite onto what is already in the buffer, which is the
+ * bookkeeping every caller was getting wrong when they wired this by hand.
+ */
+function combine(handles: ParticlesHandle[], children: Set<ParticlesHandle>): ParticlesHandle {
+  const first = handles[0]!;
+  const roots = handles.filter((h) => !children.has(h));
+  return {
+    update(dt) {
+      // build order is step order: a child reads the parent's state from the
+      // frame it is in, so the parent has to move first
+      for (const h of handles) h.update(dt);
+    },
+    setEmitter(x, y, teleport) {
+      for (const h of handles) h.setEmitter(x, y, teleport);
+    },
+    spawnBurst(count) {
+      for (const h of roots) h.spawnBurst(count);
+    },
+    setKnob(name, x, y) {
+      for (const h of handles) h.setKnob(name, x, y);
+    },
+    apply(next) {
+      let ok = true;
+      for (const h of handles) if (!h.apply(next)) ok = false;
+      return ok;
+    },
+    get autoClear() {
+      return first.autoClear;
+    },
+    set autoClear(v: boolean) {
+      first.autoClear = v;
+    },
+    get clearColor() {
+      return first.clearColor;
+    },
+    set clearColor(v: [number, number, number, number]) {
+      first.clearColor = v;
+    },
+    get zoom() {
+      return first.zoom;
+    },
+    set zoom(v: number) {
+      for (const h of handles) h.zoom = v;
+    },
+    get viewOffset(): [number, number] {
+      return first.viewOffset;
+    },
+    set viewOffset(v: [number, number]) {
+      for (const h of handles) h.viewOffset = v;
+    },
+    aliveCount() {
+      let n = 0;
+      for (const h of handles) n += h.aliveCount();
+      return n;
+    },
+    get contextLost() {
+      return handles.some((h) => h.contextLost);
+    },
+    destroy() {
+      for (const h of handles) h.destroy();
+    },
+  };
+}
+
 export function createParticles(
   target: HTMLCanvasElement | WebGL2RenderingContext,
   project: PylinkaProject,
   opts: ParticlesOptions = {},
 ): ParticlesHandle {
+  if (opts.systemName === undefined && opts.subParent === undefined) {
+    const { systems, links } = systemsInBuildOrder(project);
+    if (systems.length > 1 || links.size > 0) {
+      const byId = new Map<string, ParticlesHandle>();
+      const built: ParticlesHandle[] = [];
+      for (const sys of systems) {
+        const parentId = links.get(sys.id);
+        const parent = parentId !== undefined ? byId.get(parentId) : undefined;
+        const h = createParticles(target, project, {
+          ...opts,
+          systemName: sys.name,
+          ...(parent !== undefined ? { subParent: parent } : {}),
+        });
+        // one clear for the frame, done by the first: the rest composite on top
+        h.autoClear = built.length === 0;
+        byId.set(sys.id, h);
+        built.push(h);
+      }
+      return combine(built, new Set([...links.keys()].map((id) => byId.get(id)!)));
+    }
+  }
   const gl =
     target instanceof WebGL2RenderingContext
       ? target
