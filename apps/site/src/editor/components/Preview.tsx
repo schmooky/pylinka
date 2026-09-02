@@ -1,4 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
+/*
+ * Real icons, from lucide.
+ *
+ * The bar was glyphs — ⤧ ⌖ ✳ ❚❚ ⇥ ↻ — picked for looking vaguely like the
+ * thing they do. They render at whatever weight and baseline each platform's
+ * font decides, next to each other, at 11px. An icon set draws at one weight
+ * on one grid and means the same thing everywhere.
+ */
+import {
+  Crosshair,
+  Hand,
+  Maximize2,
+  Pause,
+  Play,
+  RotateCcw,
+  Sparkles,
+  StepForward,
+} from 'lucide-react';
 import {
   createParticles,
   type AtlasOptions,
@@ -75,11 +93,19 @@ type Tool = 'pan' | 'follow' | 'spawn';
  * places apart, both reading "Burst", one arming a click and one going off on
  * its own. Selecting a tool must never be the thing that fires it.
  */
-const TOOLS: { id: Tool; icon: string; label: string; hint: string }[] = [
-  { id: 'pan', icon: '⤧', label: 'Pan', hint: 'drag to move the view · scroll to zoom' },
-  { id: 'follow', icon: '⌖', label: 'Follow', hint: 'the emitter tracks your cursor' },
-  { id: 'spawn', icon: '✳', label: 'Spawn', hint: 'click the preview for one burst there — the emitter itself does not move' },
+const TOOLS: { id: Tool; Icon: typeof Hand; label: string; hint: string }[] = [
+  { id: 'pan', Icon: Hand, label: 'Pan', hint: 'drag to move the view · scroll to zoom' },
+  { id: 'follow', Icon: Crosshair, label: 'Follow', hint: 'the emitter tracks your cursor' },
+  { id: 'spawn', Icon: Sparkles, label: 'Spawn', hint: 'click the preview for one burst there — the emitter itself does not move' },
 ];
+
+/**
+ * Playback speeds, fast to slow.
+ *
+ * Above 1 to skim a long ambient loop, below it to see the shape of a burst
+ * that is over in a fifth of a second.
+ */
+const SPEEDS = [1.5, 1.25, 1, 0.75, 0.5, 0.25, 0.1];
 
 export function Preview() {
   const project = useEditor((s) => s.project);
@@ -132,6 +158,16 @@ export function Preview() {
   pausedRef.current = paused;
   const stepRef = useRef(false);
   const [speed, setSpeed] = useState(1);
+  /*
+   * What is actually running, in the corner.
+   *
+   * Which renderer, how many particles are alive, and the frame rate — three
+   * facts that decided every performance question in this session and were
+   * nowhere on screen. Sampled twice a second, because the alive count is a
+   * synchronous GPU readback on the interpreted path: per frame it would be
+   * the most expensive thing in the loop.
+   */
+  const [stats, setStats] = useState({ fps: 0, alive: 0 });
   const speedRef = useRef(speed);
   speedRef.current = speed;
   const burstCountRef = useRef(burstCount);
@@ -227,10 +263,14 @@ export function Preview() {
       h.viewOffset = [cx - halfW, cy - halfH];
     }
   };
-  // the choice lives in the preview store: the graph reads it too, to mark the
-  // nodes the interpreted backend will ignore
+  /*
+   * The choice lives in the preview store because three things read it: the
+   * loop, which builds the right kind of stage; the graph, which marks the
+   * nodes the interpreted backend ignores; and Settings, which is where it is
+   * now CHOSEN — its label was the widest thing in the tool bar and pushed the
+   * rest off the end.
+   */
   const backend = usePreview((s) => s.backend);
-  const setBackend = usePreview((s) => s.setBackend);
   const backendRef = useRef(backend);
   backendRef.current = backend;
   const [recompiled, setRecompiled] = useState('');
@@ -453,23 +493,34 @@ export function Preview() {
     let last = performance.now();
     let t = 0;
 
+    let frames = 0;
+    let statAt = performance.now();
     const loop = (now: number) => {
       const real = Math.min((now - last) / 1000, 0.05);
       last = now;
       /*
-       * Paused holds the last frame rather than blanking: nothing is stepped
-       * and nothing is drawn, so the canvas keeps what is already in it. That
-       * is the point — you pause to LOOK at a moment, and a burst worth
-       * looking at is over in a fifth of a second.
+       * Paused advances time by ZERO rather than skipping the frame.
+       *
+       * Skipping it froze the picture, which is what pause means — but it also
+       * froze the VIEW, so panning and zooming a held frame did nothing, and
+       * looking closely at a moment is most of the reason to hold one. Drawing
+       * with dt 0 renders the same particles wherever the view now points.
        */
+      frames++;
+      if (now - statAt >= 500) {
+        const fps = (frames * 1000) / (now - statAt);
+        frames = 0;
+        statAt = now;
+        let alive = 0;
+        const st = stageRef.current;
+        if (st !== null) for (const v of st.views.values()) alive += v.stats.aliveCount;
+        else for (const h of fxRef.current) alive += h.aliveCount();
+        setStats({ fps, alive });
+      }
       const stepOnce = stepRef.current;
       stepRef.current = false;
-      if (pausedRef.current && !stepOnce) {
-        raf = requestAnimationFrame(loop);
-        return;
-      }
       // a step is one frame at a fixed 60th, whatever the wall clock says
-      const dt = stepOnce ? 1 / 60 : real * speedRef.current;
+      const dt = stepOnce ? 1 / 60 : pausedRef.current ? 0 : real * speedRef.current;
       t += dt;
       const stage = stageRef.current;
       /*
@@ -823,6 +874,18 @@ export function Preview() {
             {error}
           </div>
         )}
+        {/*
+          Three lines, top right, over the canvas: which renderer is running,
+          how many particles are alive, and the frame rate. Bright enough to
+          read against any backdrop, small enough to ignore.
+        */}
+        <div
+          className="pointer-events-none absolute right-2 top-2 z-10 text-right font-mono text-[10px] leading-[1.35]"
+          style={{ color: 'color-mix(in oklab, var(--color-foreground) 85%, transparent)', textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>
+          <div>{BACKEND_LABEL[backend]}</div>
+          <div>{stats.alive.toLocaleString()} particles</div>
+          <div>{Math.round(stats.fps)} fps</div>
+        </div>
         {recompiled !== '' && (
           <div className="pointer-events-none absolute right-2 top-2 z-10 rounded-md bg-black/70 px-2 py-1 text-[10px] text-amber-300">
             {recompiled}
@@ -846,7 +909,7 @@ export function Preview() {
             className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 ${
               tool === tl.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60'
             }`}>
-            <span aria-hidden className="text-[13px] leading-none">{tl.icon}</span>
+            <tl.Icon aria-hidden size={13} strokeWidth={2} />
             <span>{tl.label}</span>
           </button>
         ))}
@@ -862,7 +925,7 @@ export function Preview() {
           className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 ${
             paused ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60'
           }`}>
-          <span aria-hidden className="text-[13px] leading-none">{paused ? '▶' : '❚❚'}</span>
+          {paused ? <Play aria-hidden size={13} strokeWidth={2} /> : <Pause aria-hidden size={13} strokeWidth={2} />}
         </button>
         <button
           onClick={() => {
@@ -872,24 +935,25 @@ export function Preview() {
           title="Step one frame (1/60s)"
           aria-label="Step one frame"
           className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-muted-foreground hover:bg-accent/60">
-          <span aria-hidden className="text-[13px] leading-none">⇥</span>
+          <StepForward aria-hidden size={13} strokeWidth={2} />
         </button>
         <button
           onClick={() => void recreate()}
           title="Replay from the start — the only way to see a “once” emitter again"
           aria-label="Replay"
           className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-muted-foreground hover:bg-accent/60">
-          <span aria-hidden className="text-[13px] leading-none">↻</span>
+          <RotateCcw aria-hidden size={13} strokeWidth={2} />
         </button>
         <select
           value={speed}
           onChange={(e) => setSpeed(Number(e.target.value))}
           className="sel"
           title="Playback speed — slow a burst down to see its shape">
-          <option value={1}>1×</option>
-          <option value={0.5}>½×</option>
-          <option value={0.25}>¼×</option>
-          <option value={0.1}>⅒×</option>
+          {SPEEDS.map((v) => (
+            <option key={v} value={v}>
+              x{v}
+            </option>
+          ))}
         </select>
 
         <span className="mx-1 h-4 w-px bg-border" />
@@ -900,7 +964,7 @@ export function Preview() {
           title={`Fit — reset zoom & pan · ${Math.round(view.z * 100)}%`}
           aria-label="Fit"
           className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-muted-foreground hover:bg-accent/60 disabled:opacity-30 disabled:hover:bg-transparent">
-          <span aria-hidden className="text-[13px] leading-none">⛶</span>
+          <Maximize2 aria-hidden size={13} strokeWidth={2} />
           <span>Fit</span>
         </button>
 
@@ -958,17 +1022,7 @@ export function Preview() {
             />
           </label>
         )}
-        <select
-          value={backend}
-          onChange={(e) => setBackend(e.target.value as BackendChoice)}
-          className="sel ml-auto"
-          title="Simulation backend — compiled backends run the graph as generated GPU code">
-          {(Object.keys(BACKEND_LABEL) as BackendChoice[]).map((k) => (
-            <option key={k} value={k}>
-              {BACKEND_LABEL[k]}
-            </option>
-          ))}
-        </select>
+
       </div>
     </div>
   );

@@ -18,7 +18,8 @@ export default defineConfig({
     plugins: [tailwindcss()],
     optimizeDeps: {
       /*
-       * Pre-bundle pixi up front instead of letting Vite discover it.
+       * Pre-bundle the editor's heavy dependencies up front instead of letting
+       * Vite discover them.
        *
        * The editor imports pixi from a module the dev server only reaches once
        * you pick a compiled backend, and pixi loads its RENDERERS dynamically
@@ -29,7 +30,7 @@ export default defineConfig({
        * Dep". Naming them here means they are bundled before the first request
        * and the hash never moves under a running page.
        */
-      include: ['pixi.js'],
+      include: ['pixi.js', 'lucide-react', '@xyflow/react', 'zustand', 'driver.js'],
     },
   },
 });

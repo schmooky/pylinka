@@ -10,7 +10,7 @@
  */
 import { createPortal } from 'react-dom';
 import { useEditor } from '../store';
-import { usePreview } from '../previewStore';
+import { usePreview, type BackendChoice } from '../previewStore';
 import { EmitterPanel } from './EmitterPanel';
 import { BackgroundSettings, ReferenceSettings } from './ReferenceSettings';
 
@@ -21,6 +21,8 @@ export function ConfigModal() {
   const setOpen = useEditor((s) => s.setConfigOpen);
   const section = useEditor((s) => s.configSection);
   const setSection = useEditor((s) => s.setConfigSection);
+  const backend = usePreview((st) => st.backend);
+  const setBackend = usePreview((st) => st.setBackend);
   const project = useEditor((s) => s.project);
   const rename = useEditor((s) => s.rename);
   const renameSystem = useEditor((s) => s.renameSystem);
@@ -215,7 +217,26 @@ export function ConfigModal() {
             {section === 'preview' && (
               <Group
                 title="Preview"
-                hint="What sits behind the particles while you author them. Editor-only — the runtime never sees any of it.">
+                hint="How the preview runs, and what sits behind the particles while you author them. Editor-only — the runtime never sees any of it.">
+                {/*
+                  The backend lived in the preview's tool bar, where its label —
+                  "WebGL2 · compiled" — was the widest thing in a row of icons
+                  and pushed the rest off the end. It is also not a per-glance
+                  control: you pick a renderer and leave it. The readout in the
+                  corner of the preview says which one is running.
+                */}
+                <label className="mb-4 flex items-center gap-2 text-xs">
+                  <span className="w-28 shrink-0 text-muted-foreground">renderer</span>
+                  <select
+                    value={backend}
+                    onChange={(e) => setBackend(e.target.value as BackendChoice)}
+                    className="sel sel-wide"
+                    title="Compiled backends run the graph as generated GPU code and cover the whole catalog; the interpreted one recognises common node patterns and lives on its own canvas.">
+                    <option value="webgl">WebGL · interpreted</option>
+                    <option value="webgl2">WebGL2 · compiled</option>
+                    <option value="webgpu">WebGPU · compiled</option>
+                  </select>
+                </label>
                 <BackgroundSettings />
                 <div className="mt-1 border-t border-border pt-4">
                   <h3 className="mb-2 text-xs font-semibold">Scene reference</h3>
