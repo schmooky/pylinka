@@ -177,6 +177,33 @@ describe('validateGraph — §12.3', () => {
     expect(has(b, 'W101_CAPACITY_OVERFLOW')).toBe(true);
   });
 
+  /*
+   * `max` sizes the child pool at construction; countMax is what each event
+   * asks for. Ask for more than the pool was built for and the extra children
+   * silently never appear, which reads as the count doing nothing.
+   */
+  it('W104 — a death burst asking for more than its ceiling', () => {
+    const b = minimalBundle();
+    b.system.graph.nodes.push({
+      id: 'db',
+      kind: 'output.deathBurst',
+      structural: { max: '8', on: 'death' },
+      values: { countMin: { t: 'f32', v: 20 }, countMax: { t: 'f32', v: 20 } },
+    });
+    expect(has(b, 'W104_BURST_CLAMPED')).toBe(true);
+  });
+
+  it('W104 — quiet when the ceiling covers the count', () => {
+    const b = minimalBundle();
+    b.system.graph.nodes.push({
+      id: 'db',
+      kind: 'output.deathBurst',
+      structural: { max: '24', on: 'death' },
+      values: { countMin: { t: 'f32', v: 8 }, countMax: { t: 'f32', v: 20 } },
+    });
+    expect(has(b, 'W104_BURST_CLAMPED')).toBe(false);
+  });
+
   it('W102 — high-impact node (warning)', () => {
     // synthesize a catalog with a live high-impact node
     const bigSchema: NodeSchema = {

@@ -238,7 +238,11 @@ export const NODE_CODEGEN: Record<string, NodeCodegen> = {
   // Spin is an angular VELOCITY: integrate it over the particle's own age so
   // the angle keeps growing while it lives. Wire `rate` to a gen.randomRange
   // for per-particle tumble, and remember a negative rate spins the other way.
-  'gen.spin': (_c, i) => one(`(${i.rate} * p.age)`),
+  // `unit` says how to read the rate: degrees per second by default, because
+  // that is the unit an artist has a feel for. Same rule as the interpreted
+  // backend, or the two would disagree about what a number means.
+  'gen.spin': (_c, i, s) =>
+    one(s.unit === 'radians' ? `(${i.rate} * p.age)` : `(radians(${i.rate}) * p.age)`),
   'gen.rotationOverLife': (ctx, i, s) =>
     one(`mix(${i.from}, ${i.to}, ${ctx.ease(s.ease)}(${ctx.consts.AGE_N}))`),
   // Standalone reshaper: run any 0..1 value through the chosen ease. Wire e.g.

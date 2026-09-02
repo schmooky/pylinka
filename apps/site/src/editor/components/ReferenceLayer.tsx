@@ -35,7 +35,8 @@ export function ReferenceLayer({
   const img = ref.id ? images.find((r) => r.id === ref.id) : undefined;
   const drag = useRef<{ px: number; py: number; ox: number; oy: number } | null>(null);
 
-  if (!img || !ref.visible || ref.opacity <= 0) return null;
+  // nothing to grab when there is nothing drawn, or no panel open to move it
+  if (!img || !ref.visible || ref.opacity <= 0 || !draggable) return null;
 
   return (
     <div
@@ -44,13 +45,18 @@ export function ReferenceLayer({
         transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`,
         transformOrigin: 'center',
         /*
-         * Always over the canvas. There is no "behind" any more: the preview's
-         * backdrop is drawn INSIDE the canvas, which is opaque, so a reference
-         * placed under it would be painted over and simply never seen. Turn the
-         * opacity down to read the effect through it.
+         * A DRAG TARGET, not the picture.
+         *
+         * The image itself is drawn inside the canvas now, between the backdrop
+         * and the particles, which is the only place it can be both visible and
+         * underneath them — a DOM layer is either wholly behind an opaque
+         * canvas or wholly over the effect it exists to be judged against. What
+         * is left here is an invisible rectangle in the same place, so the
+         * reference can still be dragged while its panel is open.
          */
         zIndex: 3,
         pointerEvents: 'none',
+        opacity: 0,
       }}>
       <img
         src={img.src}
@@ -60,7 +66,8 @@ export function ReferenceLayer({
         style={{
           // the drag delta is measured in SCREEN px, so divide by the view zoom
           transform: `translate(-50%, -50%) translate(${ref.offset[0]}px, ${ref.offset[1]}px) scale(${ref.scale})`,
-          opacity: ref.opacity,
+          // the canvas draws the visible copy; this one only has to be here to
+          // be grabbed, and only while the panel that moves it is open
           pointerEvents: draggable ? 'auto' : 'none',
           cursor: draggable ? 'move' : 'default',
         }}

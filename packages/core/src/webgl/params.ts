@@ -197,7 +197,16 @@ export function extractParams(
   const angleRange = (host: Node, portId: string, d: [number, number]): [number, number] => {
     let owner = host;
     let port = portId;
-    let k = 1;
+    /*
+     * Degrees or radians, and where that is decided.
+     *
+     * The node's own `unit` says how to read its port — degrees by default,
+     * because typing 45 into a radian port spins the sprite seven times round
+     * and reads as "rotation does nothing". A `math.radians` node in front of
+     * the port overrides it: that graph has already converted, and the values
+     * behind it are degrees whatever the host says.
+     */
+    let k = (host.structural?.unit ?? 'degrees') === 'degrees' ? Math.PI / 180 : 1;
     const hop = source(owner.id, port);
     if (hop?.kind === 'math.radians') {
       owner = hop;
@@ -206,7 +215,7 @@ export function extractParams(
     }
     const src = source(owner.id, port);
     if (src?.kind === 'gen.randomRange') return [fk(src, 'min', 0) * k, fk(src, 'max', 0) * k];
-    const v = fk(owner, port, k === 1 ? d[0] : 0) * k;
+    const v = fk(owner, port, d[0] / k) * k;
     return [v, v];
   };
 
@@ -525,8 +534,15 @@ export function extractParams(
       : undefined);
   const rotOut = byKind('output.writeRotation');
   if (rotRamp) {
-    p.rotFrom = fk(rotRamp, 'from', 0);
-    p.rotTo = fk(rotRamp, 'to', 0);
+    /*
+     * The DESTINATION owns the unit. A `gen.numberOverLife` feeding rotation is
+     * a generic ramp with no opinion about angles, so asking it would mean
+     * setting the unit on every node in the chain; `output.writeRotation` is
+     * the one place it belongs.
+     */
+    const rk = (rotOut?.structural?.unit ?? 'degrees') === 'degrees' ? Math.PI / 180 : 1;
+    p.rotFrom = fk(rotRamp, 'from', 0) * rk;
+    p.rotTo = fk(rotRamp, 'to', 0) * rk;
     p.rotEase = easeFor(rotRamp, EASE_CH_ROT);
   } else if (rotOut !== undefined) {
     // a held angle, knob included — `angleRange` also follows a math.radians hop

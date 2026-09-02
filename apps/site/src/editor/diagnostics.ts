@@ -37,6 +37,8 @@ export function diagnose(project: EditorProject, system: System): NodeDiagnostic
     // blank is worse than one that simply reports nothing
     return EMPTY;
   }
+  const round = roundSpriteWarning(project, system);
+  if (round) diags = [...diags, round];
   const byNode = new Map<string, Diagnostic[]>();
   const loose: Diagnostic[] = [];
   let errors = 0;
@@ -53,6 +55,37 @@ export function diagnose(project: EditorProject, system: System): NodeDiagnostic
     byNode.set(d.nodeId, list);
   }
   return { byNode, loose, errors, warnings };
+}
+
+/** Node kinds that turn a particle. */
+const ROTATION_KINDS = new Set([
+  'output.initRotation',
+  'output.writeRotation',
+  'gen.spin',
+  'gen.rotationOverLife',
+]);
+
+/**
+ * Rotation on an untextured particle.
+ *
+ * The default sprite is a soft round disc — it is radially symmetric, so
+ * turning it produces exactly the same pixels. Wire up a birth angle, a spin
+ * and a rotation ramp on it and NOTHING happens, which reads as the feature
+ * being broken rather than the sprite having no corners. It was reported as
+ * "nothing affects the initial rotation angle", and the rotation was working
+ * the whole time.
+ */
+function roundSpriteWarning(project: EditorProject, system: System): Diagnostic | undefined {
+  const spins = system.graph.nodes.filter((n) => ROTATION_KINDS.has(n.kind));
+  if (spins.length === 0) return undefined;
+  if ((project.systemTextures ?? {})[system.id]) return undefined;
+  return {
+    severity: 'warning',
+    code: 'W105_ROTATION_UNSEEN',
+    message:
+      'This emitter rotates its particles but has no texture, and the default sprite is a round dot — a circle looks identical at every angle. Give it a texture in Assets to see the rotation.',
+    nodeId: spins[0]!.id,
+  };
 }
 
 /**

@@ -12,7 +12,7 @@
  * canvas has exactly one. It keeps its own path in Preview, where the same view
  * is expressed as the handles' `zoom` and `viewOffset`.
  */
-import { Application, Container, Texture, TilingSprite } from 'pixi.js';
+import { Application, Container, Sprite, Texture, TilingSprite } from 'pixi.js';
 import {
   createPylinka,
   registerPylinka,
@@ -51,6 +51,15 @@ export interface PixiStage {
   /** Advance every system and draw one frame. */
   frame(dt: number): void;
   setBackdrop(b: { a: string; b: string; size: number }): void;
+  /**
+   * The scene reference, drawn UNDER the particles and inside the view.
+   *
+   * A DOM layer could only sit wholly behind the canvas — invisible, the
+   * backdrop being opaque — or wholly in front, painting over the effect it
+   * exists to be judged against. In the scene graph it goes where a game would
+   * put it: below everything that emits.
+   */
+  setReference(ref: { image: TexImageSource; center: [number, number]; size: [number, number]; opacity: number } | null): void;
   /** Match the renderer to the canvas box (CSS px) and the display density. */
   resize(width: number, height: number, resolution: number): void;
   /** Re-read an edited project; false when a rebuild is needed. */
@@ -103,6 +112,8 @@ export async function createPixiStage(opts: PixiStageOptions): Promise<PixiStage
   app.stage.addChild(checker);
   const world = new Container();
   app.stage.addChild(world);
+  // bottom of the world container: under every system, inside the view
+  let reference: Sprite | null = null;
 
   const runtime: PylinkaRuntime = await createPylinka(opts.project as PylinkaProject, {
     renderer: app.renderer,
@@ -151,6 +162,24 @@ export async function createPixiStage(opts: PixiStageOptions): Promise<PixiStage
       if (width <= 0 || height <= 0) return;
       app.renderer.resize(width, height, resolution);
       fitBackdrop();
+    },
+    setReference(ref) {
+      if (ref === null) {
+        reference?.destroy({ texture: true });
+        reference = null;
+        return;
+      }
+      if (reference === null) {
+        reference = new Sprite();
+        reference.anchor.set(0.5);
+        world.addChildAt(reference, 0);
+      }
+      const tex = Texture.from(ref.image as HTMLImageElement);
+      if (reference.texture !== tex) reference.texture = tex;
+      reference.position.set(ref.center[0], ref.center[1]);
+      reference.width = ref.size[0];
+      reference.height = ref.size[1];
+      reference.alpha = ref.opacity;
     },
     setBackdrop(next) {
       if (next.a === bg.a && next.b === bg.b && next.size === bg.size) return;

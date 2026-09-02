@@ -272,6 +272,26 @@ export function validateGraph(bundle: SystemBundle, catalog: NodeCatalog): Diagn
     }
   }
 
+  /*
+   * A death burst asks for countMax children per event, but `max` is the
+   * ceiling the child pool was BUILT for — ask for more and the extra ones
+   * silently never appear, which looks like the burst count doing nothing.
+   */
+  for (const n of graph.nodes) {
+    if (resolveKind(catalog, n.kind) !== 'output.deathBurst') continue;
+    const countMax = n.values?.countMax;
+    const wanted = countMax?.t === 'f32' ? countMax.v : undefined;
+    const ceiling = Number(n.structural?.max ?? '8');
+    if (wanted !== undefined && Number.isFinite(ceiling) && wanted > ceiling) {
+      diags.push({
+        code: 'W104_BURST_CLAMPED',
+        severity: 'warning',
+        message: `Burst asks for up to ${wanted} children per parent event but "max" is ${ceiling}, so the rest never spawn. Raise max to ${Math.ceil(wanted)}.`,
+        nodeId: n.id,
+      });
+    }
+  }
+
   const overflow = estimateCapacityOverflow(bundle, nodeById, catalog);
   if (overflow !== undefined) {
     diags.push({

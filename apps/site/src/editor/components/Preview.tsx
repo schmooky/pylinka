@@ -13,7 +13,7 @@ import { usePreview, type BackendChoice } from '../previewStore';
 import { frameSize, type EditorProject } from '../types';
 import { PathOverlay } from './PathOverlay';
 import { ReferenceLayer } from './ReferenceLayer';
-import { usePreviewBackground } from '../reference';
+import { usePreviewBackground, useReference } from '../reference';
 import { createBackdrop } from '../backdrop';
 import { createPixiStage, type PixiStage } from '../pixiStage';
 
@@ -145,6 +145,37 @@ export function Preview() {
     stageRef.current?.setBackdrop(bg);
   }, [bg]);
   const backdropRef = useRef<ReturnType<typeof createBackdrop> | null>(null);
+  /*
+   * The scene reference, drawn INSIDE the canvas.
+   *
+   * As a DOM layer it could only be wholly behind the canvas — invisible,
+   * because the backdrop above it is opaque — or wholly in front, painting over
+   * the effect it exists to be judged against. In the framebuffer there is a
+   * middle: backdrop, reference, particles, which is the order a game draws in.
+   */
+  const refSettings = useReference();
+  const refImages = useEditor((s) => s.project.references);
+  const refSrc = refSettings.id ? (refImages ?? []).find((r) => r.id === refSettings.id)?.src : undefined;
+  const refImgRef = useRef<HTMLImageElement | null>(null);
+  const refCfgRef = useRef(refSettings);
+  refCfgRef.current = refSettings;
+  useEffect(() => {
+    if (refSrc === undefined) {
+      refImgRef.current = null;
+      return;
+    }
+    let live = true;
+    void loadImage(refSrc)
+      .then((im) => {
+        if (live) refImgRef.current = im;
+      })
+      .catch(() => {
+        refImgRef.current = null;
+      });
+    return () => {
+      live = false;
+    };
+  }, [refSrc]);
   const dprRef = useRef(1);
   const viewRef = useRef({ z: 1, cx: 0, cy: 0 });
   /** the pixi path, when a compiled backend is running; null on the raw one */
@@ -199,6 +230,9 @@ export function Preview() {
   // knobs + pathEdit live in the preview store so the left-panel Knobs/Emitter
   // tabs can drive them; Preview owns the handles and registers the apply hook.
   const setKnobsStore = usePreview((s) => s.setKnobs);
+  // the active emitter's spawn settings, so the toolbar can edit the rate
+  const activeEmitter = useEditor((s) => (s.project.systems.find((x) => x.id === s.activeSystemId) ?? s.project.systems[0]!).emitter);
+  const setEmitterSettings = useEditor((s) => s.setEmitter);
   const pathEdit = usePreview((s) => s.pathEdit);
 
   // (re)create one particle handle per ENABLED system, PARENTS FIRST so a
@@ -449,6 +483,24 @@ export function Preview() {
           if (!backdropRef.current) backdropRef.current = createBackdrop(gl);
           gl.viewport(0, 0, canvas.width, canvas.height);
           backdropRef.current.draw(bgRef.current);
+          const rimg = refImgRef.current;
+          const rcfg = refCfgRef.current;
+          if (rimg && rcfg.visible && rcfg.opacity > 0) {
+            const v = viewRef.current;
+            // contain-fit into the canvas box, then the reference's own scale
+            const box = Math.min(canvas.clientWidth / rimg.width, canvas.clientHeight / rimg.height);
+            const w = rimg.width * box * rcfg.scale;
+            const h = rimg.height * box * rcfg.scale;
+            backdropRef.current.drawImage(
+              { image: rimg, center: [rcfg.offset[0], rcfg.offset[1]], size: [w, h], opacity: rcfg.opacity },
+              {
+                zoom: 1 / (dprRef.current * v.z),
+                offset: [v.cx - canvas.clientWidth / (2 * v.z), v.cy - canvas.clientHeight / (2 * v.z)],
+                wPx: canvas.width,
+                hPx: canvas.height,
+              },
+            );
+          }
         }
       }
       const handles = fxRef.current;
@@ -529,6 +581,23 @@ export function Preview() {
           if (sysId === activeSysRef.current && spawnReq.current) {
             fx.place(spawnReq.current.x, spawnReq.current.y, true);
             fx.burst(burstCountRef.current);
+          }
+        }
+        // the pixi path keeps its reference in the scene graph rather than
+        // redrawing it, so it only needs the numbers when they change
+        if (stage !== null) {
+          const rimg = refImgRef.current;
+          const rcfg = refCfgRef.current;
+          if (rimg && rcfg.visible && rcfg.opacity > 0) {
+            const box = Math.min(canvas.clientWidth / rimg.width, canvas.clientHeight / rimg.height);
+            stage.setReference({
+              image: rimg,
+              center: [rcfg.offset[0], rcfg.offset[1]],
+              size: [rimg.width * box * rcfg.scale, rimg.height * box * rcfg.scale],
+              opacity: rcfg.opacity,
+            });
+          } else {
+            stage.setReference(null);
           }
         }
         // stepping is per-path: raw handles each step and draw themselves, in
@@ -782,15 +851,58 @@ export function Preview() {
 
         <span className="mx-1 h-4 w-px bg-border" />
 
-        <input
-          type="number"
-          min={1}
-          value={burstCount}
-          onChange={(e) => setBurstCount(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
-          className="num"
-          style={{ width: 52 }}
-          title="Particles per click with the Spawn tool"
-        />
+        <label className="flex items-center gap-1 text-muted-foreground" title="Particles per click with the Spawn tool">
+          burst
+          <input
+            type="number"
+            min={1}
+            value={burstCount}
+            onChange={(e) => setBurstCount(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
+            className="num"
+            style={{ width: 52 }}
+          />
+        </label>
+        {/*
+          Emission rate, next to the tools rather than three clicks deep in
+          Settings. It is the number you reach for most while watching the
+          effect, and every trip to a modal is a trip with your eyes off the
+          thing you are tuning. Same store field either way — this is a second
+          door onto it, not a second copy.
+        */}
+        {activeEmitter.mode === 'flow' ? (
+          <label className="flex items-center gap-1 text-muted-foreground" title="Particles per second from this emitter">
+            rate
+            <input
+              type="number"
+              min={0}
+              step={10}
+              value={activeEmitter.rate}
+              onChange={(e) => setEmitterSettings({ rate: Math.max(0, Number(e.target.value) || 0) })}
+              className="num"
+              style={{ width: 62 }}
+            />
+            /s
+          </label>
+        ) : (
+          <label className="flex items-center gap-1 text-muted-foreground" title="Particles per burst from this emitter">
+            count
+            <input
+              type="number"
+              min={1}
+              value={activeEmitter.burst?.count ?? 100}
+              onChange={(e) =>
+                setEmitterSettings({
+                  burst: {
+                    count: Math.max(1, Math.floor(Number(e.target.value)) || 1),
+                    interval: activeEmitter.burst?.interval ?? 1.5,
+                  },
+                })
+              }
+              className="num"
+              style={{ width: 62 }}
+            />
+          </label>
+        )}
         <select
           value={backend}
           onChange={(e) => setBackend(e.target.value as BackendChoice)}

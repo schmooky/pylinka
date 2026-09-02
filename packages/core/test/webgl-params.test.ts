@@ -251,26 +251,50 @@ describe('extractParams — rotation', () => {
     expect(p.rotTo).toBe(0);
   });
 
-  it('reads a constant birth angle off output.initRotation', () => {
+  /*
+   * Angle ports read DEGREES unless the node says otherwise. Radians were the
+   * only reading, which made "type 45 into rot" spin the sprite seven times
+   * round and land somewhere arbitrary — indistinguishable from rotation not
+   * working, which is how it was reported.
+   */
+  it('reads a constant birth angle in degrees', () => {
     const p = extractParams(
-      sys([{ id: 'r', kind: 'output.initRotation', values: { rot: { t: 'f32', v: 0.75 } } }]),
+      sys([{ id: 'r', kind: 'output.initRotation', values: { rot: { t: 'f32', v: 90 } } }]),
+      [], {},
+    );
+    expect(p.rotStart[0]).toBeCloseTo(Math.PI / 2, 6);
+    expect(p.rotStart[1]).toBeCloseTo(Math.PI / 2, 6);
+  });
+
+  it('reads it in radians when the node says radians', () => {
+    const p = extractParams(
+      sys([
+        {
+          id: 'r',
+          kind: 'output.initRotation',
+          structural: { unit: 'radians' },
+          values: { rot: { t: 'f32', v: 0.75 } },
+        },
+      ]),
       [], {},
     );
     expect(p.rotStart).toEqual([0.75, 0.75]);
   });
 
-  it('reads a random birth angle off the gen.randomRange behind it', () => {
+  it('reads a random birth angle off the gen.randomRange behind it, in degrees', () => {
+    // 0..360 is "any angle", which is the thing people actually want
     const p = extractParams(
       sys(
         [
-          { id: 'g', kind: 'gen.randomRange', values: { min: { t: 'f32', v: -1 }, max: { t: 'f32', v: 2 } } },
+          { id: 'g', kind: 'gen.randomRange', values: { min: { t: 'f32', v: 0 }, max: { t: 'f32', v: 360 } } },
           { id: 'r', kind: 'output.initRotation' },
         ],
         [{ id: 'e1', from: { nodeId: 'g', portId: 'out' }, to: { nodeId: 'r', portId: 'rot' } }],
       ),
       [], {},
     );
-    expect(p.rotStart).toEqual([-1, 2]);
+    expect(p.rotStart[0]).toBe(0);
+    expect(p.rotStart[1]).toBeCloseTo(Math.PI * 2, 6);
   });
 
   it('converts degrees through a math.radians hop', () => {
@@ -292,7 +316,7 @@ describe('extractParams — rotation', () => {
     expect(p.rotStart[1]).toBeCloseTo(Math.PI * 2, 6);
   });
 
-  it('reads gen.spin as an angular-velocity range', () => {
+  it('reads gen.spin as an angular-velocity range, in degrees per second', () => {
     const p = extractParams(
       sys(
         [
@@ -303,15 +327,23 @@ describe('extractParams — rotation', () => {
       ),
       [], {},
     );
-    expect(p.spin).toEqual([-6, 6]);
+    expect(p.spin[0]).toBeCloseTo(-6 * (Math.PI / 180), 6);
+    expect(p.spin[1]).toBeCloseTo(6 * (Math.PI / 180), 6);
   });
 
   it('a bare gen.spin spins at its own literal rate', () => {
     const p = extractParams(
-      sys([{ id: 's', kind: 'gen.spin', values: { rate: { t: 'f32', v: 2 } } }]),
+      sys([{ id: 's', kind: 'gen.spin', values: { rate: { t: 'f32', v: 180 } } }]),
       [], {},
     );
-    expect(p.spin).toEqual([2, 2]);
+    // half a turn a second — the rate the old radian default meant
+    expect(p.spin[0]).toBeCloseTo(Math.PI, 6);
+  });
+
+  it('a gen.spin with no value at all still spins at half a turn a second', () => {
+    // the schema default moved from PI radians to 180 degrees: same motion
+    const p = extractParams(sys([{ id: 's', kind: 'gen.spin' }]), [], {});
+    expect(p.spin[0]).toBeCloseTo(Math.PI, 6);
   });
 
   it('reads gen.rotationOverLife as an eased ramp', () => {
@@ -327,7 +359,7 @@ describe('extractParams — rotation', () => {
       [], {},
     );
     expect(p.rotFrom).toBe(0);
-    expect(p.rotTo).toBe(1.5);
+    expect(p.rotTo).toBeCloseTo(1.5 * (Math.PI / 180), 6); // degrees by default
     expect(p.rotEase).toBe(4); // EASE_INDEX['power2.out']
   });
 
@@ -342,7 +374,7 @@ describe('extractParams — rotation', () => {
       ),
       [], {},
     );
-    expect(p.rotTo).toBe(3);
+    expect(p.rotTo).toBeCloseTo(3 * (Math.PI / 180), 6);
   });
 
   it('bakes a custom rotation curve into its own LUT channel', () => {
@@ -559,8 +591,8 @@ describe('extractParams — a constant on a look port', () => {
 
   it('holds an angle from a knob on output.writeRotation', () => {
     const p = extractParams(look('output.writeRotation', 'rot', 'p1'), knob('tilt'), { tilt: 1.5 });
-    expect(p.rotFrom).toBe(1.5);
-    expect(p.rotTo).toBe(1.5);
+    expect(p.rotFrom).toBeCloseTo(1.5 * (Math.PI / 180), 6);
+    expect(p.rotTo).toBeCloseTo(1.5 * (Math.PI / 180), 6);
   });
 
   it('leaves them alone when the output is not there at all', () => {
