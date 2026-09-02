@@ -204,6 +204,18 @@ describe('validateGraph — §12.3', () => {
     expect(has(b, 'W104_BURST_CLAMPED')).toBe(false);
   });
 
+  it('W107 — a repeating burst with no interval never fires', () => {
+    // 0 is not "as fast as possible": the scheduler has nothing to count down,
+    // so the emitter silently emits nothing at all
+    const b = minimalBundle({ emitter: { mode: 'burst', rate: 0, burst: { count: 40, interval: 0 } } });
+    expect(has(b, 'W107_EMITTER_NEVER_FIRES')).toBe(true);
+  });
+
+  it('W107 — quiet for a burst that does fire', () => {
+    const b = minimalBundle({ emitter: { mode: 'burst', rate: 0, burst: { count: 40, interval: 1.5 } } });
+    expect(has(b, 'W107_EMITTER_NEVER_FIRES')).toBe(false);
+  });
+
   it('W102 — high-impact node (warning)', () => {
     // synthesize a catalog with a live high-impact node
     const bigSchema: NodeSchema = {

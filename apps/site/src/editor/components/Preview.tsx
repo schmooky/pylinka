@@ -121,6 +121,19 @@ export function Preview() {
   const activeSysRef = useRef(activeSystemId);
   activeSysRef.current = activeSystemId;
   const [burstCount, setBurstCount] = useState(100);
+  /*
+   * Transport. VFX work is timing work, and every effect here ran at exactly
+   * one speed with no way to hold a frame — a 0.4s burst could only be watched
+   * as a blur. A `once` emitter was worse than that: it fires when it is built
+   * and there was no way to see it again short of switching tabs and back.
+   */
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
+  const stepRef = useRef(false);
+  const [speed, setSpeed] = useState(1);
+  const speedRef = useRef(speed);
+  speedRef.current = speed;
   const burstCountRef = useRef(burstCount);
   burstCountRef.current = burstCount;
   const spawnReq = useRef<{ x: number; y: number } | null>(null);
@@ -441,8 +454,22 @@ export function Preview() {
     let t = 0;
 
     const loop = (now: number) => {
-      const dt = Math.min((now - last) / 1000, 0.05);
+      const real = Math.min((now - last) / 1000, 0.05);
       last = now;
+      /*
+       * Paused holds the last frame rather than blanking: nothing is stepped
+       * and nothing is drawn, so the canvas keeps what is already in it. That
+       * is the point — you pause to LOOK at a moment, and a burst worth
+       * looking at is over in a fifth of a second.
+       */
+      const stepOnce = stepRef.current;
+      stepRef.current = false;
+      if (pausedRef.current && !stepOnce) {
+        raf = requestAnimationFrame(loop);
+        return;
+      }
+      // a step is one frame at a fixed 60th, whatever the wall clock says
+      const dt = stepOnce ? 1 / 60 : real * speedRef.current;
       t += dt;
       const stage = stageRef.current;
       /*
@@ -823,6 +850,50 @@ export function Preview() {
             <span>{tl.label}</span>
           </button>
         ))}
+        {/*
+          Transport, in the bar that already exists rather than a panel of its
+          own: hold a frame, step one, replay from the start, or slow the whole
+          thing down. A `once` emitter needs the replay to be watchable at all.
+        */}
+        <button
+          onClick={() => setPaused((v) => !v)}
+          title={paused ? 'Play' : 'Pause — hold the frame'}
+          aria-label={paused ? 'Play' : 'Pause'}
+          className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 ${
+            paused ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60'
+          }`}>
+          <span aria-hidden className="text-[13px] leading-none">{paused ? '▶' : '❚❚'}</span>
+        </button>
+        <button
+          onClick={() => {
+            stepRef.current = true;
+            setPaused(true);
+          }}
+          title="Step one frame (1/60s)"
+          aria-label="Step one frame"
+          className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-muted-foreground hover:bg-accent/60">
+          <span aria-hidden className="text-[13px] leading-none">⇥</span>
+        </button>
+        <button
+          onClick={() => void recreate()}
+          title="Replay from the start — the only way to see a “once” emitter again"
+          aria-label="Replay"
+          className="flex items-center gap-1.5 rounded-md px-2 py-0.5 text-muted-foreground hover:bg-accent/60">
+          <span aria-hidden className="text-[13px] leading-none">↻</span>
+        </button>
+        <select
+          value={speed}
+          onChange={(e) => setSpeed(Number(e.target.value))}
+          className="sel"
+          title="Playback speed — slow a burst down to see its shape">
+          <option value={1}>1×</option>
+          <option value={0.5}>½×</option>
+          <option value={0.25}>¼×</option>
+          <option value={0.1}>⅒×</option>
+        </select>
+
+        <span className="mx-1 h-4 w-px bg-border" />
+
         <button
           onClick={fitView}
           disabled={view.z === 1 && view.cx === 0 && view.cy === 0}

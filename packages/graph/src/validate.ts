@@ -292,6 +292,24 @@ export function validateGraph(bundle: SystemBundle, catalog: NodeCatalog): Diagn
     }
   }
 
+  /*
+   * A repeating burst with no interval never fires. The scheduler needs a
+   * positive interval to have something to count down, so `0` is not "as fast
+   * as possible" — it is an emitter that silently emits nothing. The editor
+   * clamps the field, but an imported or hand-written project can hold it.
+   */
+  if (system.emitter.mode === 'burst') {
+    const interval = system.emitter.burst?.interval ?? 0;
+    const count = system.emitter.burst?.count ?? 0;
+    if (interval <= 0 || count <= 0) {
+      diags.push({
+        code: 'W107_EMITTER_NEVER_FIRES',
+        severity: 'warning',
+        message: `A repeating burst needs a count and an interval above zero; this one has count ${count} every ${interval}s, so it never spawns anything.`,
+      });
+    }
+  }
+
   const overflow = estimateCapacityOverflow(bundle, nodeById, catalog);
   if (overflow !== undefined) {
     diags.push({
