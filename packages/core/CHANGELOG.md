@@ -1,5 +1,127 @@
 # @pylinka/core
 
+## 2.0.0
+
+### Major Changes
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - **Behaviour change:** angles in the catalog are DEGREES unless the node says otherwise.
+
+  Typing 45 into a radian port turns a sprite seven times round and lands somewhere arbitrary, which is indistinguishable from rotation not working — and that is how it was reported. `output.initRotation`, `output.writeRotation` and `gen.spin` now carry a structural `unit` (`degrees` by default, `radians` if you say so). The unit lives on the DESTINATION, so it is set once per angle rather than on every node feeding it, and a `math.radians` node in front of a port still wins: graphs that convert for themselves — including every recipe — are untouched, and neither backend converts twice.
+
+  `gen.spin`'s default rate moved from `π` to `180`, which is the same half-turn a second in the new unit, and `gen.rotationOverLife`'s `to` moved from `2π` to `360` for the same reason. Both backends read the unit the same way, so a preview and a shipped game agree about what 45 means.
+
+  Also: `output.deathBurst`'s `max` offered powers of two, which reads like a hardware limit and is not one — it is a ceiling on children per parent event, sizing the child pool and the per-frame passes. The options are useful numbers now (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64), and a new `W104_BURST_CLAMPED` warning fires when `countMax` asks for more than that ceiling, which used to just silently drop the extra children.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - **Behaviour change:** in the interpreted WebGL backend, `shape.circle` now spawns on the RING rather than across the filled disc.
+
+  The compiled backends have always emitted `vec2(cos a, sin a) * radius` — the outline — and the catalog implies as much by offering `shape.torus` alongside it. The interpreted one multiplied by `sqrt(random)` as well, filling the disc, so the same graph spawned one way in an editor preview and another way in a shipped game running a compiled backend. This is the one divergence between the two that was a difference of meaning rather than of coverage.
+
+  **If a project of yours uses `shape.circle` and wants a filled blob, change it to `shape.torus` with `innerRadius` 0.** The site's recipes and emitter templates were migrated that way, so the gallery keeps the look it was authored with. Note that a torus samples its radius linearly, so a blob built this way is a little denser at the centre than the old disc, which was uniform by area.
+
+### Minor Changes
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - The interpreted WebGL backend no longer invents behaviour for outputs a graph does not have.
+
+  `extractParams` fell back to preset values rather than neutral ones, so a system with no `output.initVelocity` spawned every particle at 60–120 px/s upward, and one with no `output.writeScale` shrank it from 8px to nothing over its life. Neither had a node anywhere in the graph to explain it or a way to switch it off, and the compiled backend disagreed on the same graph — it spawns at rest and keeps the size and colour a particle was born with. The interpreted backend now does the same.
+
+  Birth velocity also reads more than one node kind. Only a `gen.randomVec2` behind `output.initVelocity` was honoured, so a velocity typed straight into the port, or a knob bound to it, was ignored and the preset used instead. Anything that is not a random range now collapses to a single exact velocity, knobs included.
+
+  Effects that wire up `output.initVelocity` and `output.writeScale` — every recipe, template and seed project does — are unchanged. A project that deliberately omits one will now sit still, or hold its size, instead of drifting or fading.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - The interpreted WebGL backend implements all six spawn shapes.
+
+  It branched on `shape.circle` and `shape.rectangle` only. `shape.torus`, `shape.burstRing` and `shape.polygonalChain` fell through to a point, so picking one in the editor changed nothing and said nothing, and `shape.point` dropped its own `offset`. The compiled backend has always implemented all six, so the same graph spawned differently depending on which backend ran it — and the `shockwave` recipe, whose whole shape is a ring, had been rendering as a dot.
+
+  The shape now lives in one `shapeOffset()` helper shared by both spawn paths, so they cannot drift apart again. `burstRing` lays its particles out evenly by spawn index where there is one, matching the compiled backend; a sub-emitter spawns on parent deaths rather than in a numbered window, so it spaces by burst copy when it is a death burst and takes a random angle otherwise.
+
+  Two shape ports also stopped ignoring knobs (rectangle `size`, chain `start`/`end`), and the fallbacks for an empty port are the catalog's defaults now rather than numbers this file invented — a circle with no radius is 50, the schema default, not 40.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - A handle stays bound to the system it was created for, even after a rename.
+
+  `apply()` re-resolved the system by NAME on every live edit, with a fall-through to "the first enabled system". Renaming an emitter therefore did not fail — the handle silently rebound to a different system and started rendering another effect. In the editor, where renaming a tab does not rebuild the preview, that is exactly what happened. Handles now re-resolve by system id, which survives a rename, and fall back to the name only if the id is gone.
+
+  A `systemName` that matches nothing still falls back rather than throwing — a game asking for an effect that was renamed should not go down — but it now warns once, naming the systems the project does have. It used to play a different effect in silence.
+
+  `pickSystem` moved to its own module (`@pylinka/core` internals) so the interpreted WebGL path no longer imports the WebGPU one to ask which system to run, and takes an optional third `systemId` argument.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - More of the interpreted WebGL backend's fallbacks now agree with the graph.
+
+  **A field wired to nothing does nothing.** Fields are found by kind rather than by following wires, so a `field.gravity` dropped on the canvas and left unconnected pulled on the whole effect, and deleting the `output.addForce` it fed changed nothing at all. A field now needs an outgoing edge to count. The test is coarse — this backend cannot follow a force through a math node, so it does not check where the wire goes — but a node connected to nothing no longer acts.
+
+  **Gravity and drag accumulate.** `output.addForce` and `output.drag` are accumulating outputs, and the compiler emits `force +=` / `dragK +=`, but here a second node of the same kind replaced the first. Two gravity nodes are now one stronger pull, and two drags one stronger drag.
+
+  **Knobs reach more places.** Gravity, the vortex centre and the radial centre read their knob bindings, the way `field.obstacle` and the wind strength already did. Lifetime does too: `output.initLife` behind anything other than a `gen.randomRange` read the port's raw literal only, so a knob-driven lifetime silently fell back to the 1–1.5s default.
+
+  Recipes, templates and the seed project wire every field they use and none of them carry two of a kind, so their output is unchanged.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - `ParticlesHandle.clearColor` — what `autoClear` clears the canvas to, as straight `[r,g,b,a]` in 0..1. Defaults to fully transparent, so nothing changes unless you set it. Available on the interpreted and both compiled backends.
+
+  This exists because of what a light blend mode can actually reach. `add` and `screen` add to the pixels in the SAME framebuffer; they cannot add to the page behind a transparent canvas. So an additive effect on a transparent canvas behaves as if the backdrop were black, and an opaque sprite drawn on black covers whatever is really behind the canvas rather than keying itself out. Clearing to the colour the effect will actually play on gives the light somewhere to land.
+
+  Worth recording what does NOT work, since it looks obviously right: holding the destination alpha at 0 so the page shows through. The canvas is premultiplied, so RGB carrying light at alpha 0 is not a representable colour and the compositor discards the pixel — measured, an additive emitter rendered nothing at all. The blend functions are unchanged.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - `@pylinka/core/webgl` says which nodes it cannot run.
+
+  The interpreted backend recognises node patterns instead of evaluating the graph — that is what keeps it small and lets it live-edit without recompiling — so a kind it does not recognise contributes nothing at all. Silently: the effect just comes out wrong, with no error, until you work out that the compiled backends run the whole catalog and this one runs 35 kinds of it. Whole namespaces are affected, `math.*` and `input.*` among them, along with `output.setVelocity`, `writePosition`, `killIf`, `killIfOutOfRect` and `reflectInRect`.
+
+  New exports `INTERPRETED_KINDS`, `isInterpreted(kind)` and `unsupportedNodes(system)` make that list something a tool can read. `output.addForce`, `output.drag`, `output.writeColor` and the `tex.*` pair count as supported: this backend reads the field or ramp node behind them rather than the output itself, so the effect still lands. A test holds the list against the source of `params.ts`, so support added there without a line in the list fails the build.
+
+  The editor uses it to mark those nodes `inert` while the interpreted backend is the one running.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - `zoom` is settable on a running handle, on all three backends.
+
+  It was a construction-time option, so anything wanting to zoom a live effect had to scale the finished canvas instead — magnifying a raster rendered at the un-zoomed size, which blurs, worse the further in you go. `handle.zoom = 0.5` now shows half as much world at full resolution. Zero and negative values are ignored rather than blanking the view.
+
+  The editor uses it for both halves of a bug the preview had: it grows the canvas buffer with the zoom so a magnified view is drawn rather than stretched, and it sets `zoom = 1 / devicePixelRatio` so that world units are CSS pixels. Effects used to be measured in DEVICE pixels there, which meant the same project rendered half-size on a 2× display — a particle authored at 8px covering 8 device pixels rather than 8 CSS ones.
+
+  The runtime default is unchanged: `zoom: 1` still means one world unit per canvas pixel.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - The pixi runtime carries emission masks and sub-emitter links.
+
+  `createPylinka` built each enabled system on its own, so two things the compiled sims underneath have always supported never reached them through this path: painted **emission masks**, and **sub-emitters** — a system whose particles are born from another system's. Anything built on the pixi integration silently lost both, which reads as broken rather than unsupported.
+
+  New options: `emissionMask` / `emissionMasks` (per system name), and `subEmitters` as `child name → parent name`. An editor project's own `subEmitters` map is read when the option is absent, translating its system IDs to names. Parents are built before their children, since the two share GPU buffers; a link to a muted or missing system is dropped rather than throwing, so muting one emitter does not take its children down with it.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - `setEmitter(x, y, teleport?)` — move the emitter without counting the distance travelled.
+
+  That distance is what `rateOverDistance` turns into spawns, which is the feature that lays a trail behind a dragged emitter. It also means jumping the emitter somewhere for a single frame fires a spawn proportional to how far it jumped, and another one when it jumps back — so placing a one-off burst produced two large dumps instead of the burst you asked for. Measured on a `rate: 420, rateOverDistance: 1.4` emitter, one 100-particle burst placed 178px away spawned 356 particles at the target and 256 more at the origin on the next frame; with `teleport` it spawns 100.
+
+  Teleport when the move is a cut rather than a motion: placing a burst, or repositioning between shots. Leave it off to keep the trail. Available on the interpreted and both compiled backends.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Sub-emitter links are part of the project format, and loading one wires them up.
+
+  A system whose particles are born from another's was stored as `subEmitters` on the project — an undeclared extra key, written by the editor and read by nothing on the loading side. `PylinkaProject` had no such field, `createParticles` never looked for it, and `createCompiledParticles` did not either: a project that worked in the editor came back from a file as a set of unrelated systems, with the child spawning at its own emitter instead of on its parent's deaths. It read as the link not having been saved. It was saved; nothing read it.
+
+  `subEmitters` is now a documented field on `PylinkaProject` (`child system id` → `parent system id`), part of the document rather than editor decoration.
+
+  **Loading a project now runs it.** `createParticles(canvas, project)` and `createCompiledParticles(canvas, project)` build EVERY enabled system with the links wired, and return one handle over all of them: `update` steps them parents-first, `setKnob` and `setEmitter` reach every system, `spawnBurst` reaches only the ones that are not born from another (bursting a sub-emitter means nothing — its particles come from its parent's), and the clear belongs to the first so the rest composite on top. Pass `systemName` for the old single-system behaviour.
+
+  Also new in `@pylinka/core`: `systemsInBuildOrder(project)` returns the enabled systems parents-first along with the links that survived (a link to a muted or missing system is dropped rather than taking the child down with it; a cycle keeps its systems), and `buildProject(project, create)` walks that order, hands each child its parent's handle, and returns something that steps every system in the same order — a child reads the parent's state from the frame it is in, so the parent has to move first.
+
+  The pixi runtime already resolved the links and is unchanged; the editor now shares the same ordering rather than keeping a second copy of it.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - `handle.viewOffset` — pan the view without moving the effect.
+
+  `[x, y]` in world units, subtracted before the world is mapped to the screen, so the same particles are drawn through a window that slid. It pairs with the live `zoom` added alongside it: together they are a full view transform inside the renderer, which is where a view belongs. Transforming the canvas ELEMENT instead moves finished pixels — it slides the drawn area out of its own viewport and leaves an empty margin, and it does not compose with a rendered zoom.
+
+  `setEmitter` maps its canvas pixels through the offset as well as the zoom, so a panned view no longer drags the emitter along with the window. With the default view (`[0, 0]`, zoom 1) nothing changes.
+
+  The editor now sets both instead of CSS-transforming its canvas, which never scales or translates again.
+
+  Measured on a real context — 200×200 canvas, emitter centred, particles read back with `readPixels`: the centroid sat at (100, 101), and with `viewOffset = [40, 25]` it sat at (60, 76). The exact shift, in the opposite direction.
+
+### Patch Changes
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Size, alpha and rotation read a constant on the port, not just a ramp node.
+
+  The interpreted WebGL backend took these from `gen.scaleOverLife` / `gen.alphaOverLife` / `gen.rotationOverLife` (and the generic `numberOverLife` / `curveOverLife` behind the matching output) and nothing else. A literal typed into `output.writeScale`, or a knob bound to it — the way a game sets particle size at runtime — was ignored, and every particle came out at the 8px default. A constant is now treated as a ramp that does not move, knobs included; `output.writeRotation` also follows a `math.radians` hop, the same as the birth angle does.
+
+  Nothing changes for a graph that uses ramp nodes, which is every recipe and template.
+
+- Updated dependencies [[`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936), [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936), [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936), [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936)]:
+  - @pylinka/graph@2.0.0
+  - @pylinka/compiler@2.0.0
+
 ## 1.4.0
 
 ### Minor Changes
