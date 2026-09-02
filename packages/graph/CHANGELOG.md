@@ -1,5 +1,41 @@
 # @pylinka/graph
 
+## 2.0.0
+
+### Major Changes
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - **Behaviour change:** angles in the catalog are DEGREES unless the node says otherwise.
+
+  Typing 45 into a radian port turns a sprite seven times round and lands somewhere arbitrary, which is indistinguishable from rotation not working — and that is how it was reported. `output.initRotation`, `output.writeRotation` and `gen.spin` now carry a structural `unit` (`degrees` by default, `radians` if you say so). The unit lives on the DESTINATION, so it is set once per angle rather than on every node feeding it, and a `math.radians` node in front of a port still wins: graphs that convert for themselves — including every recipe — are untouched, and neither backend converts twice.
+
+  `gen.spin`'s default rate moved from `π` to `180`, which is the same half-turn a second in the new unit, and `gen.rotationOverLife`'s `to` moved from `2π` to `360` for the same reason. Both backends read the unit the same way, so a preview and a shipped game agree about what 45 means.
+
+  Also: `output.deathBurst`'s `max` offered powers of two, which reads like a hardware limit and is not one — it is a ceiling on children per parent event, sizing the child pool and the per-frame passes. The options are useful numbers now (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64), and a new `W104_BURST_CLAMPED` warning fires when `countMax` asks for more than that ceiling, which used to just silently drop the extra children.
+
+### Minor Changes
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - Sub-emitter links are part of the project format, and loading one wires them up.
+
+  A system whose particles are born from another's was stored as `subEmitters` on the project — an undeclared extra key, written by the editor and read by nothing on the loading side. `PylinkaProject` had no such field, `createParticles` never looked for it, and `createCompiledParticles` did not either: a project that worked in the editor came back from a file as a set of unrelated systems, with the child spawning at its own emitter instead of on its parent's deaths. It read as the link not having been saved. It was saved; nothing read it.
+
+  `subEmitters` is now a documented field on `PylinkaProject` (`child system id` → `parent system id`), part of the document rather than editor decoration.
+
+  **Loading a project now runs it.** `createParticles(canvas, project)` and `createCompiledParticles(canvas, project)` build EVERY enabled system with the links wired, and return one handle over all of them: `update` steps them parents-first, `setKnob` and `setEmitter` reach every system, `spawnBurst` reaches only the ones that are not born from another (bursting a sub-emitter means nothing — its particles come from its parent's), and the clear belongs to the first so the rest composite on top. Pass `systemName` for the old single-system behaviour.
+
+  Also new in `@pylinka/core`: `systemsInBuildOrder(project)` returns the enabled systems parents-first along with the links that survived (a link to a muted or missing system is dropped rather than taking the child down with it; a cycle keeps its systems), and `buildProject(project, create)` walks that order, hands each child its parent's handle, and returns something that steps every system in the same order — a child reads the parent's state from the frame it is in, so the parent has to move first.
+
+  The pixi runtime already resolved the links and is unchanged; the editor now shares the same ordering rather than keeping a second copy of it.
+
+### Patch Changes
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - `W101_CAPACITY_OVERFLOW` covers burst and one-shot emitters, not just `flow`.
+
+  Bursts overlap whenever the lifetime outlasts the interval, so 120 particles every 0.5s that live for 2s is 480 alive at the peak — and `capacity` is a hard ceiling the scheduler clamps to, silently. That was the mode most likely to blow the pool and the one mode the check skipped. A one-shot larger than the pool is now flagged too, and the message says outright that the excess is dropped without a word.
+
+- [#24](https://github.com/schmooky/pylinka/pull/24) [`b3046c5`](https://github.com/schmooky/pylinka/commit/b3046c5e928d314600f8729dbe9fda5004f0d936) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - `W107_EMITTER_NEVER_FIRES`: a repeating burst with no count or no interval.
+
+  The scheduler counts down an interval to decide when to fire, so `0` is not "as fast as possible" — it is an emitter that silently emits nothing, forever. The editor clamps the field, but an imported or hand-written project can hold it, and an emitter that produces nothing looks like a broken graph rather than a setting.
+
 ## 1.4.0
 
 ### Minor Changes
