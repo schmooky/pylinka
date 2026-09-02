@@ -63,10 +63,15 @@ export interface ReferenceSettings {
   opacity: number;
   /** multiplier on the contain-fit size */
   scale: number;
-  /** px offset from the preview centre, in canvas CSS space */
+  /**
+   * px offset from the preview centre, in canvas CSS space.
+   *
+   * A reference always draws OVER the canvas. There is no "behind": the
+   * preview's backdrop is painted inside the canvas, which is opaque, so a
+   * reference under it would never be seen. Turn `opacity` down to read the
+   * effect through it.
+   */
   offset: [number, number];
-  /** draw ABOVE the particles — for checking what the effect has to read through */
-  front: boolean;
 }
 
 export const DEFAULT_REFERENCE: ReferenceSettings = {
@@ -75,7 +80,34 @@ export const DEFAULT_REFERENCE: ReferenceSettings = {
   opacity: 0.6,
   scale: 1,
   offset: [0, 0],
-  front: false,
+};
+
+/**
+ * What sits behind the particles in the preview.
+ *
+ * A transparent canvas over solid black is the worst case for judging a light
+ * blend mode: additive means "add to what is behind", and adding to black is
+ * indistinguishable from covering it. A checkerboard says "this is transparent"
+ * the way every other art tool does, and a solid colour lets you check the
+ * effect against the tone it will actually play on.
+ */
+export interface PreviewBackground {
+  /** two checker colours; set them the same for a flat backdrop */
+  a: string;
+  b: string;
+  /** checker square size in px */
+  size: number;
+}
+
+/**
+ * A dark checker rather than black. Adding light to black and covering black
+ * with light look identical, so pure black is the one backdrop on which an
+ * additive emitter cannot show itself.
+ */
+export const DEFAULT_PREVIEW_BACKGROUND: PreviewBackground = {
+  a: '#141414',
+  b: '#1c1c1c',
+  size: 16,
 };
 
 /** A named, colored comment frame around an area of a system's graph (à la UE Blueprints). */
@@ -141,6 +173,8 @@ export interface EditorProject extends PylinkaProject {
   references?: ReferenceImage[];
   /** which reference is shown behind the preview, and how */
   reference?: ReferenceSettings;
+  /** what the preview draws behind everything else */
+  previewBackground?: PreviewBackground;
 }
 
 /** Per-frame atlas dims from a uniform grid (matches the runtime's tools). */

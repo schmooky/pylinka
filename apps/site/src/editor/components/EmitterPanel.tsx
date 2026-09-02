@@ -24,32 +24,92 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
   const setEmitter = useEditor((s) => s.setEmitter);
   const [maskOpen, setMaskOpen] = useState(false);
   const burst = emitter.burst ?? { count: 120, interval: 1.5 };
+  // where this emitter's particles come from: the cursor, or another emitter's
+  // particles at the moment they are born or die
+  const systems = useEditor((s) => s.project.systems);
+  const activeId = useEditor((s) => s.activeSystemId);
+  const parentId = useEditor((s) => (s.project.subEmitters ?? {})[s.activeSystemId] ?? '');
+  const setSubParent = useEditor((s) => s.setSubParent);
+  const setSubTrigger = useEditor((s) => s.setSubTrigger);
+  const trigger = useEditor((s) => {
+    const sys = s.project.systems.find((x) => x.id === s.activeSystemId);
+    return sys?.graph.nodes.find((n) => n.kind === 'output.deathBurst')?.structural?.on === 'birth'
+      ? 'birth'
+      : 'death';
+  });
+  const parentChoices = systems.filter((s) => s.id !== activeId);
 
   const patchPath = (patch: Partial<EmitterPathData>) => setPath({ ...(path ?? DEFAULT_PATH), ...patch });
 
   return (
     <div className="text-xs">
+      {/* ---- where particles come from ---- */}
+      {parentChoices.length > 0 && (
+        <>
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Born from
+          </div>
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <select
+              className="sel sel-wide"
+              value={parentId}
+              onChange={(e) => setSubParent(activeId, e.target.value || null)}>
+              <option value="">the cursor / this emitter</option>
+              {parentChoices.map((s) => (
+                <option key={s.id} value={s.id}>
+                  particles of “{s.name}”
+                </option>
+              ))}
+            </select>
+            {parentId !== '' && (
+              <select
+                className="sel sel-wide"
+                value={trigger}
+                title="Which moment in the parent particle's life spawns one of these"
+                onChange={(e) => setSubTrigger(e.target.value as 'death' | 'birth')}>
+                <option value="death">on their deaths</option>
+                <option value="birth">on their births</option>
+              </select>
+            )}
+          </div>
+        </>
+      )}
+
       {/* ---- spawn (how many & how) ---- */}
       <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         Spawn — “{systemName}”
       </div>
+      {/*
+        These modes all run BY THEMSELVES. "burst" in particular repeats — it is
+        a batch every interval, not a batch when you ask — and calling it that
+        next to a preview tool also called Burst made it read as manual, so an
+        emitter firing on its own clock looked like the tool misbehaving. The
+        labels say when each one fires.
+      */}
       <div className="mb-2 flex overflow-hidden rounded-md border border-border">
         {(
           [
-            ['flow', 'automatic'],
-            ['burst', 'burst'],
-            ['once', 'once'],
+            ['flow', 'stream', 'a continuous stream, at a rate you set'],
+            ['burst', 'repeating', 'a batch every interval, on its own clock — this one keeps going'],
+            ['once', 'once', 'a single batch when the effect starts, then nothing'],
           ] as const
-        ).map(([m, label]) => (
+        ).map(([m, label, hint]) => (
           <button
             key={m}
-            title={m === 'flow' ? 'continuous stream at a rate' : m === 'burst' ? 'a batch of particles every interval' : 'a single batch at the start'}
+            title={hint}
             onClick={() => setEmitter(m === 'flow' ? { mode: 'flow' } : { mode: m, burst })}
             className={`flex-1 py-1.5 ${emitter.mode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
             {label}
           </button>
         ))}
       </div>
+      <p className="mb-3 text-[10px] leading-relaxed text-muted-foreground">
+        {emitter.mode === 'flow'
+          ? `Emits ${emitter.rate} particles a second for as long as it runs.`
+          : emitter.mode === 'burst'
+            ? `Emits ${burst.count} particles every ${burst.interval}s, over and over, without being asked. Use “once” if you want to fire it yourself with the preview's Spawn tool.`
+            : 'Emits one batch at the start and then stops. Use the preview’s Spawn tool to fire more, wherever you click.'}
+      </p>
       {emitter.mode === 'flow' ? (
         <div className="mb-3 grid grid-cols-2 gap-2">
           <label className="flex flex-col gap-0.5">
@@ -101,7 +161,7 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
             ? 'click the preview to add points · drag to move · double-click to delete'
             : path?.points.length
               ? `${path.points.length} points — emitter follows the spline`
-              : 'no path — emitter follows the mouse / orbit'}
+              : 'no path — the emitter sits at the centre, or follows the cursor with the preview\u2019s Follow tool'}
         </span>
       </div>
       {path && path.points.length >= 2 && (

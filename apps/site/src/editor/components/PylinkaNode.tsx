@@ -4,6 +4,9 @@ import type { Literal, PortType } from '@pylinka/graph';
 import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { useEditor } from '../store';
 import { NS_TINT } from '../nsMeta';
+import { useDiagnostics } from '../diagnostics';
+import { usePreview } from '../previewStore';
+import { isInterpreted } from '@pylinka/core/webgl';
 import { EaseControl } from './CurvePicker';
 
 const HEADER_H = 30;
@@ -116,6 +119,16 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
   const unbindKnob = useEditor((s) => s.unbindKnob);
   const toggleNodeDisabled = useEditor((s) => s.toggleNodeDisabled);
   const muted = useEditor((s) => s.project.disabledNodes?.includes(nodeId) ?? false);
+  /*
+   * The interpreted backend recognises node PATTERNS rather than evaluating the
+   * graph, so a kind it does not know contributes nothing — silently, until you
+   * notice the effect is wrong. Compiled backends run the whole catalog. Say
+   * which nodes are inert, and only while that backend is the one running.
+   */
+  const backend = usePreview((s) => s.backend);
+  const inert = backend === 'webgl' && node !== undefined && !isInterpreted(node.kind);
+  const problems = useDiagnostics().byNode.get(nodeId) ?? [];
+  const worst = problems.some((d) => d.severity === 'error') ? 'error' : problems.length ? 'warning' : null;
 
   const connected = useMemo(() => {
     const set = new Set<string>();
@@ -126,7 +139,7 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
   if (!node) return null;
   const schema = getSchema(V1_CATALOG, node.kind);
   if (!schema) {
-    return <div className="rounded-md border border-[#f87171] bg-card px-3 py-2 text-xs">{node.kind} (unknown)</div>;
+    return <div className="rounded-md border border-destructive bg-card px-3 py-2 text-xs">{node.kind} (unknown)</div>;
   }
 
   const inputs = schema.inputs;
@@ -141,10 +154,14 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
       style={{
         width: WIDTH,
         minHeight: bodyH,
-        borderColor: selected ? tint : 'var(--color-border)',
+        borderColor: worst === 'error'
+          ? 'var(--color-destructive)'
+          : selected
+            ? tint
+            : 'var(--color-border)',
         boxShadow: selected ? `0 0 0 1px ${tint}, 0 8px 24px -8px color-mix(in oklab, ${tint} 35%, transparent)` : undefined,
-        opacity: muted ? 0.45 : 1,
-        filter: muted ? 'grayscale(0.6)' : undefined,
+        opacity: muted ? 0.45 : inert ? 0.7 : 1,
+        filter: muted ? 'grayscale(0.6)' : inert ? 'grayscale(0.5)' : undefined,
       }}>
       <div className="flex items-center gap-2 rounded-t-lg px-2.5 py-1.5"
         style={{
@@ -160,6 +177,26 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
           onClick={() => toggleNodeDisabled(node.id)}
         />
         <span className="truncate font-medium">{schema.label}{muted ? ' (muted)' : ''}</span>
+        {inert && (
+          <span
+            className="shrink-0 cursor-help rounded px-1 text-[9px] leading-[14px]"
+            style={{
+              color: 'var(--color-muted-foreground)',
+              background: 'var(--color-accent)',
+            }}
+            title={`The interpreted WebGL backend does not run ${schema.label} — it recognises node patterns rather than evaluating the graph, so this node has no effect on the preview. Switch the backend under the preview to WebGL2 or WebGPU, which run the whole catalog.`}>
+            inert
+          </span>
+        )}
+        {/* the validator knows which node is wrong; this is where it says so */}
+        {worst !== null && (
+          <span
+            className="shrink-0 cursor-help text-[11px] leading-none"
+            style={{ color: worst === 'error' ? 'var(--color-destructive)' : 'var(--color-foreground)' }}
+            title={problems.map((d) => `${d.code}: ${d.message}`).join('\n\n')}>
+            {worst === 'error' ? '!' : '?'}
+          </span>
+        )}
         <code className="ml-auto text-[9px] text-muted-foreground opacity-60">{node.id}</code>
         <button
           className="nodrag -mr-1 hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-black/20 hover:text-foreground group-hover/node:flex"
@@ -194,7 +231,7 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
               )}
               {!isConnected && (bound ? (
                 <span className="nodrag flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px]"
-                  style={{ background: 'color-mix(in oklab, #a78bfa 20%, transparent)', color: '#c4b5fd' }}
+                  style={{ background: 'color-mix(in oklab, var(--color-foreground) 14%, transparent)', color: 'var(--color-foreground)' }}
                   title={`Driven by knob “${bound.name}”`}
                   onPointerDown={(e) => e.stopPropagation()}>
                   ◆ {bound.name}
@@ -204,7 +241,7 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
                 <span className="flex items-center gap-1">
                   {p.type === 'f32' && (
                     <button
-                      className="nodrag h-4 w-4 rounded text-[10px] leading-none text-muted-foreground opacity-0 transition-opacity hover:text-[#c4b5fd] group-hover/row:opacity-100"
+                      className="nodrag h-4 w-4 rounded text-[10px] leading-none text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/row:opacity-100"
                       title="Promote to knob (live slider in the preview)"
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={() => promoteValue(node.id, p.id)}>

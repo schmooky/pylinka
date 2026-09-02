@@ -3,8 +3,12 @@ import { useEditor } from '../store';
 import type { EditorProject } from '../types';
 
 /**
- * "Projects" dropdown: a small localStorage library (save / load / delete /
- * duplicate) plus file import, export, copy-to-clipboard, and reset.
+ * The "Project" menu — the editor's only chrome besides Assets.
+ *
+ * It holds a small localStorage library (save / load / delete / duplicate),
+ * file import and export, and the door into Settings. Everything that is not
+ * an action you take constantly lives here rather than in the header, which is
+ * why the header has room to be almost empty.
  */
 const LIB_KEY = 'pylinka.editor.library';
 
@@ -25,11 +29,14 @@ function readLib(): LibEntry[] {
   return [];
 }
 
-function writeLib(lib: LibEntry[]) {
+/** Returns whether the write landed — the caller must not claim a save it did not get. */
+function writeLib(lib: LibEntry[]): boolean {
   try {
     localStorage.setItem(LIB_KEY, JSON.stringify(lib));
+    return true;
   } catch (e) {
     alert('Could not save to the project library (storage full?): ' + (e as Error).message);
+    return false;
   }
 }
 
@@ -39,6 +46,9 @@ export function ProjectsMenu() {
   const newProject = useEditor((s) => s.newProject);
   const reset = useEditor((s) => s.reset);
   const projectName = useEditor((s) => s.project.name);
+  const setConfigOpen = useEditor((s) => s.setConfigOpen);
+  const setConfigSection = useEditor((s) => s.setConfigSection);
+  const markSaved = useEditor((s) => s.markSaved);
   const [open, setOpen] = useState(false);
   const [lib, setLib] = useState<LibEntry[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -59,7 +69,7 @@ export function ProjectsMenu() {
     const p = snapshot();
     const entry: LibEntry = { id: p.id, name: p.name, updatedAt: new Date().toISOString(), data: p };
     const next = [entry, ...readLib().filter((e) => e.id !== p.id)].slice(0, 30);
-    writeLib(next);
+    if (writeLib(next)) markSaved();
     setLib(next);
   };
 
@@ -82,7 +92,8 @@ export function ProjectsMenu() {
     setOpen(false);
   };
 
-  // export stripped of comment frames / sticky notes (the header Export keeps them)
+  // export stripped of comment frames / sticky notes — they are notes to the
+  // person editing, not part of the effect a game loads
   const exportWithoutNotes = () => {
     const p = snapshot();
     delete p.annotations;
@@ -92,6 +103,9 @@ export function ProjectsMenu() {
     a.download = `${(p.name || 'effect').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.pylinka.json`;
     a.click();
     URL.revokeObjectURL(a.href);
+    // a file on disk outlives this browser, so it closes the same gap the
+    // library does — the header should stop saying the work is unsaved
+    markSaved();
     setOpen(false);
   };
 
@@ -118,22 +132,26 @@ export function ProjectsMenu() {
   };
 
   const item =
-    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent text-foreground/90';
+    'flex w-full items-center gap-2 whitespace-nowrap rounded-md px-2 py-1.5 text-left hover:bg-accent text-foreground/90';
 
   return (
     <div ref={rootRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className={`rounded-md border px-3 py-1.5 ${open ? 'border-foreground/40 text-foreground' : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
-        Projects ▾
+        className={`rounded-md px-2 py-1 text-[11px] ${open ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
+        Project ▾
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-border bg-card p-1.5 text-xs shadow-2xl">
+        <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-lg border border-border p-1.5 text-[11px] shadow-2xl" style={{ background: 'var(--color-popover)' }}>
+          <button className={item} onClick={() => { setConfigSection('project'); setConfigOpen(true); setOpen(false); }}>
+            Settings…
+          </button>
+          <div className="my-1 border-t border-border" />
           <button className={item} onClick={() => { newProject(); setOpen(false); }}>New project</button>
           <button className={item} onClick={duplicate}>Duplicate “{projectName}”</button>
           <button className={item} onClick={saveCurrent}>Save to library</button>
           <div className="my-1 border-t border-border" />
-          {lib.length === 0 && <div className="px-2 py-1.5 text-muted-foreground">Library is empty — save the current project.</div>}
+          {lib.length === 0 && <div className="px-2 py-1.5 text-muted-foreground">No saved projects yet.</div>}
           {lib.map((e) => (
             <div key={e.id} className="group flex items-center gap-1 rounded-md px-1 hover:bg-accent">
               <button className="min-w-0 flex-1 truncate px-1 py-1.5 text-left" title={new Date(e.updatedAt).toLocaleString()} onClick={() => load(e)}>

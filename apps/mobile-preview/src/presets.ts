@@ -55,7 +55,9 @@ function buildSystem(o: SysOpts, id: string, prefix: string, name: string): Syst
   const link = (fromN: number, fromP: string, toN: number, toP: string) =>
     edges.push({ id: `${prefix}e${e++}`, from: { nodeId: nid(fromN), portId: fromP }, to: { nodeId: nid(toN), portId: toP } });
 
-  if (o.shape === 'circle') nodes.push({ id: nid(1), kind: 'shape.circle', values: { radius: f(o.radius ?? 40) } });
+  // shape.circle is the RING; a filled blob is a torus from 0
+  if (o.shape === 'circle')
+    nodes.push({ id: nid(1), kind: 'shape.torus', values: { innerRadius: f(0), outerRadius: f(o.radius ?? 40) } });
   else if (o.shape === 'rect') nodes.push({ id: nid(1), kind: 'shape.rectangle', values: { size: v2(o.size ?? [100, 100]) } });
   else nodes.push({ id: nid(1), kind: 'shape.point', values: { offset: v2([0, 0]) } });
   nodes.push({ id: nid(2), kind: 'output.spawnPosition' });

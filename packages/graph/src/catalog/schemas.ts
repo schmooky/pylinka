@@ -48,6 +48,9 @@ function schema(s: Omit<NodeSchema, 'codegen' | 'structural'> & Partial<Pick<Nod
 const SPACE_OPTIONS = ['world', 'emitter'];
 
 // The GSAP-named ease set (§13.9), shared by every structural `ease` param.
+/** Angle ports read either way; the graph says which. */
+const ANGLE_UNITS = ['degrees', 'radians'];
+
 const EASE_OPTIONS = [
   'linear',
   'power1.in',
@@ -186,12 +189,17 @@ const gens: NodeSchema[] = [
   // own age, which is what "spin the asset while it lives" means.
   schema({
     kind: 'gen.spin',
-    label: 'Spin (rad/s)',
+    label: 'Spin',
     namespace: 'gen',
     evalTime: 'update',
     impact: 'low',
-    inputs: [inPort('rate', 'f32', f(3.1415926535897931))],
+    // Degrees per second by default, because that is the unit an artist has a
+    // feel for; 180 is the rate the radian default used to be. A math.radians
+    // node feeding the port still wins, so graphs that convert for themselves
+    // are untouched.
+    inputs: [inPort('rate', 'f32', f(180))],
     outputs: [outPort('out', 'f32')],
+    structural: [{ key: 'unit', options: ANGLE_UNITS, default: 'degrees' }],
   }),
   // An eased sweep from one angle to another over the lifetime — the ramp form,
   // for a tile that turns exactly 90 degrees as it falls and then stops.
@@ -201,8 +209,11 @@ const gens: NodeSchema[] = [
     namespace: 'gen',
     evalTime: 'update',
     impact: 'low',
-    inputs: [inPort('from', 'f32', f(0)), inPort('to', 'f32', f(6.2831853071795862))],
+    // a full turn, in the unit the node declares
+    inputs: [inPort('from', 'f32', f(0)), inPort('to', 'f32', f(360))],
     outputs: [outPort('out', 'f32')],
+    // no `unit` here: the DESTINATION declares it (output.writeRotation), so an
+    // artist sets the unit once per angle rather than on every node feeding it
     structural: [{ key: 'ease', options: EASE_OPTIONS, default: 'linear' }],
   }),
   schema({
@@ -317,7 +328,20 @@ const outputs: NodeSchema[] = [
   // Birth angle. Wire a `gen.randomRange` for scattered starts, a literal for a
   // fixed one. Without this every particle spawned at 0 and any spin was
   // perfectly in phase across the whole burst, which reads as a single object.
-  schema({ kind: 'output.initRotation', label: 'Init rotation', namespace: 'output', evalTime: 'init', impact: 'low', inputs: [inPort('rot', 'f32', f(0))], outputs: [] }),
+  // Birth angle. Degrees by default: typing 45 into a radian port turns the
+  // sprite seven times round and reads as "rotation does nothing", which is
+  // exactly how it read. Feed it a gen.randomRange for a random angle in a
+  // range — 0 to 360 is every direction.
+  schema({
+    kind: 'output.initRotation',
+    label: 'Init rotation',
+    namespace: 'output',
+    evalTime: 'init',
+    impact: 'low',
+    inputs: [inPort('rot', 'f32', f(0))],
+    outputs: [],
+    structural: [{ key: 'unit', options: ANGLE_UNITS, default: 'degrees' }],
+  }),
   schema({ kind: 'output.initLife', label: 'Init life', namespace: 'output', evalTime: 'init', impact: 'low', inputs: [inPort('life', 'f32', f(1))], outputs: [] }),
   schema({ kind: 'output.addForce', label: 'Add force', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('force', 'vec2', v2(0, 0))], outputs: [] }),
   schema({ kind: 'output.drag', label: 'Drag', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('drag', 'f32', f(0))], outputs: [] }),
@@ -326,7 +350,7 @@ const outputs: NodeSchema[] = [
   schema({ kind: 'output.writeColor', label: 'Write color', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('color', 'color', col('#ffffffff'))], outputs: [] }),
   schema({ kind: 'output.writeAlpha', label: 'Write alpha', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('alpha', 'f32', f(1))], outputs: [] }),
   schema({ kind: 'output.writeScale', label: 'Write scale', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('scale', 'f32', f(1))], outputs: [] }),
-  schema({ kind: 'output.writeRotation', label: 'Write rotation', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('rot', 'f32', f(0))], outputs: [] }),
+  schema({ kind: 'output.writeRotation', label: 'Write rotation', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('rot', 'f32', f(0))], outputs: [], structural: [{ key: 'unit', options: ANGLE_UNITS, default: 'degrees' }] }),
   schema({ kind: 'output.initTexIndex', label: 'Init texture index', namespace: 'output', evalTime: 'init', impact: 'low', inputs: [inPort('index', 'f32', f(0))], outputs: [] }),
   // The child-side declaration of a sub-emitter burst. `on` picks WHICH parent
   // event fires it: a death (debris where a projectile ends) or a birth (a
@@ -347,7 +371,20 @@ const outputs: NodeSchema[] = [
     ],
     outputs: [],
     structural: [
-      { key: 'max', options: ['1', '2', '4', '8', '16', '32', '64'], default: '8' },
+      /*
+       * `max` is the CEILING on children per parent event, and it is a cost
+       * knob rather than a look one: the child pool is the parent's capacity
+       * times this, and the engine runs one pass per copy every frame. The
+       * options used to be powers of two, which reads like a hardware
+       * constraint and is not one — nothing here needs a power of two, so the
+       * list is just useful numbers now. Keep it at or just above `countMax`;
+       * anything beyond that is pool and passes you paid for and never use.
+       */
+      {
+        key: 'max',
+        options: ['1', '2', '3', '4', '6', '8', '12', '16', '24', '32', '48', '64'],
+        default: '8',
+      },
       { key: 'on', options: ['death', 'birth'], default: 'death' },
     ],
   }),

@@ -65,6 +65,13 @@ export function MaskEditor({ initial, onSave, onClose }: MaskEditorProps) {
   const stampImage = (file: File) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
+    // a dropped file that is not a decodable image never fires onload, so the
+    // URL would be held for the life of the page and the drop would look like
+    // it simply did nothing
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      alert(`Could not read "${file.name}" as an image.`);
+    };
     img.onload = () => {
       URL.revokeObjectURL(url);
       // fit-contain into the paint canvas

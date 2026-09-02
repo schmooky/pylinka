@@ -144,6 +144,78 @@ describe('validateGraph — §12.3', () => {
     expect(has(b, 'W101_CAPACITY_OVERFLOW')).toBe(true);
   });
 
+  /*
+   * Only `flow` used to be checked, though a repeating burst is the easier one
+   * to get wrong: bursts OVERLAP whenever the lifetime outlasts the interval,
+   * and everything past the pool is dropped in silence.
+   */
+  it('W101 — a repeating burst that overlaps itself', () => {
+    // 120 every 0.5s, alive 2s → four batches overlapping → 480
+    const b = minimalBundle({
+      capacity: 200,
+      emitter: { mode: 'burst', rate: 0, burst: { count: 120, interval: 0.5 } },
+    });
+    b.system.graph.nodes.find((n) => n.id === 'n3')!.values = { life: { t: 'f32', v: 2 } };
+    expect(has(b, 'W101_CAPACITY_OVERFLOW')).toBe(true);
+  });
+
+  it('W101 — quiet when the bursts do not overlap', () => {
+    // 120 every 2s, alive 0.5s → one batch at a time → 120 fits in 200
+    const b = minimalBundle({
+      capacity: 200,
+      emitter: { mode: 'burst', rate: 0, burst: { count: 120, interval: 2 } },
+    });
+    b.system.graph.nodes.find((n) => n.id === 'n3')!.values = { life: { t: 'f32', v: 0.5 } };
+    expect(has(b, 'W101_CAPACITY_OVERFLOW')).toBe(false);
+  });
+
+  it('W101 — a one-shot bigger than the pool', () => {
+    const b = minimalBundle({
+      capacity: 200,
+      emitter: { mode: 'once', rate: 0, burst: { count: 900, interval: 0 } },
+    });
+    expect(has(b, 'W101_CAPACITY_OVERFLOW')).toBe(true);
+  });
+
+  /*
+   * `max` sizes the child pool at construction; countMax is what each event
+   * asks for. Ask for more than the pool was built for and the extra children
+   * silently never appear, which reads as the count doing nothing.
+   */
+  it('W104 — a death burst asking for more than its ceiling', () => {
+    const b = minimalBundle();
+    b.system.graph.nodes.push({
+      id: 'db',
+      kind: 'output.deathBurst',
+      structural: { max: '8', on: 'death' },
+      values: { countMin: { t: 'f32', v: 20 }, countMax: { t: 'f32', v: 20 } },
+    });
+    expect(has(b, 'W104_BURST_CLAMPED')).toBe(true);
+  });
+
+  it('W104 — quiet when the ceiling covers the count', () => {
+    const b = minimalBundle();
+    b.system.graph.nodes.push({
+      id: 'db',
+      kind: 'output.deathBurst',
+      structural: { max: '24', on: 'death' },
+      values: { countMin: { t: 'f32', v: 8 }, countMax: { t: 'f32', v: 20 } },
+    });
+    expect(has(b, 'W104_BURST_CLAMPED')).toBe(false);
+  });
+
+  it('W107 — a repeating burst with no interval never fires', () => {
+    // 0 is not "as fast as possible": the scheduler has nothing to count down,
+    // so the emitter silently emits nothing at all
+    const b = minimalBundle({ emitter: { mode: 'burst', rate: 0, burst: { count: 40, interval: 0 } } });
+    expect(has(b, 'W107_EMITTER_NEVER_FIRES')).toBe(true);
+  });
+
+  it('W107 — quiet for a burst that does fire', () => {
+    const b = minimalBundle({ emitter: { mode: 'burst', rate: 0, burst: { count: 40, interval: 1.5 } } });
+    expect(has(b, 'W107_EMITTER_NEVER_FIRES')).toBe(false);
+  });
+
   it('W102 — high-impact node (warning)', () => {
     // synthesize a catalog with a live high-impact node
     const bigSchema: NodeSchema = {

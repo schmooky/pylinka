@@ -183,13 +183,13 @@ export function AssetManager() {
                     key={t.id}
                     onClick={() => setSelId(t.id)}
                     className="group/asset relative flex flex-col gap-1 rounded-lg border p-1.5 text-left hover:bg-black/20"
-                    style={{ borderColor: t.id === selId ? 'var(--accent, #a78bfa)' : 'var(--color-border)' }}>
+                    style={{ borderColor: t.id === selId ? 'var(--color-foreground)' : 'var(--color-border)' }}>
                     <div className="grid h-16 place-items-center overflow-hidden rounded bg-black/40">
                       <img src={t.src} alt="" className="max-h-16 max-w-full object-contain" style={{ imageRendering: 'pixelated' }} />
                     </div>
                     <div className="flex items-center gap-1">
                       <span className="min-w-0 flex-1 truncate text-[11px]">{t.name}</span>
-                      {t.id === activeId && <span className="rounded bg-[#a78bfa]/20 px-1 text-[8px] text-[#c4b5fd]">live</span>}
+                      {t.id === activeId && <span className="rounded bg-foreground/15 px-1 text-[8px] text-foreground">live</span>}
                     </div>
                     <span className="font-mono text-[8px] text-muted-foreground">{t.frames ? `${t.frames.length}f` : `${t.cols}×${t.rows}`}</span>
                   </button>
@@ -312,10 +312,10 @@ function ReferenceTab() {
                   Delete
                 </button>
                 {r.id === ref.id ? (
-                  <span className="rounded bg-[#a78bfa]/20 px-1.5 py-0.5 text-[#c4b5fd]">● shown</span>
+                  <span className="rounded bg-foreground/15 px-1.5 py-0.5 text-foreground">● shown</span>
                 ) : (
                   <button
-                    className="rounded bg-[#a78bfa] px-1.5 py-0.5 font-medium text-black hover:brightness-110"
+                    className="rounded bg-foreground px-1.5 py-0.5 font-medium text-black hover:brightness-110"
                     onClick={() => setReference({ id: r.id, visible: true })}>
                     Show
                   </button>
@@ -433,7 +433,7 @@ function AssetDetail({
                   <button className="px-1 hover:text-foreground disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)} title="Move left">◄</button>
                   <span className="font-mono">{i + 1}</span>
                   <button className="px-1 hover:text-foreground disabled:opacity-30" disabled={i === tex.frames!.length - 1} onClick={() => move(i, 1)} title="Move right">►</button>
-                  <button className="px-1 hover:text-[#f87171]" onClick={() => removeFrame(i)} title="Remove frame">✕</button>
+                  <button className="px-1 hover:text-destructive" onClick={() => removeFrame(i)} title="Remove frame">✕</button>
                 </div>
               </div>
             ))}
@@ -484,9 +484,9 @@ function AssetDetail({
 
       <div className="flex items-center gap-2 border-t pt-3" style={{ borderColor: 'var(--color-border)' }}>
         {isActive ? (
-          <span className="rounded-md bg-[#a78bfa]/20 px-3 py-1.5 text-[11px] text-[#c4b5fd]">● Rendering on “{activeSystemName}”</span>
+          <span className="rounded-md bg-foreground/15 px-3 py-1.5 text-[11px] text-foreground">● Rendering on “{activeSystemName}”</span>
         ) : (
-          <button className="rounded-md bg-[#a78bfa] px-3 py-1.5 text-[11px] font-medium text-black hover:brightness-110" onClick={onUse}>Use for “{activeSystemName}”</button>
+          <button className="rounded-md bg-foreground px-3 py-1.5 text-[11px] font-medium text-black hover:brightness-110" onClick={onUse}>Use for “{activeSystemName}”</button>
         )}
       </div>
     </div>

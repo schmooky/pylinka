@@ -1,25 +1,41 @@
 @import 'tailwindcss';
+/* Fira Code for the whole editor — see the --font-sans note below */
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&display=swap');
 @import '@xyflow/react/dist/style.css';
+@import 'driver.js/dist/driver.css';
 
 @custom-variant dark (&:is(.dark *));
 
-/* shadcn zinc monochrome (dark) */
+/*
+ * Monochrome workbench palette — every colour is `oklch(L 0 0)`, i.e. zero
+ * chroma, so the whole editor is grey and the only colour on screen is the
+ * effect being authored. Lifted from the spine-benchmark workbench, which
+ * solved the same problem: a tool whose subject is colour cannot afford to
+ * have any of its own.
+ */
 :root {
-  --radius: 0.5rem;
-  --background: oklch(0.141 0.005 285.823);
+  --radius: 0.625rem;
+  --background: oklch(0.205 0 0);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --border: oklch(1 0 0 / 12%);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.21 0.006 285.885);
-  /* port type colors */
-  --t-f32: oklch(0.72 0.01 286);
-  --t-vec2: oklch(0.72 0.12 235);
-  --t-vec4: oklch(0.7 0.16 300);
-  --t-bool: oklch(0.8 0.13 85);
+  --card: oklch(0.24 0 0);
+  --popover: oklch(0.24 0 0);
+  --muted: oklch(0.27 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.32 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.72 0 0);
+  --primary: oklch(0.82 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.637 0.237 25.331);
+  /*
+   * Port types read as lightness steps rather than hues. A wire's type still
+   * separates at a glance, but nothing competes with the preview.
+   */
+  --t-f32: oklch(0.62 0 0);
+  --t-vec2: oklch(0.78 0 0);
+  --t-vec4: oklch(0.92 0 0);
+  --t-bool: oklch(0.45 0 0);
 }
 
 @theme inline {
@@ -32,8 +48,18 @@
   --color-border: var(--border);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
-  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --color-popover: var(--popover);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  /*
+   * One typeface, monospaced, everywhere. A node editor is mostly identifiers,
+   * numbers and short labels sitting in narrow columns; a proportional face
+   * makes those columns ragged and makes a scrubbed number jitter as its digits
+   * change width. Fira Code holds them still.
+   */
+  --font-sans: 'Fira Code', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-mono: 'Fira Code', ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
 html,
@@ -94,5 +120,77 @@ input[type='range'] { accent-color: var(--color-foreground); }
   max-width: 110px;
   outline: none;
 }
+/* selects on a settings row have the width to spell their options out; the
+   110px cap exists for the ones crammed onto a node */
+.sel-wide {
+  max-width: none;
+  min-width: 180px;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+/*
+ * The emitter strip scrolls when there are more tabs than room, and a scrollbar
+ * lands exactly on the line the active tab opens into — breaking the one edge
+ * the tabs exist to make. The strip still scrolls by wheel and trackpad.
+ */
+.tabstrip {
+  scrollbar-width: none;
+}
+.tabstrip::-webkit-scrollbar {
+  display: none;
+}
+
 /* hide number spinners */
 .num::-webkit-outer-spin-button, .num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/*
+ * driver.js ships a light popover. The editor is dark and deliberately grey, so
+ * a white card mid-tour reads as a browser dialog rather than part of the tool.
+ * Only the surface is restyled — the library keeps its own positioning.
+ */
+.driver-popover {
+  background: var(--color-popover);
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px -20px rgb(0 0 0 / 70%);
+  max-width: 340px;
+}
+.driver-popover-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+.driver-popover-description {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-muted-foreground);
+}
+.driver-popover-progress-text {
+  font-size: 10px;
+  color: var(--color-muted-foreground);
+}
+.driver-popover-navigation-btns button {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-muted-foreground);
+  font-size: 12px;
+  text-shadow: none;
+  padding: 3px 10px;
+}
+.driver-popover-navigation-btns button:hover {
+  background: var(--color-accent);
+  color: var(--color-foreground);
+}
+.driver-popover-close-btn {
+  color: var(--color-muted-foreground);
+}
+.driver-popover-close-btn:hover {
+  color: var(--color-foreground);
+}
+/* the callout arrow has to follow the card on every side */
+.driver-popover-arrow-side-top.driver-popover-arrow { border-top-color: var(--color-popover); }
+.driver-popover-arrow-side-bottom.driver-popover-arrow { border-bottom-color: var(--color-popover); }
+.driver-popover-arrow-side-left.driver-popover-arrow { border-left-color: var(--color-popover); }
+.driver-popover-arrow-side-right.driver-popover-arrow { border-right-color: var(--color-popover); }

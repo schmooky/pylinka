@@ -50,7 +50,10 @@ export function emitter(name: string, idp: string, o: EmitterOpts): System {
     edges.push({ id: `${idp}e${e++}`, from: { nodeId: nid(fn), portId: fp }, to: { nodeId: nid(tn), portId: tp } });
 
   // where particles are born
-  if (o.shape === 'circle') nodes.push({ id: nid(1), kind: 'shape.circle', values: { radius: f(o.radius ?? 30) } });
+  // `circle` here means a filled blob, and shape.circle is the RING — a blob
+  // is a torus with an inner radius of 0
+  if (o.shape === 'circle')
+    nodes.push({ id: nid(1), kind: 'shape.torus', values: { innerRadius: f(0), outerRadius: f(o.radius ?? 30) } });
   else if (o.shape === 'rect') nodes.push({ id: nid(1), kind: 'shape.rectangle', values: { size: v2(o.size ?? [100, 100]) } });
   else nodes.push({ id: nid(1), kind: 'shape.point', values: { offset: v2([0, 0]) } });
   nodes.push({ id: nid(2), kind: 'output.spawnPosition' });

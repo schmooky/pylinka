@@ -23,6 +23,8 @@ import { clampDt } from '../time.js';
 import { featuresOf, WebGL2Engine, type AtlasConfig, type MaskConfig } from './engine.js';
 import { extractParams, type EngineParams, type KnobValues } from './params.js';
 import { playCode, type AtlasPlay } from '../atlas.js';
+import { pickSystem } from '../system.js';
+import { systemsInBuildOrder } from '../project.js';
 
 /**
  * Rasterize an emission mask into a point table: one emitter-relative offset
@@ -113,8 +115,17 @@ function resolveAtlas(o: AtlasOptions | undefined): AtlasConfig | undefined {
 export interface ParticlesHandle {
   /** Step the simulation and render one frame. Call once per rAF tick. */
   update(dtSeconds: number): void;
-  /** Move where new particles are born (world/canvas pixels). */
-  setEmitter(x: number, y: number): void;
+  /**
+   * Move where new particles are born (world/canvas pixels).
+   *
+   * `teleport` moves the emitter WITHOUT counting the distance travelled. That
+   * distance is what `rateOverDistance` turns into spawns — the feature that
+   * lays a trail behind a dragged emitter — so jumping the emitter somewhere
+   * for one frame otherwise fires a spawn proportional to how far it jumped,
+   * and another one when it jumps back. Teleport when the move is a cut rather
+   * than a motion: placing a one-off burst, or repositioning between shots.
+   */
+  setEmitter(x: number, y: number, teleport?: boolean): void;
   /** Emit an extra burst next frame. */
   spawnBurst(count: number): void;
   /**
@@ -129,8 +140,40 @@ export interface ParticlesHandle {
    * a full re-create (only pool capacity does) — recreate via createParticles.
    */
   apply(project: PylinkaProject): boolean;
+  /**
+   * How much world the canvas shows, live.
+   *
+   * `1` maps one world unit to one canvas PIXEL, so on a 2x-density display an
+   * effect authored at 100px covers 50 CSS px — pass `1 / devicePixelRatio` to
+   * make world units device-independent. Values above 1 show more world in the
+   * same canvas (zoom out), below 1 less (zoom in), and because it changes what
+   * the renderer draws rather than how a finished image is stretched, zooming
+   * this way stays sharp at any level. Emitter coordinates are still canvas
+   * pixels; they are converted for you.
+   */
+  zoom: number;
+  /**
+   * Slide the view without moving the effect, in world units.
+   *
+   * Panning by transforming the canvas ELEMENT moves finished pixels: the
+   * drawn area slides away from the viewport and leaves an empty margin, and
+   * it cannot be combined with a rendered zoom. This shifts the window the
+   * renderer draws through instead. `[0, 0]` is the default.
+   */
+  viewOffset: [number, number];
   /** Whether the canvas should be cleared each frame (default true). */
   autoClear: boolean;
+  /**
+   * What `autoClear` clears to, as straight (non-premultiplied) `[r,g,b,a]` in
+   * 0..1. Defaults to fully transparent.
+   *
+   * This matters more than it looks. The canvas is premultiplied, so a light
+   * blend mode can only add to pixels that are IN this framebuffer — over a
+   * transparent clear there is nothing to add to, and the page behind the
+   * canvas is out of reach. Clearing to the colour the effect will really play
+   * on is what makes `add` and `screen` show what they will actually do.
+   */
+  clearColor: [number, number, number, number];
   /** Alive particle count. Synchronous GPU readback — for debug/stats, not per-frame. */
   aliveCount(): number;
   /**
@@ -226,25 +269,128 @@ export interface AtlasOptions {
 
 export { extractParams, parseColor, type EngineParams, type KnobValues } from './params.js';
 export { WebGL2Engine } from './engine.js';
+export { INTERPRETED_KINDS, isInterpreted, unsupportedNodes } from './support.js';
 
 /** Handle → engine, so a sub-emitter can reach its parent's GPU buffers. */
 const engineOf = new WeakMap<ParticlesHandle, WebGL2Engine>();
+
+/**
+ * Run a project.
+ *
+ * With no `systemName`, this builds EVERY enabled system and wires the
+ * sub-emitter links the project declares — the thing an artist already set up
+ * when they chose what a system is born from. It used to build one system and
+ * leave the links to the caller, which meant a project that worked in the
+ * editor came back from a file as a set of unrelated effects unless the game
+ * happened to know it had to sort the systems and hand each child its parent.
+ * Nothing about that was discoverable, and it is not the caller's problem: the
+ * document says how the systems relate.
+ *
+ * Name a system to get just that one, the way this always behaved.
+ */
+/**
+ * One handle over several systems.
+ *
+ * Fan-out with two exceptions that matter. `spawnBurst` reaches only the roots:
+ * a sub-emitter's particles come from its parent's, so bursting it directly
+ * means nothing. And `autoClear` belongs to the first handle alone — every
+ * other one has to composite onto what is already in the buffer, which is the
+ * bookkeeping every caller was getting wrong when they wired this by hand.
+ */
+function combine(handles: ParticlesHandle[], children: Set<ParticlesHandle>): ParticlesHandle {
+  const first = handles[0]!;
+  const roots = handles.filter((h) => !children.has(h));
+  return {
+    update(dt) {
+      // build order is step order: a child reads the parent's state from the
+      // frame it is in, so the parent has to move first
+      for (const h of handles) h.update(dt);
+    },
+    setEmitter(x, y, teleport) {
+      for (const h of handles) h.setEmitter(x, y, teleport);
+    },
+    spawnBurst(count) {
+      for (const h of roots) h.spawnBurst(count);
+    },
+    setKnob(name, x, y) {
+      for (const h of handles) h.setKnob(name, x, y);
+    },
+    apply(next) {
+      let ok = true;
+      for (const h of handles) if (!h.apply(next)) ok = false;
+      return ok;
+    },
+    get autoClear() {
+      return first.autoClear;
+    },
+    set autoClear(v: boolean) {
+      first.autoClear = v;
+    },
+    get clearColor() {
+      return first.clearColor;
+    },
+    set clearColor(v: [number, number, number, number]) {
+      first.clearColor = v;
+    },
+    get zoom() {
+      return first.zoom;
+    },
+    set zoom(v: number) {
+      for (const h of handles) h.zoom = v;
+    },
+    get viewOffset(): [number, number] {
+      return first.viewOffset;
+    },
+    set viewOffset(v: [number, number]) {
+      for (const h of handles) h.viewOffset = v;
+    },
+    aliveCount() {
+      let n = 0;
+      for (const h of handles) n += h.aliveCount();
+      return n;
+    },
+    get contextLost() {
+      return handles.some((h) => h.contextLost);
+    },
+    destroy() {
+      for (const h of handles) h.destroy();
+    },
+  };
+}
 
 export function createParticles(
   target: HTMLCanvasElement | WebGL2RenderingContext,
   project: PylinkaProject,
   opts: ParticlesOptions = {},
 ): ParticlesHandle {
+  if (opts.systemName === undefined && opts.subParent === undefined) {
+    const { systems, links } = systemsInBuildOrder(project);
+    if (systems.length > 1 || links.size > 0) {
+      const byId = new Map<string, ParticlesHandle>();
+      const built: ParticlesHandle[] = [];
+      for (const sys of systems) {
+        const parentId = links.get(sys.id);
+        const parent = parentId !== undefined ? byId.get(parentId) : undefined;
+        const h = createParticles(target, project, {
+          ...opts,
+          systemName: sys.name,
+          ...(parent !== undefined ? { subParent: parent } : {}),
+        });
+        // one clear for the frame, done by the first: the rest composite on top
+        h.autoClear = built.length === 0;
+        byId.set(sys.id, h);
+        built.push(h);
+      }
+      return combine(built, new Set([...links.keys()].map((id) => byId.get(id)!)));
+    }
+  }
   const gl =
     target instanceof WebGL2RenderingContext
       ? target
       : target.getContext('webgl2', { premultipliedAlpha: true, alpha: true });
   if (!gl) throw new Error('WebGL2 is not available on this target.');
 
-  const system =
-    project.systems.find((s) => s.name === opts.systemName) ??
-    project.systems.find((s) => s.enabled) ??
-    project.systems[0];
+  const system = pickSystem(project, opts.systemName);
   if (!system) throw new Error('Project has no systems.');
 
   // knob values seeded from ParamDef defaults (by name)
@@ -275,10 +421,13 @@ export function createParticles(
   let curSystem = system;
   let curParams = project.params;
   const systemName = system.name;
+  const systemId = system.id;
   const maxDt = opts.maxDt ?? 0.05;
 
   const canvas = gl.canvas as HTMLCanvasElement;
-  const zoom = opts.zoom ?? 1;
+  let zoom = opts.zoom ?? 1;
+  let viewX = 0;
+  let viewY = 0;
   let ex = (canvas.width * zoom) / 2;
   let ey = (canvas.height * zoom) / 2;
   let px = ex;
@@ -292,6 +441,7 @@ export function createParticles(
 
   const handle: ParticlesHandle = {
     autoClear: true,
+    clearColor: [0, 0, 0, 0],
     update(dtSeconds: number) {
       const dt = clampDt(dtSeconds, maxDt);
       const dist = Math.hypot(ex - px, ey - py);
@@ -300,17 +450,27 @@ export function createParticles(
 
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (this.autoClear) {
-        gl.clearColor(0, 0, 0, 0);
+        const [cr, cg, cb, ca] = this.clearColor;
+        // premultiplied target: scale by alpha, or an opaque-looking clear
+        // colour arrives washed out
+        gl.clearColor(cr * ca, cg * ca, cb * ca, ca);
         gl.clear(gl.COLOR_BUFFER_BIT);
       }
-      engine.render(canvas.width * zoom, canvas.height * zoom, params);
+      engine.render(canvas.width * zoom, canvas.height * zoom, params, viewX, viewY);
 
       px = ex;
       py = ey;
     },
-    setEmitter(x: number, y: number) {
-      ex = x * zoom;
-      ey = y * zoom;
+    setEmitter(x: number, y: number, teleport = false) {
+      // canvas pixels -> world, through the SAME mapping the renderer draws
+      // with: without the view offset, panning would drag the emitter along
+      // with the window instead of moving the window over it
+      ex = x * zoom + viewX;
+      ey = y * zoom + viewY;
+      if (teleport) {
+        px = ex;
+        py = ey;
+      }
     },
     spawnBurst(count: number) {
       scheduler.spawnBurst(count);
@@ -321,10 +481,8 @@ export function createParticles(
       recomputeWind();
     },
     apply(next: PylinkaProject): boolean {
-      const sys =
-        next.systems.find((s) => s.name === systemName) ??
-        next.systems.find((s) => s.enabled) ??
-        next.systems[0];
+      // by ID first: renaming an emitter must not rebind this handle to another
+      const sys = pickSystem(next, systemName, systemId);
       if (!sys) return false;
       for (const pd of next.params) {
         if (pd.name in knobValues) continue;
@@ -346,6 +504,22 @@ export function createParticles(
       scheduler.setEmitter(sys.emitter);
       recomputeWind();
       return true;
+    },
+    get viewOffset(): [number, number] {
+      return [viewX, viewY];
+    },
+    set viewOffset(v: [number, number]) {
+      if (Number.isFinite(v[0]) && Number.isFinite(v[1])) {
+        viewX = v[0];
+        viewY = v[1];
+      }
+    },
+    get zoom() {
+      return zoom;
+    },
+    set zoom(z: number) {
+      // a zoom of 0 divides the world by nothing; ignore it rather than blanking
+      if (Number.isFinite(z) && z > 0) zoom = z;
     },
     aliveCount() {
       return engine.aliveCount();

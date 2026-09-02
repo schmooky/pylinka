@@ -40,9 +40,33 @@ fx.spawnBurst(300);</code></pre>
   <p>
     This entry point interprets the common node patterns into a fixed GPU model: spawn shape,
     random velocity and life, gravity, wind, drag, colour and scale over life, obstacles and
-    colliders. An effect that uses nodes outside that set still runs, and the extra nodes are
-    quietly ignored. Convenient right up until the moment you wonder why a node did nothing, so
-    reach for the compiled backends below once an effect gets serious.
+    colliders. An effect that uses nodes outside that set still runs, and the extra nodes do
+    nothing — the whole of <code>math.*</code> and <code>input.*</code> among them. Ask it what it
+    can run with <code>isInterpreted(kind)</code> or <code>unsupportedNodes(system)</code> from
+    <code>@pylinka/core/webgl</code>; the editor uses those to mark such nodes
+    <em>inert</em> while this backend is the one running. Reach for the compiled backends below
+    once an effect gets serious — they evaluate the graph and cover the whole catalog.
+  </p>
+
+  <h2>Projects with several emitters</h2>
+  <p>
+    A project can hold more than one system, and one system's particles can be born from another's
+    — sparks from a rocket, embers from smoke. That link is part of the project, chosen when the
+    effect was authored, so loading the project is all it takes:
+  </p>
+  <pre><code>const fx = createParticles(canvas, project);   // every enabled system, linked
+fx.update(1 / 60);                             // steps them, parents first
+</code></pre>
+  <p>
+    The handle drives the whole project: <code>setKnob</code> and <code>setEmitter</code> reach
+    every system, <code>spawnBurst</code> reaches the ones that are not born from another (bursting
+    a sub-emitter means nothing — its particles come from its parent's), and the clear belongs to
+    the first so the rest composite on top.
+  </p>
+  <p>
+    Pass <code>systemName</code> to build a single system instead, and drive them yourself; the
+    order and the links are available as <code>systemsInBuildOrder(project)</code>, or
+    <code>buildProject(project, create)</code> if you want the walk done for you.
   </p>
 
   <h2>The pixi v8 path</h2>

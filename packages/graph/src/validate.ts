@@ -272,12 +272,50 @@ export function validateGraph(bundle: SystemBundle, catalog: NodeCatalog): Diagn
     }
   }
 
+  /*
+   * A death burst asks for countMax children per event, but `max` is the
+   * ceiling the child pool was BUILT for — ask for more and the extra ones
+   * silently never appear, which looks like the burst count doing nothing.
+   */
+  for (const n of graph.nodes) {
+    if (resolveKind(catalog, n.kind) !== 'output.deathBurst') continue;
+    const countMax = n.values?.countMax;
+    const wanted = countMax?.t === 'f32' ? countMax.v : undefined;
+    const ceiling = Number(n.structural?.max ?? '8');
+    if (wanted !== undefined && Number.isFinite(ceiling) && wanted > ceiling) {
+      diags.push({
+        code: 'W104_BURST_CLAMPED',
+        severity: 'warning',
+        message: `Burst asks for up to ${wanted} children per parent event but "max" is ${ceiling}, so the rest never spawn. Raise max to ${Math.ceil(wanted)}.`,
+        nodeId: n.id,
+      });
+    }
+  }
+
+  /*
+   * A repeating burst with no interval never fires. The scheduler needs a
+   * positive interval to have something to count down, so `0` is not "as fast
+   * as possible" — it is an emitter that silently emits nothing. The editor
+   * clamps the field, but an imported or hand-written project can hold it.
+   */
+  if (system.emitter.mode === 'burst') {
+    const interval = system.emitter.burst?.interval ?? 0;
+    const count = system.emitter.burst?.count ?? 0;
+    if (interval <= 0 || count <= 0) {
+      diags.push({
+        code: 'W107_EMITTER_NEVER_FIRES',
+        severity: 'warning',
+        message: `A repeating burst needs a count and an interval above zero; this one has count ${count} every ${interval}s, so it never spawns anything.`,
+      });
+    }
+  }
+
   const overflow = estimateCapacityOverflow(bundle, nodeById, catalog);
   if (overflow !== undefined) {
     diags.push({
       code: 'W101_CAPACITY_OVERFLOW',
       severity: 'warning',
-      message: `Emitter may exceed pool capacity: ~${Math.ceil(overflow.needed)} particles alive (rate ${overflow.rate}/s × max life ${overflow.maxLife}s) vs capacity ${system.capacity}.`,
+      message: `Emitter may exceed pool capacity: ~${Math.ceil(overflow.needed)} particles alive (${Math.round(overflow.rate)}/s × max life ${overflow.maxLife}s) vs capacity ${system.capacity}. Everything past the capacity is dropped without a word.`,
     });
   }
 
@@ -357,9 +395,7 @@ function estimateCapacityOverflow(
   catalog: NodeCatalog,
 ): { needed: number; rate: number; maxLife: number } | undefined {
   const { system } = bundle;
-  if (system.emitter.mode !== 'flow') return undefined;
-  const rate = system.emitter.rate;
-  if (rate <= 0) return undefined;
+  const e = system.emitter;
 
   // Trace output.initLife's `life` input to a statically-known max life.
   const initLife = system.graph.nodes.find((n) => resolveKind(catalog, n.kind) === 'output.initLife');
@@ -385,7 +421,39 @@ function estimateCapacityOverflow(
   }
   if (maxLife === undefined) return undefined;
 
-  const needed = rate * maxLife;
+  /*
+   * How many are alive at the peak.
+   *
+   * `flow` is rate times lifetime. A REPEATING burst was not checked at all,
+   * though it is the easier one to get wrong: bursts overlap whenever the
+   * lifetime outlasts the interval, so 120 particles every 0.5s that live 2s
+   * is 480 alive, and everything past `capacity` is dropped in silence.
+   *
+   * `rate` in the returned reason is the per-second figure either way, so the
+   * message reads the same for both.
+   */
+  let needed: number;
+  let rate: number;
+  if (e.mode === 'flow') {
+    // rateOverDistance adds to this while the emitter MOVES, by an amount only
+    // the game knows; a still emitter is the honest floor
+    rate = e.rate;
+    needed = rate * maxLife;
+  } else if (e.mode === 'burst') {
+    const interval = e.burst?.interval ?? 0;
+    const count = e.burst?.count ?? 0;
+    if (interval <= 0 || count <= 0) return undefined;
+    rate = count / interval;
+    needed = count * Math.ceil(maxLife / interval);
+  } else {
+    // 'once' — one batch, and the scheduler falls back to `rate` for its size
+    const count = e.burst?.count ?? e.rate;
+    if (count <= 0) return undefined;
+    rate = count;
+    needed = count;
+  }
+  if (rate <= 0) return undefined;
+
   if (needed > system.capacity) return { needed, rate, maxLife };
   return undefined;
 }

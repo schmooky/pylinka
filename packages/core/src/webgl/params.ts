@@ -33,9 +33,14 @@ export interface EngineParams {
   velMax: [number, number];
   lifeMin: number;
   lifeMax: number;
-  shape: 0 | 1 | 2;
+  /** 0 point, 1 circle, 2 rect, 3 torus, 4 burstRing, 5 polygonal chain */
+  shape: 0 | 1 | 2 | 3 | 4 | 5;
   shapeRadius: number;
   shapeSize: [number, number];
+  /** per-shape: point offset | torus (inner, outer) | chain start */
+  shapeA: [number, number];
+  /** per-shape: chain end */
+  shapeB: [number, number];
   colorFrom: [number, number, number, number];
   colorTo: [number, number, number, number];
   colorEase: number;
@@ -192,7 +197,16 @@ export function extractParams(
   const angleRange = (host: Node, portId: string, d: [number, number]): [number, number] => {
     let owner = host;
     let port = portId;
-    let k = 1;
+    /*
+     * Degrees or radians, and where that is decided.
+     *
+     * The node's own `unit` says how to read its port — degrees by default,
+     * because typing 45 into a radian port spins the sprite seven times round
+     * and reads as "rotation does nothing". A `math.radians` node in front of
+     * the port overrides it: that graph has already converted, and the values
+     * behind it are degrees whatever the host says.
+     */
+    let k = (host.structural?.unit ?? 'degrees') === 'degrees' ? Math.PI / 180 : 1;
     const hop = source(owner.id, port);
     if (hop?.kind === 'math.radians') {
       owner = hop;
@@ -201,7 +215,7 @@ export function extractParams(
     }
     const src = source(owner.id, port);
     if (src?.kind === 'gen.randomRange') return [fk(src, 'min', 0) * k, fk(src, 'max', 0) * k];
-    const v = fk(owner, port, k === 1 ? d[0] : 0) * k;
+    const v = fk(owner, port, d[0] / k) * k;
     return [v, v];
   };
 
@@ -213,18 +227,30 @@ export function extractParams(
     drag: 0,
     windPower: 0,
     windDir: 0,
-    velMin: [-20, -60],
-    velMax: [20, -120],
+    // An ABSENT node has to mean "nothing", not "something that looks nice".
+    // These defaults used to be a preset: no output.initVelocity gave every
+    // particle 60-120 px/s upward, so deleting the node — or never adding one —
+    // produced a drift with no node anywhere in the graph to explain it, and no
+    // way to turn it off. The compiled backend has always spawned at rest
+    // (`o_initVel = vec2f(0.0)`), so the two backends disagreed on the same
+    // graph. Same reasoning for the size and colour pair below: with no write
+    // node, the compiled backend keeps what the particle was born with.
+    velMin: [0, 0],
+    velMax: [0, 0],
     lifeMin: 1,
     lifeMax: 1.5,
     shape: 0,
-    shapeRadius: 40,
-    shapeSize: [80, 80],
+    // schema defaults, so a node with an empty port behaves the way the
+    // catalog says it does rather than the way this file used to guess
+    shapeRadius: 50,
+    shapeSize: [100, 100],
+    shapeA: [0, 0],
+    shapeB: [100, 0],
     colorFrom: [1, 1, 1, 1],
-    colorTo: [1, 1, 1, 0],
+    colorTo: [1, 1, 1, 1],
     colorEase: 0,
     sizeFrom: 8,
-    sizeTo: 0,
+    sizeTo: 8,
     sizeEase: 0,
     alphaFrom: 1,
     alphaTo: 1,
@@ -242,39 +268,111 @@ export function extractParams(
     subOn: 'death',
   };
 
+  /**
+   * Spawn shape. All six the catalog offers, matching the compiled backend:
+   * only circle and rectangle used to be read, so torus, burstRing and
+   * polygonalChain silently spawned at a point — you picked a shape in the
+   * editor and nothing changed — and `shape.point`'s own offset was dropped.
+   */
   const shapeNode = source(byKind('output.spawnPosition')?.id, 'pos');
-  if (shapeNode?.kind === 'shape.circle') {
-    p.shape = 1;
-    p.shapeRadius = fk(shapeNode, 'radius', 40);
-  } else if (shapeNode?.kind === 'shape.rectangle') {
-    p.shape = 2;
-    p.shapeSize = v2(shapeNode.values?.size, [80, 80]);
+  switch (shapeNode?.kind) {
+    case 'shape.circle':
+      p.shape = 1;
+      p.shapeRadius = fk(shapeNode, 'radius', 50);
+      break;
+    case 'shape.rectangle':
+      p.shape = 2;
+      p.shapeSize = vk(shapeNode, 'size', [100, 100]);
+      break;
+    case 'shape.torus':
+      p.shape = 3;
+      p.shapeA = [fk(shapeNode, 'innerRadius', 20), fk(shapeNode, 'outerRadius', 50)];
+      break;
+    case 'shape.burstRing':
+      p.shape = 4;
+      p.shapeRadius = fk(shapeNode, 'radius', 50);
+      break;
+    case 'shape.polygonalChain':
+      p.shape = 5;
+      p.shapeA = vk(shapeNode, 'start', [0, 0]);
+      p.shapeB = vk(shapeNode, 'end', [100, 0]);
+      break;
+    case 'shape.point':
+      p.shape = 0;
+      p.shapeA = vk(shapeNode, 'offset', [0, 0]);
+      break;
+    default:
+      break;
   }
 
-  const velNode = source(byKind('output.initVelocity')?.id, 'vel');
-  if (velNode?.kind === 'gen.randomVec2') {
-    p.velMin = v2(velNode.values?.min, p.velMin);
-    p.velMax = v2(velNode.values?.max, p.velMax);
-  }
-
-  const lifeNode = source(byKind('output.initLife')?.id, 'life');
-  if (lifeNode?.kind === 'gen.randomRange') {
-    p.lifeMin = fk(lifeNode, 'min', 1);
-    p.lifeMax = fk(lifeNode, 'max', 1.5);
-  } else {
-    const lit = byKind('output.initLife')?.values?.life;
-    if (lit?.t === 'f32') {
-      p.lifeMin = lit.v;
-      p.lifeMax = lit.v;
+  /**
+   * Birth velocity. A `gen.randomVec2` behind the port is the range itself —
+   * that is how "thrown out at a spread of speeds" is authored — and anything
+   * else collapses to a single value, including the port's own literal and a
+   * knob bound to it. Reading only the randomVec2 case meant typing a velocity
+   * straight into the node, or driving it from a knob, did nothing at all.
+   */
+  const velOut = byKind('output.initVelocity');
+  if (velOut !== undefined) {
+    const velNode = source(velOut.id, 'vel');
+    if (velNode?.kind === 'gen.randomVec2') {
+      p.velMin = vk(velNode, 'min', [0, 0]);
+      p.velMax = vk(velNode, 'max', [0, 0]);
+    } else {
+      const v = vk(velOut, 'vel', [0, 0]);
+      p.velMin = v;
+      p.velMax = v;
     }
   }
 
+  /**
+   * Lifetime, the same shape as velocity above: a `gen.randomRange` behind the
+   * port is the range, anything else is one exact value. The `else` branch used
+   * to read the port's raw literal only, so a lifetime coming from a knob fell
+   * through to the 1-1.5s default and the knob did nothing.
+   */
+  const lifeOut = byKind('output.initLife');
+  if (lifeOut !== undefined) {
+    const lifeNode = source(lifeOut.id, 'life');
+    if (lifeNode?.kind === 'gen.randomRange') {
+      p.lifeMin = fk(lifeNode, 'min', 1);
+      p.lifeMax = fk(lifeNode, 'max', 1.5);
+    } else {
+      const v = fk(lifeOut, 'life', 1);
+      p.lifeMin = v;
+      p.lifeMax = v;
+    }
+  }
+
+  /**
+   * Does this field reach anything?
+   *
+   * The loop below finds fields BY KIND, ignoring the wires. A `field.gravity`
+   * dropped on the canvas and left unconnected therefore pulled on the whole
+   * effect, and deleting the `output.addForce` it fed changed nothing — the
+   * exact inverse of a missing node inventing behaviour. Requiring an outgoing
+   * edge is a coarse test (this backend cannot follow a force through a math
+   * node, so it does not check WHERE the wire goes) but it draws the line in
+   * the right place: a node wired to nothing does nothing.
+   */
+  const wired = (id: string): boolean => g.edges.some((e) => e.from.nodeId === id);
+
   for (const n of g.nodes) {
-    if (n.kind === 'field.gravity') p.gravity = v2(n.values?.g, [0, 300]);
-    if (n.kind === 'field.drag') p.drag = fk(n, 'coefficient', 0);
+    if (!wired(n.id) && n.kind.startsWith('field.')) continue;
+    /*
+     * Gravity and drag ACCUMULATE. `output.addForce` and `output.drag` are
+     * accumulating outputs — the compiler emits `force +=` and `dragK +=` —
+     * so two gravity nodes are one stronger pull. Assigning here meant the
+     * last node in the list won and every other one silently vanished.
+     */
+    if (n.kind === 'field.gravity') {
+      const gv = vk(n, 'g', [0, 300]);
+      p.gravity = [p.gravity[0] + gv[0], p.gravity[1] + gv[1]];
+    }
+    if (n.kind === 'field.drag') p.drag += fk(n, 'coefficient', 0);
     if (n.kind === 'field.vortex' && p.pointFields.length < 4) {
       p.pointFields.push({
-        center: v2(n.values?.center, [0, 0]),
+        center: vk(n, 'center', [0, 0]),
         tangential: fk(n, 'strength', 300),
         pull: fk(n, 'pull', 0),
         radius: fk(n, 'radius', 240),
@@ -284,7 +382,7 @@ export function extractParams(
     if (n.kind === 'field.radial' && p.pointFields.length < 4) {
       // schema: +strength pushes away from center → pull is the negation
       p.pointFields.push({
-        center: v2(n.values?.center, [0, 0]),
+        center: vk(n, 'center', [0, 0]),
         tangential: 0,
         pull: -fk(n, 'strength', 0),
         radius: 0,
@@ -384,10 +482,18 @@ export function extractParams(
     (wiredScale?.kind === 'gen.numberOverLife' || wiredScale?.kind === 'gen.curveOverLife'
       ? wiredScale
       : undefined);
+  const scaleOut = byKind('output.writeScale');
   if (scaleNode) {
     p.sizeFrom = fk(scaleNode, 'from', 1) * 8;
     p.sizeTo = fk(scaleNode, 'to', 0) * 8;
     p.sizeEase = easeFor(scaleNode, EASE_CH_SIZE);
+  } else if (scaleOut !== undefined) {
+    // Not a ramp: a literal or a knob on the port itself. A constant size is a
+    // ramp that does not move, and reading only the ramp kinds meant a size
+    // driven by a knob was ignored and every particle came out 8px.
+    const v = fk(scaleOut, 'scale', 1) * 8;
+    p.sizeFrom = v;
+    p.sizeTo = v;
   }
 
   // Alpha ramp: gen.alphaOverLife anywhere, else whatever ramp feeds
@@ -398,10 +504,15 @@ export function extractParams(
     (wiredAlpha?.kind === 'gen.numberOverLife' || wiredAlpha?.kind === 'gen.curveOverLife'
       ? wiredAlpha
       : undefined);
+  const alphaOut = byKind('output.writeAlpha');
   if (alphaNode) {
     p.alphaFrom = fk(alphaNode, 'from', 1);
     p.alphaTo = fk(alphaNode, 'to', 0);
     p.alphaEase = easeFor(alphaNode, EASE_CH_ALPHA);
+  } else if (alphaOut !== undefined) {
+    const v = fk(alphaOut, 'alpha', 1);
+    p.alphaFrom = v;
+    p.alphaTo = v;
   }
 
   // ---- rotation ------------------------------------------------------------
@@ -421,10 +532,23 @@ export function extractParams(
     (wiredRot?.kind === 'gen.numberOverLife' || wiredRot?.kind === 'gen.curveOverLife'
       ? wiredRot
       : undefined);
+  const rotOut = byKind('output.writeRotation');
   if (rotRamp) {
-    p.rotFrom = fk(rotRamp, 'from', 0);
-    p.rotTo = fk(rotRamp, 'to', 0);
+    /*
+     * The DESTINATION owns the unit. A `gen.numberOverLife` feeding rotation is
+     * a generic ramp with no opinion about angles, so asking it would mean
+     * setting the unit on every node in the chain; `output.writeRotation` is
+     * the one place it belongs.
+     */
+    const rk = (rotOut?.structural?.unit ?? 'degrees') === 'degrees' ? Math.PI / 180 : 1;
+    p.rotFrom = fk(rotRamp, 'from', 0) * rk;
+    p.rotTo = fk(rotRamp, 'to', 0) * rk;
     p.rotEase = easeFor(rotRamp, EASE_CH_ROT);
+  } else if (rotOut !== undefined) {
+    // a held angle, knob included — `angleRange` also follows a math.radians hop
+    const [a, b] = angleRange(rotOut, 'rot', [0, 0]);
+    p.rotFrom = a;
+    p.rotTo = b;
   }
 
   const burstNode = byKind('output.deathBurst');

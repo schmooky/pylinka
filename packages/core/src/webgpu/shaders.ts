@@ -65,6 +65,8 @@ fn fs(in: VSOut) -> @location(0) vec4f {
 /** §13.1 blend states, premultiplied output assumed. */
 export function blendState(mode: 'normal' | 'add' | 'screen'): GPUBlendState {
   switch (mode) {
+    // additive blends alpha too — see webgl/engine.ts render() for why leaving
+    // the destination alpha alone makes the compositor discard the pixel
     case 'add':
       return {
         color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },

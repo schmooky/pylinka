@@ -155,6 +155,27 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
 }
 
 /** Stateful helper that walks nodes and emits WGSL body lines. */
+/**
+ * Wrap an angle expression in the conversion its node asks for.
+ *
+ * Angles in the catalog are DEGREES unless the node says radians, because
+ * typing 45 into a radian port turns a sprite seven times round and reads as
+ * "rotation does nothing". The unit lives on the DESTINATION — initRotation,
+ * writeRotation — so it is set once per angle rather than on every node in the
+ * chain feeding it.
+ */
+function angle(
+  node: { structural?: Record<string, string> },
+  expr: string,
+  srcKind?: string,
+): string {
+  // A math.radians node in front of the port has already converted; wrapping
+  // again would turn 360 degrees into six, which is the same double-conversion
+  // trap the interpreted backend avoids by following the hop.
+  if (srcKind === 'math.radians') return expr;
+  return (node.structural?.unit ?? 'degrees') === 'radians' ? expr : `radians(${expr})`;
+}
+
 class CompileCtx {
   private readonly nodeById = new Map<string, Node>();
   private readonly edgeInto = new Map<string, Edge>(); // "nodeId portId" → edge
@@ -187,6 +208,12 @@ class CompileCtx {
   }
 
   /** Expression feeding an input port: upstream temp, or its value slot. */
+  /** The resolved kind of a node id, for rules that depend on what feeds a port. */
+  private kindOf(nodeId: string | undefined): string | undefined {
+    const n = nodeId !== undefined ? this.nodeById.get(nodeId) : undefined;
+    return n === undefined ? undefined : resolveKind(this.catalog, n.kind);
+  }
+
   private inputExpr(nodeId: string, portId: string): { expr: string; srcId?: string } {
     const edge = this.edgeInto.get(nodeId + ' ' + portId);
     if (edge !== undefined) {
@@ -279,7 +306,10 @@ class CompileCtx {
     // spawn site can assign it unconditionally.
     out.push(
       rot !== undefined
-        ? `  let o_initRot: f32 = ${this.inputExpr(rot.id, 'rot').expr};`
+        ? (() => {
+            const r = this.inputExpr(rot.id, 'rot');
+            return `  let o_initRot: f32 = ${angle(rot, r.expr, this.kindOf(r.srcId))};`;
+          })()
         : `  let o_initRot: f32 = 0.0;`,
     );
     void INIT_OUTPUT_ORDER;
@@ -388,9 +418,12 @@ class CompileCtx {
       case 'output.writeScale':
         out.push(`  outSize = ${inp('scale')};${tag}`);
         break;
-      case 'output.writeRotation':
-        out.push(`  outRot = ${inp('rot')};${tag}`);
+      case 'output.writeRotation': {
+        // the destination owns the angle unit — see output.initRotation below
+        const r = this.inputExpr(node.id, 'rot');
+        out.push(`  outRot = ${angle(node, r.expr, this.kindOf(r.srcId))};${tag}`);
         break;
+      }
       case 'output.writePosition':
         post.push(`  p.pos = ${inp('pos')};${tag}`);
         break;

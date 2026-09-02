@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ParamDef, System } from '@pylinka/graph';
+import type { Node, ParamDef, System } from '@pylinka/graph';
 import { extractParams, parseColor } from '../src/webgl/params.js';
 
 describe('parseColor', () => {
@@ -251,26 +251,50 @@ describe('extractParams — rotation', () => {
     expect(p.rotTo).toBe(0);
   });
 
-  it('reads a constant birth angle off output.initRotation', () => {
+  /*
+   * Angle ports read DEGREES unless the node says otherwise. Radians were the
+   * only reading, which made "type 45 into rot" spin the sprite seven times
+   * round and land somewhere arbitrary — indistinguishable from rotation not
+   * working, which is how it was reported.
+   */
+  it('reads a constant birth angle in degrees', () => {
     const p = extractParams(
-      sys([{ id: 'r', kind: 'output.initRotation', values: { rot: { t: 'f32', v: 0.75 } } }]),
+      sys([{ id: 'r', kind: 'output.initRotation', values: { rot: { t: 'f32', v: 90 } } }]),
+      [], {},
+    );
+    expect(p.rotStart[0]).toBeCloseTo(Math.PI / 2, 6);
+    expect(p.rotStart[1]).toBeCloseTo(Math.PI / 2, 6);
+  });
+
+  it('reads it in radians when the node says radians', () => {
+    const p = extractParams(
+      sys([
+        {
+          id: 'r',
+          kind: 'output.initRotation',
+          structural: { unit: 'radians' },
+          values: { rot: { t: 'f32', v: 0.75 } },
+        },
+      ]),
       [], {},
     );
     expect(p.rotStart).toEqual([0.75, 0.75]);
   });
 
-  it('reads a random birth angle off the gen.randomRange behind it', () => {
+  it('reads a random birth angle off the gen.randomRange behind it, in degrees', () => {
+    // 0..360 is "any angle", which is the thing people actually want
     const p = extractParams(
       sys(
         [
-          { id: 'g', kind: 'gen.randomRange', values: { min: { t: 'f32', v: -1 }, max: { t: 'f32', v: 2 } } },
+          { id: 'g', kind: 'gen.randomRange', values: { min: { t: 'f32', v: 0 }, max: { t: 'f32', v: 360 } } },
           { id: 'r', kind: 'output.initRotation' },
         ],
         [{ id: 'e1', from: { nodeId: 'g', portId: 'out' }, to: { nodeId: 'r', portId: 'rot' } }],
       ),
       [], {},
     );
-    expect(p.rotStart).toEqual([-1, 2]);
+    expect(p.rotStart[0]).toBe(0);
+    expect(p.rotStart[1]).toBeCloseTo(Math.PI * 2, 6);
   });
 
   it('converts degrees through a math.radians hop', () => {
@@ -292,7 +316,7 @@ describe('extractParams — rotation', () => {
     expect(p.rotStart[1]).toBeCloseTo(Math.PI * 2, 6);
   });
 
-  it('reads gen.spin as an angular-velocity range', () => {
+  it('reads gen.spin as an angular-velocity range, in degrees per second', () => {
     const p = extractParams(
       sys(
         [
@@ -303,15 +327,23 @@ describe('extractParams — rotation', () => {
       ),
       [], {},
     );
-    expect(p.spin).toEqual([-6, 6]);
+    expect(p.spin[0]).toBeCloseTo(-6 * (Math.PI / 180), 6);
+    expect(p.spin[1]).toBeCloseTo(6 * (Math.PI / 180), 6);
   });
 
   it('a bare gen.spin spins at its own literal rate', () => {
     const p = extractParams(
-      sys([{ id: 's', kind: 'gen.spin', values: { rate: { t: 'f32', v: 2 } } }]),
+      sys([{ id: 's', kind: 'gen.spin', values: { rate: { t: 'f32', v: 180 } } }]),
       [], {},
     );
-    expect(p.spin).toEqual([2, 2]);
+    // half a turn a second — the rate the old radian default meant
+    expect(p.spin[0]).toBeCloseTo(Math.PI, 6);
+  });
+
+  it('a gen.spin with no value at all still spins at half a turn a second', () => {
+    // the schema default moved from PI radians to 180 degrees: same motion
+    const p = extractParams(sys([{ id: 's', kind: 'gen.spin' }]), [], {});
+    expect(p.spin[0]).toBeCloseTo(Math.PI, 6);
   });
 
   it('reads gen.rotationOverLife as an eased ramp', () => {
@@ -327,7 +359,7 @@ describe('extractParams — rotation', () => {
       [], {},
     );
     expect(p.rotFrom).toBe(0);
-    expect(p.rotTo).toBe(1.5);
+    expect(p.rotTo).toBeCloseTo(1.5 * (Math.PI / 180), 6); // degrees by default
     expect(p.rotEase).toBe(4); // EASE_INDEX['power2.out']
   });
 
@@ -342,7 +374,7 @@ describe('extractParams — rotation', () => {
       ),
       [], {},
     );
-    expect(p.rotTo).toBe(3);
+    expect(p.rotTo).toBeCloseTo(3 * (Math.PI / 180), 6);
   });
 
   it('bakes a custom rotation curve into its own LUT channel', () => {
@@ -357,5 +389,292 @@ describe('extractParams — rotation', () => {
     expect(p.easeLut).toHaveLength(32 * 4);
     expect(p.easeLut.slice(96, 128)[16]).toBeLessThan(0.25);
     expect(p.easeLut.slice(64, 96)[16]).toBeCloseTo(16 / 31, 6);
+  });
+});
+
+/**
+ * A node that is not there must not do anything.
+ *
+ * These defaults were a preset, not a neutral state: with no
+ * `output.initVelocity` every particle was born moving 60-120 px/s UPWARD, and
+ * with no `output.writeScale` it shrank from 8px to nothing over its life. Both
+ * showed up as motion with no node in the graph to explain it and no way to
+ * switch it off — and the compiled backend disagreed, spawning at rest
+ * (`o_initVel = vec2f(0.0)`) and keeping the size it was born with
+ * (`var outSize = rnd[slot].size`). Same graph, two answers.
+ */
+describe('extractParams — an absent output writes nothing', () => {
+  const bare: System = {
+    id: 's1', name: 'bare', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 },
+    graph: {
+      nodes: [
+        { id: 'n1', kind: 'shape.point' },
+        { id: 'n2', kind: 'output.spawnPosition' },
+        { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } },
+      ],
+      edges: [{ id: 'e1', from: { nodeId: 'n1', portId: 'pos' }, to: { nodeId: 'n2', portId: 'pos' } }],
+    },
+  };
+
+  it('spawns at rest with no output.initVelocity', () => {
+    const p = extractParams(bare, [], {});
+    expect(p.velMin).toEqual([0, 0]);
+    expect(p.velMax).toEqual([0, 0]);
+  });
+
+  it('holds size and colour with no write node', () => {
+    const p = extractParams(bare, [], {});
+    expect(p.sizeTo).toBe(p.sizeFrom);
+    expect(p.colorTo).toEqual(p.colorFrom);
+  });
+});
+
+/**
+ * The velocity port, when a `gen.randomVec2` is NOT what is behind it. Only
+ * that one node kind used to be read, so a velocity typed into the port, or a
+ * knob bound to it, was silently ignored and the preset applied instead.
+ */
+describe('extractParams — velocity that is not a random range', () => {
+  const withLiteral: System = {
+    id: 's1', name: 'literal', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 },
+    graph: {
+      nodes: [
+        { id: 'n1', kind: 'shape.point' },
+        { id: 'n2', kind: 'output.spawnPosition' },
+        { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } },
+        { id: 'n4', kind: 'output.initVelocity', values: { vel: { t: 'vec2', v: [12, 34] } } },
+      ],
+      edges: [{ id: 'e1', from: { nodeId: 'n1', portId: 'pos' }, to: { nodeId: 'n2', portId: 'pos' } }],
+    },
+  };
+
+  it('uses the port literal, as one exact velocity', () => {
+    const p = extractParams(withLiteral, [], {});
+    expect(p.velMin).toEqual([12, 34]);
+    expect(p.velMax).toEqual([12, 34]);
+  });
+
+  it('follows a knob bound to the port', () => {
+    const knobbed = structuredClone(withLiteral);
+    // knobBindings hold the knob's ID; its NAME is what the live value map uses
+    knobbed.graph.nodes[3]!.knobBindings = { vel: 'p1' };
+    const p = extractParams(
+      knobbed,
+      [{ id: 'p1', name: 'launch', type: 'vec2', scale: 'linear', default: { t: 'vec2', v: [0, 0] } }],
+      { launch: [5, -9] },
+    );
+    expect(p.velMin).toEqual([5, -9]);
+    expect(p.velMax).toEqual([5, -9]);
+  });
+});
+
+/**
+ * Fields are found BY KIND, not by following wires — this backend drives a
+ * fixed set of uniforms rather than evaluating the graph. Two things followed
+ * from that and both were wrong: a field node sitting unconnected on the canvas
+ * still pulled on the whole effect (so deleting the `output.addForce` it fed
+ * changed nothing), and a second node of the same kind REPLACED the first
+ * instead of adding to it, though `output.addForce` and `output.drag` are
+ * accumulating outputs the compiler emits as `force +=` and `dragK +=`.
+ */
+describe('extractParams — fields, wiring and accumulation', () => {
+  const grav = (id: string, y: number): Node => ({ id, kind: 'field.gravity', values: { g: { t: 'vec2', v: [0, y] } } });
+  const life: Node = { id: 'life', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } };
+  const addForce: Node = { id: 'af', kind: 'output.addForce' };
+  const wire = (from: string): System['graph']['edges'][number] => ({
+    id: `e-${from}`, from: { nodeId: from, portId: 'force' }, to: { nodeId: 'af', portId: 'force' },
+  });
+  const sys = (nodes: Node[], edges: System['graph']['edges'] = []): System => ({
+    id: 's1', name: 'f', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 }, graph: { nodes, edges },
+  });
+
+  it('ignores a field that is wired to nothing', () => {
+    const p = extractParams(sys([life, grav('g1', 999)]), [], {});
+    expect(p.gravity).toEqual([0, 0]);
+  });
+
+  it('applies one that is wired', () => {
+    const p = extractParams(sys([life, addForce, grav('g1', 340)], [wire('g1')]), [], {});
+    expect(p.gravity).toEqual([0, 340]);
+  });
+
+  it('adds two gravities together rather than keeping the last', () => {
+    const p = extractParams(sys([life, addForce, grav('g1', 100), grav('g2', 7)], [wire('g1'), wire('g2')]), [], {});
+    expect(p.gravity).toEqual([0, 107]);
+  });
+
+  it('adds two drags together', () => {
+    const drag = (id: string, c: number): Node => ({ id, kind: 'field.drag', values: { coefficient: { t: 'f32', v: c } } });
+    const toDrag = (from: string): System['graph']['edges'][number] => ({
+      id: `e-${from}`, from: { nodeId: from, portId: 'drag' }, to: { nodeId: 'od', portId: 'drag' },
+    });
+    const p = extractParams(
+      sys([life, { id: 'od', kind: 'output.drag' }, drag('d1', 2), drag('d2', 3)], [toDrag('d1'), toDrag('d2')]),
+      [], {},
+    );
+    expect(p.drag).toBe(5);
+  });
+
+  it('follows a knob bound to gravity', () => {
+    const g: Node = { id: 'g1', kind: 'field.gravity', knobBindings: { g: 'p1' } };
+    const p = extractParams(
+      sys([life, addForce, g], [wire('g1')]),
+      [{ id: 'p1', name: 'grav', type: 'vec2', scale: 'linear', default: { t: 'vec2', v: [0, 0] } }],
+      { grav: [0, 500] },
+    );
+    expect(p.gravity).toEqual([0, 500]);
+  });
+});
+
+/**
+ * Lifetime, when a `gen.randomRange` is not what is behind the port. The
+ * fallback branch read the port's raw literal and nothing else, so a lifetime
+ * driven by a knob landed on the 1-1.5s default with the knob ignored.
+ */
+describe('extractParams — lifetime from a knob', () => {
+  it('reads the knob rather than the default range', () => {
+    const s: System = {
+      id: 's1', name: 'ttl', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+      emitter: { mode: 'flow', rate: 10 },
+      graph: { nodes: [{ id: 'n3', kind: 'output.initLife', knobBindings: { life: 'p1' } }], edges: [] },
+    };
+    const p = extractParams(
+      s,
+      [{ id: 'p1', name: 'ttl', type: 'f32', min: 0, max: 10, scale: 'linear', default: { t: 'f32', v: 1 } }],
+      { ttl: 4 },
+    );
+    expect(p.lifeMin).toBe(4);
+    expect(p.lifeMax).toBe(4);
+  });
+});
+
+/**
+ * The look ports, when a ramp is not what is behind them.
+ *
+ * Size, alpha and rotation were read from `gen.*OverLife` nodes only. A
+ * constant on the port — a literal, or a knob a game drives at runtime — was
+ * ignored, so a knob-driven size came out at the 8px default no matter what
+ * the knob said. A constant is a ramp that does not move.
+ */
+describe('extractParams — a constant on a look port', () => {
+  const look = (kind: string, port: string, knobId: string): System => ({
+    id: 's1', name: 'look', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 },
+    graph: {
+      nodes: [
+        { id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } },
+        { id: 'w', kind, knobBindings: { [port]: knobId } },
+      ],
+      edges: [],
+    },
+  });
+  /** One f32 knob. Its DEFAULT is deliberately 0 — the live value is what the
+   *  test asserts on, so a pass cannot come from the default by accident. */
+  const knob = (name: string): ParamDef[] => [
+    { id: 'p1', name, type: 'f32', min: 0, max: 100, scale: 'linear', default: { t: 'f32', v: 0 } },
+  ];
+
+  it('takes size from a knob on output.writeScale', () => {
+    const p = extractParams(look('output.writeScale', 'scale', 'p1'), knob('size'), { size: 3 });
+    expect(p.sizeFrom).toBe(24); // 3 x the 8px base sprite
+    expect(p.sizeTo).toBe(24);
+  });
+
+  it('takes alpha from a knob on output.writeAlpha', () => {
+    const p = extractParams(look('output.writeAlpha', 'alpha', 'p1'), knob('fade'), { fade: 0.25 });
+    expect(p.alphaFrom).toBe(0.25);
+    expect(p.alphaTo).toBe(0.25);
+  });
+
+  it('holds an angle from a knob on output.writeRotation', () => {
+    const p = extractParams(look('output.writeRotation', 'rot', 'p1'), knob('tilt'), { tilt: 1.5 });
+    expect(p.rotFrom).toBeCloseTo(1.5 * (Math.PI / 180), 6);
+    expect(p.rotTo).toBeCloseTo(1.5 * (Math.PI / 180), 6);
+  });
+
+  it('leaves them alone when the output is not there at all', () => {
+    const bare: System = {
+      id: 's1', name: 'bare', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+      emitter: { mode: 'flow', rate: 10 },
+      graph: { nodes: [{ id: 'n3', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } }], edges: [] },
+    };
+    const p = extractParams(bare, [], {});
+    expect(p.sizeTo).toBe(p.sizeFrom);
+    expect(p.alphaFrom).toBe(1);
+    expect(p.alphaTo).toBe(1);
+    expect(p.rotFrom).toBe(0);
+  });
+});
+
+/**
+ * Spawn shapes. The catalog offers six and the compiled backend implements all
+ * six; this one read circle and rectangle, so torus, burstRing and
+ * polygonalChain silently spawned at a point — you picked a shape and nothing
+ * changed — and `shape.point` dropped its own offset.
+ */
+describe('extractParams — every spawn shape', () => {
+  const withShape = (kind: string, values: Node['values']): System => ({
+    id: 's1', name: 'shape', capacity: 100, blendMode: 'add', enabled: true, space: 'world',
+    emitter: { mode: 'flow', rate: 10 },
+    graph: {
+      nodes: [
+        { id: 'sh', kind, values },
+        { id: 'sp', kind: 'output.spawnPosition' },
+        { id: 'li', kind: 'output.initLife', values: { life: { t: 'f32', v: 1 } } },
+      ],
+      edges: [{ id: 'e', from: { nodeId: 'sh', portId: 'pos' }, to: { nodeId: 'sp', portId: 'pos' } }],
+    },
+  });
+
+  it('point carries its offset', () => {
+    const p = extractParams(withShape('shape.point', { offset: { t: 'vec2', v: [12, -34] } }), [], {});
+    expect(p.shape).toBe(0);
+    expect(p.shapeA).toEqual([12, -34]);
+  });
+
+  it('circle reads its radius', () => {
+    const p = extractParams(withShape('shape.circle', { radius: { t: 'f32', v: 25 } }), [], {});
+    expect(p.shape).toBe(1);
+    expect(p.shapeRadius).toBe(25);
+  });
+
+  it('rectangle reads its size', () => {
+    const p = extractParams(withShape('shape.rectangle', { size: { t: 'vec2', v: [40, 9] } }), [], {});
+    expect(p.shape).toBe(2);
+    expect(p.shapeSize).toEqual([40, 9]);
+  });
+
+  it('torus reads both radii, in order', () => {
+    const p = extractParams(
+      withShape('shape.torus', { innerRadius: { t: 'f32', v: 30 }, outerRadius: { t: 'f32', v: 90 } }),
+      [], {},
+    );
+    expect(p.shape).toBe(3);
+    expect(p.shapeA).toEqual([30, 90]);
+  });
+
+  it('burst ring reads its radius', () => {
+    const p = extractParams(withShape('shape.burstRing', { radius: { t: 'f32', v: 64 } }), [], {});
+    expect(p.shape).toBe(4);
+    expect(p.shapeRadius).toBe(64);
+  });
+
+  it('polygonal chain reads both ends', () => {
+    const p = extractParams(
+      withShape('shape.polygonalChain', { start: { t: 'vec2', v: [-50, 0] }, end: { t: 'vec2', v: [50, 20] } }),
+      [], {},
+    );
+    expect(p.shape).toBe(5);
+    expect(p.shapeA).toEqual([-50, 0]);
+    expect(p.shapeB).toEqual([50, 20]);
+  });
+
+  it('falls back to the catalog default, not an invented one', () => {
+    // shape.circle's schema default radius is 50; this file used to say 40
+    const p = extractParams(withShape('shape.circle', {}), [], {});
+    expect(p.shapeRadius).toBe(50);
   });
 });

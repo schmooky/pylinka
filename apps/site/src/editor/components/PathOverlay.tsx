@@ -11,9 +11,11 @@ const VB = 100; // svg viewBox units
 
 interface PathOverlayProps {
   editing: boolean;
+  /** the preview's view, so the curve tracks the particles that run along it */
+  view: { z: number; x: number; y: number };
 }
 
-export function PathOverlay({ editing }: PathOverlayProps) {
+export function PathOverlay({ editing, view }: PathOverlayProps) {
   const path = useEditor((s) => (s.project.systemPaths ?? {})[s.activeSystemId] ?? null);
   const setPath = useEditor((s) => s.setPath);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -53,7 +55,23 @@ export function PathOverlay({ editing }: PathOverlayProps) {
       viewBox={`0 0 ${VB} ${VB}`}
       preserveAspectRatio="none"
       className="absolute inset-0 z-10 h-full w-full"
-      style={{ pointerEvents: editing ? 'auto' : 'none', cursor: editing ? 'crosshair' : 'default', touchAction: 'none' }}
+      /*
+       * The same view the renderer got, as a CSS transform.
+       *
+       * The trajectory is a WORLD path: the emitter runs along it wherever the
+       * view is pointed. This overlay draws the same path in the canvas box, so
+       * without the transform it stayed put while the particles moved with the
+       * view — pan or zoom, and the effect visibly left its own curve behind.
+       * Point dragging still works because the numbers come from the element's
+       * transformed rect.
+       */
+      style={{
+        pointerEvents: editing ? 'auto' : 'none',
+        cursor: editing ? 'crosshair' : 'default',
+        touchAction: 'none',
+        transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`,
+        transformOrigin: 'center',
+      }}
       onPointerDown={(e) => {
         if (!editing || dragIdx.current >= 0 || e.target !== svgRef.current) return;
         commit([...points, toNorm(e)]);
@@ -73,7 +91,7 @@ export function PathOverlay({ editing }: PathOverlayProps) {
         <polyline
           points={curve}
           fill="none"
-          stroke="#a78bfa"
+          stroke="oklch(0.86 0 0)"
           strokeOpacity={editing ? 0.9 : 0.45}
           strokeWidth={editing ? 0.6 : 0.4}
           vectorEffect="non-scaling-stroke"
@@ -87,7 +105,7 @@ export function PathOverlay({ editing }: PathOverlayProps) {
             cx={p[0] * VB}
             cy={p[1] * VB}
             r={1.6}
-            fill={i === 0 ? '#34d399' : '#a78bfa'}
+            fill={i === 0 ? 'oklch(0.98 0 0)' : 'oklch(0.62 0 0)'}
             stroke="#0a0a0b"
             style={{ cursor: 'grab', strokeWidth: 1, vectorEffect: 'non-scaling-stroke' as never }}
             onPointerDown={(e) => {

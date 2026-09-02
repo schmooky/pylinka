@@ -146,6 +146,26 @@ import DocsLayout from '../layouts/DocsLayout.astro';
     texture with a visible orientation.
   </p>
 
+  <h2>Blend modes and draw order</h2>
+  <p>
+    An emitter draws with one of three blend modes. <strong>normal</strong> composites the sprite
+    over what is behind it. <strong>add</strong> and <strong>screen</strong> are light modes: they
+    add to what is behind rather than covering it, which is what turns a glow drawn on a black
+    background into light instead of a black box. Both leave the canvas&rsquo;s alpha alone, so the
+    scene behind the effect shows through the parts of a sprite that are dark — an opaque asset on
+    black keys itself out with no cutout needed.
+  </p>
+  <p>
+    Judge those modes against something other than black, and understand what they can reach. A
+    light mode adds to pixels in the SAME framebuffer — it cannot add to the page behind a
+    transparent canvas, so an additive effect on a transparent canvas behaves as if the backdrop
+    were black, and an opaque sprite&rsquo;s black background covers whatever is really behind it.
+    Give the canvas a backdrop of its own and they behave. The editor draws one into the preview
+    canvas — a checkerboard whose two colours and square size are set in
+    <em>Project → Settings → Preview</em> — so what you see under the particles is what they are
+    adding to.
+  </p>
+
   <h2>Sub-emitters: spawning from another emitter</h2>
   <p>
     A system can be born from another system's particles instead of from the cursor. Point its

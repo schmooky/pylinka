@@ -4,16 +4,33 @@
  * sticky note with the recipe's one-liner — so a forked recipe explains itself.
  */
 import { getSchema, V1_CATALOG, type Graph, type PylinkaProject } from '@pylinka/graph';
+import { NS_TINT } from './nsMeta';
 import type { Annotations, CommentFrame, StickyNote } from './types';
 
-/** Accent palette for frames & notes (mirrors the node namespace tints). */
-export const ANNOTATION_COLORS = ['#a78bfa', '#22d3ee', '#34d399', '#fbbf24', '#f87171', '#e879f9', '#94a3b8'];
+/**
+ * Accent palette for frames & notes — a grey ramp, like everything else in the
+ * editor. Frames are large and sit behind the graph, so on the old colour
+ * palette they were the loudest thing on screen, competing with the effect in
+ * the preview. Lightness separates them well enough to group by.
+ */
+export const ANNOTATION_COLORS = [
+  'oklch(0.92 0 0)',
+  'oklch(0.82 0 0)',
+  'oklch(0.72 0 0)',
+  'oklch(0.62 0 0)',
+  'oklch(0.52 0 0)',
+  'oklch(0.44 0 0)',
+];
 
 export const NODE_W = 210;
 
 /** Rendered height of a PylinkaNode (mirror of the component's row constants;
  *  the `ease` structural row is taller because it draws its curve inline). */
 export function estimateNodeHeight(kind: string): number {
+  // a knob draws its own face — header, scrub readout, three range rows and an
+  // output row — rather than a row per port, so the generic sum would put a
+  // frame's edge through it
+  if (kind === 'param.ref') return 180;
   const s = getSchema(V1_CATALOG, kind);
   if (!s) return 80;
   const structuralH = s.structural.reduce((a, sp) => a + (sp.key === 'ease' ? 56 : 30), 0);
@@ -57,10 +74,15 @@ function groupOfOutput(kind: string): 'spawn' | 'forces' | 'look' | undefined {
   return undefined;
 }
 
+/**
+ * A generated frame borrows the tint of the family it is wrapped around, so a
+ * group and the nodes inside it agree at a glance rather than being two
+ * unrelated colour schemes stacked on each other.
+ */
 const GROUP_META: Record<'spawn' | 'forces' | 'look', { title: string; color: string }> = {
-  spawn: { title: 'Spawn — where & how particles are born', color: '#fbbf24' },
-  forces: { title: 'Forces — motion while alive', color: '#34d399' },
-  look: { title: 'Look — color & size over life', color: '#22d3ee' },
+  spawn: { title: 'Spawn — where & how particles are born', color: NS_TINT.shape! },
+  forces: { title: 'Forces — motion while alive', color: NS_TINT.field! },
+  look: { title: 'Look — color & size over life', color: NS_TINT.gen! },
 };
 
 let annId = 0;
@@ -151,7 +173,7 @@ export function generateAnnotations(
         w: 260,
         h: 150,
         text: noteText,
-        color: '#a78bfa',
+        color: 'oklch(0.82 0 0)',
       });
     }
   }

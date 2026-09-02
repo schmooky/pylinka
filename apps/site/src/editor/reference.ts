@@ -3,13 +3,40 @@
  * still works on the components that use them (a module mixing components with
  * plain exports loses its refresh boundary).
  */
+import { useMemo } from 'react';
 import { useEditor } from './store';
-import { DEFAULT_REFERENCE, type ReferenceSettings } from './types';
+import {
+  DEFAULT_PREVIEW_BACKGROUND,
+  DEFAULT_REFERENCE,
+  type PreviewBackground,
+  type ReferenceSettings,
+} from './types';
 
 /** The project's reference settings, with the defaults filled in. */
 export function useReference(): ReferenceSettings {
   const stored = useEditor((s) => s.project.reference);
   return { ...DEFAULT_REFERENCE, ...(stored ?? {}) };
+}
+
+/**
+ * The preview backdrop, with defaults filled in.
+ *
+ * The merge happens OUTSIDE the selector on purpose. Zustand compares what a
+ * selector returns by reference, so building the object inside one hands it a
+ * new value on every render and the component re-renders forever.
+ */
+export function usePreviewBackground(): PreviewBackground {
+  const stored = useEditor((s) => s.project.previewBackground);
+  /*
+   * Merged in a memo, not in the selector.
+   *
+   * Building the object inside the zustand selector compares a fresh object
+   * every time and re-renders forever; building it on the way out is correct
+   * but hands back a new identity per render, which makes it useless as an
+   * effect dependency — anything watching it runs on every render instead of
+   * when the backdrop changes.
+   */
+  return useMemo(() => ({ ...DEFAULT_PREVIEW_BACKGROUND, ...(stored ?? {}) }), [stored]);
 }
 
 function readFile(file: File): Promise<string> {

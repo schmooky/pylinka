@@ -13,6 +13,10 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useEditor } from '../src/editor/store';
+import { copyNodes, emitterPayload } from '../src/editor/clipboard';
+import { EMITTER_TEMPLATES } from '../src/editor/templates';
+import { diagnose } from '../src/editor/diagnostics';
+import { autoLayout } from '../src/editor/layout';
 
 /**
  * Everything an undo step is supposed to restore. `updatedAt` is a timestamp
@@ -96,6 +100,20 @@ describe('undo — emitters', () => {
   });
 
   it('rename an emitter', () => roundTrip(() => store().renameSystem('s1', 'renamed')));
+
+  it('reorder emitters — the list is the draw order', () => {
+    store().addSystem();
+    const moved = store().activeSystemId;
+    roundTrip(() => store().moveSystem(moved, -1));
+  });
+
+  it('a reorder at either end is a no-op, not a wrap-around', () => {
+    const only = store().project.systems[0]!.id;
+    const before = store().project.systems.map((s) => s.id);
+    store().moveSystem(only, -1);
+    store().moveSystem(only, 1);
+    expect(store().project.systems.map((s) => s.id)).toEqual(before);
+  });
 
   it('mute an emitter', () => roundTrip(() => store().toggleSystem('s1')));
 
@@ -202,6 +220,9 @@ describe('undo — per-system attachments', () => {
 
   it('place the scene reference', () =>
     roundTrip(() => store().setReference({ opacity: 0.25, offset: [40, 60] })));
+
+  it('change the preview backdrop', () =>
+    roundTrip(() => store().setPreviewBackground({ a: '#334455', b: '#445566', size: 24 })));
 
   it('pick a texture on a tex node', () => {
     const id = store().addTextureId({
@@ -313,5 +334,94 @@ describe('undo — the documented exclusions', () => {
     });
     store().undo();
     expect(store().project.textures?.some((t) => t.id === id)).toBe(true);
+  });
+});
+
+describe('copy, paste and duplicate', () => {
+  it('pasting nodes rewrites ids instead of merging into the originals', () => {
+    const sys = store().project.systems[0]!;
+    const payload = copyNodes(store().project, sys, store().positions, ['n1', 'n2']);
+    const before = sys.graph.nodes.length;
+    const fresh = store().pasteNodes(payload, { x: 500, y: 500 });
+    expect(fresh).toHaveLength(2);
+    expect(fresh).not.toContain('n1');
+    const after = store().project.systems[0]!.graph.nodes;
+    expect(after).toHaveLength(before + 2);
+    // the original is untouched and the copy carries its values
+    expect(after.find((n) => n.id === 'n1')).toBeDefined();
+    expect(after.find((n) => n.id === fresh[0])!.kind).toBe('shape.point');
+  });
+
+  it('carries the edges BETWEEN the copied nodes, and no half-edges', () => {
+    const sys = store().project.systems[0]!;
+    // n1 -> n2 is an edge inside the pair; n3 -> n4 is outside it
+    const payload = copyNodes(store().project, sys, store().positions, ['n1', 'n2']);
+    expect(payload.edges).toHaveLength(1);
+    const before = sys.graph.edges.length;
+    store().pasteNodes(payload, { x: 0, y: 0 });
+    expect(store().project.systems[0]!.graph.edges).toHaveLength(before + 1);
+  });
+
+  it('a copied knob node reuses a knob of the same name rather than making another', () => {
+    const sys = store().project.systems[0]!;
+    const payload = copyNodes(store().project, sys, store().positions, ['n9']); // param.ref -> windPower
+    const before = store().project.params.length;
+    const [id] = store().pasteNodes(payload, { x: 0, y: 0 });
+    expect(store().project.params).toHaveLength(before); // no duplicate knob
+    const pasted = store().project.systems[0]!.graph.nodes.find((n) => n.id === id)!;
+    expect(pasted.structural?.param).toBe('p1');
+  });
+
+  it('paste is one undo step', () => {
+    const sys = store().project.systems[0]!;
+    const payload = copyNodes(store().project, sys, store().positions, ['n1', 'n2']);
+    roundTrip(() => store().pasteNodes(payload, { x: 300, y: 300 }));
+  });
+
+  it('duplicating an emitter copies its graph under fresh ids and names it apart', () => {
+    const before = store().project.systems.length;
+    store().duplicateSystem('s1');
+    const systems = store().project.systems;
+    expect(systems).toHaveLength(before + 1);
+    const copy = systems.at(-1)!;
+    expect(copy.name).not.toBe(systems[0]!.name);
+    expect(copy.graph.nodes).toHaveLength(systems[0]!.graph.nodes.length);
+    // node ids are unique across the whole project — positions are keyed by them
+    const all = systems.flatMap((s) => s.graph.nodes.map((n) => n.id));
+    expect(new Set(all).size).toBe(all.length);
+    expect(store().activeSystemId).toBe(copy.id);
+  });
+
+  it('duplicating an emitter is one undo step', () => roundTrip(() => store().duplicateSystem('s1')));
+});
+
+describe('emitter templates', () => {
+  it('every template is a graph the validator accepts', () => {
+    for (const t of EMITTER_TEMPLATES) {
+      const system = { ...structuredClone(t.system), id: `t_${t.id}` };
+      const diags = diagnose(store().project, system);
+      expect(diags.errors, `${t.id}: ${[...diags.byNode.values()].flat().concat(diags.loose).map((d) => d.message).join(' | ')}`).toBe(0);
+    }
+  });
+
+  it('a template lands as a real emitter, in one undo step', () => {
+    const t = EMITTER_TEMPLATES[0]!;
+    const system = { ...structuredClone(t.system), id: `t_${t.id}` };
+    roundTrip(() => store().pasteEmitter(emitterPayload(system, autoLayout(system.graph))));
+  });
+
+  it('two of the same template do not collide on ids or names', () => {
+    const t = EMITTER_TEMPLATES[0]!;
+    const drop = () => {
+      const system = { ...structuredClone(t.system), id: `t_${t.id}` };
+      store().pasteEmitter(emitterPayload(system, autoLayout(system.graph)));
+    };
+    drop();
+    drop();
+    const systems = store().project.systems;
+    const ids = systems.flatMap((s) => s.graph.nodes.map((n) => n.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(new Set(systems.map((s) => s.id)).size).toBe(systems.length);
+    expect(new Set(systems.map((s) => s.name)).size).toBe(systems.length);
   });
 });

@@ -1,8 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   Controls,
-  Panel,
   ReactFlow,
   ReactFlowProvider,
   useEdgesState,
@@ -15,17 +14,23 @@ import {
 import { useEditor } from './store';
 import { toFlow, FRAME_PREFIX, NOTE_PREFIX } from './graphAdapter';
 import { geometryOf, geometrySignature, reconcilePositions } from './reconcile';
-import { nodesBBox } from './annotate';
 import { PylinkaNode } from './components/PylinkaNode';
+import { ParamNode } from './components/ParamNode';
 import { CommentNode, NoteNode } from './components/AnnotationNodes';
-import { DND_KIND } from './components/Palette';
-import { LeftPanel } from './components/LeftPanel';
+import { GraphMenu, type MenuTarget } from './components/GraphMenu';
+import { ConfigModal } from './components/ConfigModal';
+import { startTour } from './tour';
+import { useDiagnostics } from './diagnostics';
+import { copyNodes, readClipboard, writeClipboard } from './clipboard';
+import { portType } from './ports';
 import { Preview } from './components/Preview';
 import { Systems } from './components/Systems';
 import { ProjectsMenu } from './components/ProjectsMenu';
+import { SaveState } from './components/SaveState';
+import { Shortcuts } from './components/Shortcuts';
 import { AssetManager } from './components/AssetManager';
 
-const nodeTypes = { pylinka: PylinkaNode, comment: CommentNode, note: NoteNode };
+const nodeTypes = { pylinka: PylinkaNode, param: ParamNode, comment: CommentNode, note: NoteNode };
 
 export function App() {
   return (
@@ -44,17 +49,12 @@ function EditorApp() {
   const deleteNode = useEditor((s) => s.deleteNode);
   const deleteEdge = useEditor((s) => s.deleteEdge);
   const select = useEditor((s) => s.select);
-  const rename = useEditor((s) => s.rename);
   const importProject = useEditor((s) => s.importProject);
-  const snapshot = useEditor((s) => s.snapshot);
-  const addFrame = useEditor((s) => s.addFrame);
-  const addNote = useEditor((s) => s.addNote);
   const updateFrame = useEditor((s) => s.updateFrame);
   const updateNote = useEditor((s) => s.updateNote);
   const removeFrame = useEditor((s) => s.removeFrame);
   const removeNote = useEditor((s) => s.removeNote);
   const setAssetsOpen = useEditor((s) => s.setAssetsOpen);
-  const lockAnnotations = useEditor((s) => s.lockAnnotations);
   // ⌘ on a Mac, Ctrl elsewhere — only for the tooltip text
   const modKey = typeof navigator !== 'undefined' && /Mac|iPad|iPhone/.test(navigator.userAgent);
   const undo = useEditor((s) => s.undo);
@@ -62,16 +62,10 @@ function EditorApp() {
   const pastCount = useEditor((s) => s.past);
   const futureCount = useEditor((s) => s.future);
   const positions = useEditor((s) => s.positions);
+  const dirty = useEditor((s) => s.dirty);
+  const saveError = useEditor((s) => s.saveError);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
-  const exportJson = () => {
-    const proj = snapshot();
-    const blob = new Blob([JSON.stringify(proj, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${(proj.name || 'effect').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.pylinka.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
 
   const onImportFile = (file: File) => {
     const r = new FileReader();
@@ -83,6 +77,25 @@ function EditorApp() {
       }
     };
     r.readAsText(file);
+  };
+
+  /** Graph nodes currently selected on the canvas, annotations excluded. */
+  const selectedGraphIds = () =>
+    rfNodesRef.current.filter((n) => n.selected && !n.id.includes(':')).map((n) => n.id);
+
+  /**
+   * Where a paste lands: under the pointer if it is over the canvas, else the
+   * middle of the view. Pasting into the corner you cannot see is the classic
+   * way to lose a copy.
+   */
+  const pasteAt = () => {
+    const r = document.querySelector('.react-flow')?.getBoundingClientRect();
+    const p = pointerRef.current;
+    if (r && p && p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom)
+      return screenToFlowPosition({ x: p.x, y: p.y });
+    return r
+      ? screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 })
+      : { x: 0, y: 0 };
   };
 
   /**
@@ -100,7 +113,14 @@ function EditorApp() {
       return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
     };
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || isTyping(e.target)) return;
+      if (isTyping(e.target)) return;
+      // the one binding with no modifier: everything else here is Ctrl/Cmd
+      if (e.key === '?') {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+        return;
+      }
+      if (!(e.metaKey || e.ctrlKey)) return;
       const k = e.key.toLowerCase();
       if (k === 'z') {
         e.preventDefault();
@@ -109,6 +129,29 @@ function EditorApp() {
       } else if (k === 'y') {
         e.preventDefault();
         redo();
+      } else if (k === 'c' || k === 'd') {
+        const s = useEditor.getState();
+        const sys = s.project.systems.find((x) => x.id === s.activeSystemId) ?? s.project.systems[0]!;
+        const ids = selectedGraphIds();
+        if (ids.length === 0) return;
+        e.preventDefault();
+        const payload = copyNodes(s.project, sys, s.positions, ids);
+        if (k === 'c') void writeClipboard(payload);
+        else {
+          // duplicate lands beside the original rather than on top of it, so
+          // the copy is visible without dragging it off first
+          const at = s.positions[ids[0]!] ?? { x: 0, y: 0 };
+          s.pasteNodes(payload, { x: at.x + 40, y: at.y + 40 });
+        }
+      } else if (k === 'v') {
+        e.preventDefault();
+        void (async () => {
+          const payload = await readClipboard();
+          if (!payload) return;
+          const s = useEditor.getState();
+          if (payload.kind === 'emitter') s.pasteEmitter(payload);
+          else s.pasteNodes(payload, pasteAt());
+        })();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -135,24 +178,37 @@ function EditorApp() {
     };
   }, []);
 
+  /**
+   * Ask before closing the tab on work that is not somewhere it can be opened
+   * from again.
+   *
+   * Two different situations, and only the second is a real loss. A `dirty`
+   * project IS still in localStorage and comes back on reload — the warning is
+   * about the copy that outlives this browser, which is the library or a file.
+   * A `saveError` means even that fell through and closing loses everything.
+   *
+   * Browsers ignore custom text here and show their own wording, so there is no
+   * point writing any; the indicator in the header is where the distinction
+   * gets explained.
+   */
+  useEffect(() => {
+    if (!dirty && saveError === null) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Safari and older Chrome still want returnValue set to something
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty, saveError]);
+
+  const [menu, setMenu] = useState<MenuTarget | null>(null);
+  // the shortcut handler is registered once, so it reads these through refs
+  const rfNodesRef = useRef<RFNode[]>([]);
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
   const { screenToFlowPosition } = useReactFlow();
-  const addNode = useEditor((s) => s.addNode);
-
-  // palette → canvas drag-and-drop
-  const onDragOver = (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes(DND_KIND)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-  };
-  const onDrop = (e: React.DragEvent) => {
-    const kind = e.dataTransfer.getData(DND_KIND);
-    if (!kind) return;
-    e.preventDefault();
-    const at = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-    addNode(kind, at.x - 105, at.y - 15); // centre the node on the cursor
-  };
 
   // rebuild flow only when the active graph's STRUCTURE changes (not on value scrubs / drags)
   const structureSig = useMemo(() => {
@@ -171,33 +227,17 @@ function EditorApp() {
     });
   }, [project, activeSystemId]);
 
-  // annotation toolbar: frame wraps the current selection (or drops at the view centre)
-  const paneCenter = () => {
-    const r = document.querySelector('.react-flow')?.getBoundingClientRect();
-    return r ? screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) : { x: 0, y: 0 };
-  };
-  const onAddFrame = () => {
-    const sel = rfNodes.filter((n) => n.selected && !n.id.includes(':')).map((n) => n.id);
-    const g = (project.systems.find((s) => s.id === activeSystemId) ?? project.systems[0]!).graph;
-    const box = sel.length ? nodesBBox(sel, g, useEditor.getState().positions) : undefined;
-    if (box) addFrame(box);
-    else {
-      const c = paneCenter();
-      addFrame({ x: c.x - 210, y: c.y - 130, w: 420, h: 260 });
-    }
-  };
-  const onAddNote = () => {
-    const c = paneCenter();
-    addNote({ x: c.x - 110, y: c.y - 75 });
+  /** Open the graph menu where the pointer is, in both coordinate systems. */
+  const openMenu = (e: React.MouseEvent, annotationId?: string) => {
+    e.preventDefault();
+    setMenu({
+      screen: { x: e.clientX, y: e.clientY },
+      flow: screenToFlowPosition({ x: e.clientX, y: e.clientY }),
+      ...(annotationId !== undefined ? { annotationId } : {}),
+    });
   };
 
-  // one switch for the whole canvas — the point of locking is to stop catching
-  // annotations while wiring, and doing that frame-by-frame defeats it
-  const sysAnnotations = [
-    ...(project.annotations?.frames ?? []).filter((f) => f.systemId === activeSystemId),
-    ...(project.annotations?.notes ?? []).filter((n) => n.systemId === activeSystemId),
-  ];
-  const allLocked = sysAnnotations.length > 0 && sysAnnotations.every((a) => a.locked === true);
+  // annotation toolbar: frame wraps the current selection (or drops at the view centre)
 
   useEffect(() => {
     const f = toFlow(project, useEditor.getState().positions, useEditor.getState().selectedNodeId, activeSystemId);
@@ -226,6 +266,34 @@ function EditorApp() {
     setRfNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === selectedNodeId })));
   }, [selectedNodeId, setRfNodes]);
 
+  rfNodesRef.current = rfNodes;
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      pointerRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener('pointermove', move);
+    return () => window.removeEventListener('pointermove', move);
+  }, []);
+
+  const diags = useDiagnostics();
+
+  /**
+   * Refuse a wire whose ends do not agree on a type.
+   *
+   * The graph would take it and the compiler would reject it a moment later,
+   * which is a worse way to learn: the mistake is made, the preview goes red,
+   * and the message names a rule rather than the wire you just drew. React Flow
+   * greys the target out instead, so the wire simply will not land.
+   */
+  const isValidConnection = (c: Connection | RFEdge) => {
+    if (!c.source || !c.target || !c.sourceHandle || !c.targetHandle) return false;
+    if (c.source === c.target) return false; // a node cannot feed itself
+    const g = (project.systems.find((s) => s.id === activeSystemId) ?? project.systems[0]!).graph;
+    const from = portType(g, c.source, c.sourceHandle, 'out');
+    const to = portType(g, c.target, c.targetHandle, 'in');
+    return from !== undefined && to !== undefined && from === to;
+  };
+
   const onConnect = (c: Connection) => {
     if (c.source && c.target && c.sourceHandle && c.targetHandle)
       connect({ nodeId: c.source, portId: c.sourceHandle }, { nodeId: c.target, portId: c.targetHandle });
@@ -233,46 +301,62 @@ function EditorApp() {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
-        <a href="/recipes" className="grid h-6 w-6 place-items-center rounded-md border border-border bg-card text-[11px]" title="Recipes">✨</a>
-        <span className="font-semibold tracking-tight">pylinka</span>
-        <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">editor</span>
-        <input
-          className="ml-2 w-52 rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-foreground outline-none hover:border-border focus:border-border"
-          value={project.name}
-          onChange={(e) => rename(e.target.value)}
-          aria-label="Project name"
-        />
-        <div className="ml-auto flex items-center gap-2 text-xs">
-          <div className="flex items-center rounded-md border border-border">
-            <button
-              onClick={undo}
-              disabled={pastCount === 0}
-              title={`Undo (${modKey ? '\u2318' : 'Ctrl+'}Z) — ${pastCount} step${pastCount === 1 ? '' : 's'} back`}
-              aria-label="Undo"
-              className="px-2 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent">
-              ↶
-            </button>
-            <button
-              onClick={redo}
-              disabled={futureCount === 0}
-              title={`Redo (${modKey ? '\u21e7\u2318' : 'Ctrl+Shift+'}Z) — ${futureCount} step${futureCount === 1 ? '' : 's'} forward`}
-              aria-label="Redo"
-              className="border-l border-border px-2 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent">
-              ↷
-            </button>
-          </div>
-          <button onClick={() => setAssetsOpen(true)} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground" title="Textures & animated sequences">Assets</button>
+      {/*
+        The bar is deliberately almost empty. Everything that is not an action
+        you take constantly — the name, export, the project list — is one click
+        deeper in Project, and the product name is not information the person
+        using the editor needs on screen.
+      */}
+      <header className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
+        <span data-tour="project">
           <ProjectsMenu />
-          <button onClick={exportJson} className="rounded-md border border-border px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">Export</button>
+        </span>
+        <button
+          onClick={() => setAssetsOpen(true)}
+          className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="Textures, sprite sequences and scene references">
+          Assets
+        </button>
+        <button
+          onClick={startTour}
+          className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="Walk through building an effect: emitters, nodes and how to link them">
+          Tutorial
+        </button>
+        <button
+          onClick={() => setShortcutsOpen(true)}
+          className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="Keyboard shortcuts (?)">
+          Keys
+        </button>
+        <div className="ml-auto flex items-center gap-1">
+          <SaveState />
+        </div>
+        <div data-tour="undo" className="flex items-center gap-0.5">
+          <button
+            onClick={undo}
+            disabled={pastCount === 0}
+            title={`Undo (${modKey ? '\u2318' : 'Ctrl+'}Z) — ${pastCount} step${pastCount === 1 ? '' : 's'} back`}
+            aria-label="Undo"
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-25 disabled:hover:bg-transparent">
+            <HistoryIcon />
+          </button>
+          <button
+            onClick={redo}
+            disabled={futureCount === 0}
+            title={`Redo (${modKey ? '\u21e7\u2318' : 'Ctrl+Shift+'}Z) — ${futureCount} step${futureCount === 1 ? '' : 's'} forward`}
+            aria-label="Redo"
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-25 disabled:hover:bg-transparent">
+            <HistoryIcon flip />
+          </button>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <LeftPanel />
-        <div className="flex min-w-0 flex-1 flex-col">
+        {/* an even split: the graph you are editing, and the thing it produces */}
+        <div className="flex min-w-0 flex-1 flex-col border-r border-border">
           <Systems />
-          <div className="min-h-0 flex-1">
+          <div data-tour="graph" className="relative min-h-0 flex-1">
           <ReactFlow
             nodes={rfNodes}
             edges={rfEdges}
@@ -280,6 +364,7 @@ function EditorApp() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            isValidConnection={isValidConnection}
             onNodeDragStop={(_e, n) => {
               if (n.id.startsWith(FRAME_PREFIX)) updateFrame(n.id.slice(FRAME_PREFIX.length), { x: n.position.x, y: n.position.y });
               else if (n.id.startsWith(NOTE_PREFIX)) updateNote(n.id.slice(NOTE_PREFIX.length), { x: n.position.x, y: n.position.y });
@@ -295,47 +380,75 @@ function EditorApp() {
             onEdgesDelete={(es) => es.forEach((e) => deleteEdge(e.id))}
             onNodeClick={(_e, n) => select(n.id)}
             onPaneClick={() => select(null)}
-            onDragOver={onDragOver}
-            onDrop={onDrop}
+            onPaneContextMenu={(e) => openMenu(e as unknown as React.MouseEvent)}
+            onNodeContextMenu={(e, n) =>
+              openMenu(e as unknown as React.MouseEvent, n.id.includes(':') ? n.id : undefined)
+            }
             fitView
             minZoom={0.2}
+            // React Flow only binds Backspace by default, so Delete — the key
+            // most people reach for, and the only one on a full keyboard that
+            // says what it does — did nothing
+            deleteKeyCode={['Backspace', 'Delete']}
             defaultEdgeOptions={{ animated: true }}
           >
             <Background gap={22} color="color-mix(in oklab, var(--color-border) 70%, transparent)" />
             <Controls showInteractive={false} />
-            <Panel position="top-right" className="flex gap-1.5 text-xs">
-              <button
-                onClick={onAddFrame}
-                title="Add a comment frame — select nodes first to wrap them"
-                className="rounded-md border border-border bg-card px-2.5 py-1.5 text-muted-foreground shadow hover:bg-accent hover:text-foreground">
-                ⬚ Frame
-              </button>
-              <button
-                onClick={onAddNote}
-                title="Add a sticky note"
-                className="rounded-md border border-border bg-card px-2.5 py-1.5 text-muted-foreground shadow hover:bg-accent hover:text-foreground">
-                🗒 Note
-              </button>
-              <button
-                onClick={() => lockAnnotations(!allLocked)}
-                disabled={sysAnnotations.length === 0}
-                title={
-                  allLocked
-                    ? 'Unlock every frame & note on this canvas'
-                    : 'Lock every frame & note on this canvas — they stay visible and editable, but stop moving when you catch them'
-                }
-                className={`rounded-md border border-border px-2.5 py-1.5 shadow hover:bg-accent hover:text-foreground disabled:opacity-40 ${allLocked ? 'bg-accent text-foreground' : 'bg-card text-muted-foreground'}`}>
-                {allLocked ? '🔒 Locked' : '🔓 Lock'}
-              </button>
-            </Panel>
           </ReactFlow>
+          {/*
+            The palette used to be a dock you could not miss. Now that nodes
+            come from a menu, nothing on screen says so — this is the one line
+            that has to be there, and it steps aside while the menu is open.
+          */}
+          {diags.loose.length > 0 && (
+            <div
+              className="pointer-events-none absolute inset-x-2 top-2 z-10 rounded-md border px-2 py-1.5 text-[10px]"
+              style={{ borderColor: 'color-mix(in oklab, var(--color-destructive) 40%, transparent)', background: 'color-mix(in oklab, var(--color-background) 88%, transparent)', color: 'var(--color-destructive)' }}>
+              {diags.loose.map((d) => d.message).join(' · ')}
+            </div>
+          )}
+          {!menu && (
+            <span className="pointer-events-none absolute bottom-2 right-3 z-10 text-[10px] text-muted-foreground/70">
+              right-click for nodes
+            </span>
+          )}
+          {menu && <GraphMenu target={menu} onClose={() => setMenu(null)} />}
           </div>
         </div>
-        <div className="w-[42vw] min-w-[480px] max-w-[860px] shrink-0 border-l border-border">
+        <div className="min-w-0 flex-1">
           <Preview />
         </div>
       </div>
       <AssetManager />
+      <ConfigModal />
+      {shortcutsOpen && <Shortcuts onClose={() => setShortcutsOpen(false)} />}
     </div>
+  );
+}
+
+/**
+ * Undo / redo. One shape, mirrored — an arrow curving back on itself, which is
+ * the gesture both actions describe. Drawn rather than typed: the arrow glyphs
+ * that read correctly here (↺ ↻ ⎌) pick up emoji presentation on some systems
+ * and land at a different weight from everything else in the bar.
+ */
+function HistoryIcon({ flip = false }: { flip?: boolean }) {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 15 15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      style={flip ? { transform: 'scaleX(-1)' } : undefined}>
+      {/* the arc: down the left, along the bottom, back up the right */}
+      <path d="M3.2 6.4a5 5 0 1 1 .6 5.1" />
+      {/* the head, sitting on the tail of the arc */}
+      <path d="M3.2 2.9v3.6h3.6" />
+    </svg>
   );
 }

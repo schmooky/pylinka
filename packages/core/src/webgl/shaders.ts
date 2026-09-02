@@ -265,9 +265,11 @@ uniform float u_spawnBase;   // cursor
 uniform float u_spawnCount;
 uniform float u_capacity;
 uniform float u_frame;
-uniform int   u_shape;       // 0 point, 1 circle, 2 rect
+uniform int   u_shape;       // 0 point, 1 circle, 2 rect, 3 torus, 4 burstRing, 5 chain
 uniform float u_shapeR;
 uniform vec2  u_shapeSize;
+uniform vec2  u_shapeA;      // point offset | torus (inner, outer) | chain start
+uniform vec2  u_shapeB;      // chain end
 // emission mask: a point table of emitter-relative offsets (RG32F, row-major
 // 2048-wide). u_maskCount == 0 → no mask, use the analytic shape.
 uniform highp sampler2D u_maskTbl;
@@ -275,6 +277,30 @@ uniform float u_maskCount;
 
 float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
 float rnd(float s, float k) { return hash11(s * 57.31 + k * 131.7 + 0.123); }
+
+/**
+ * Spawn offset for the current shape, emitter-relative.
+ *
+ * t is an even-spacing parameter in 0..1 for the shapes that want the ring
+ * laid out rather than sampled (burstRing), or < 0 when the caller has no
+ * index to give -- the sub-emitter path spawns on parent deaths, not in a
+ * numbered window, so it falls back to a random angle there.
+ *
+ * u_shapeA / u_shapeB are per-shape: the point's offset, the torus's
+ * (inner, outer) radii, the chain's start and end.
+ */
+vec2 shapeOffset(float s, float t) {
+  // circle is the RING, as the compiled backends have always had it and as the
+  // catalog implies by offering torus alongside it. This used to spawn across
+  // the filled disc, so the same graph looked one way in an editor preview and
+  // another way in a game. A filled blob is a torus with an inner radius of 0.
+  if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); return vec2(cos(a), sin(a)) * u_shapeR; }
+  if (u_shape == 2) return (vec2(rnd(s, 1.0), rnd(s, 2.0)) - 0.5) * u_shapeSize;
+  if (u_shape == 3) { float a = 6.2831853 * rnd(s, 1.0); float r = mix(u_shapeA.x, u_shapeA.y, rnd(s, 9.0)); return vec2(cos(a), sin(a)) * r; }
+  if (u_shape == 4) { float a = 6.2831853 * (t >= 0.0 ? t : rnd(s, 1.0)); return vec2(cos(a), sin(a)) * u_shapeR; }
+  if (u_shape == 5) return mix(u_shapeA, u_shapeB, rnd(s, 1.0));
+  return u_shapeA; // point, at its offset
+}
 ${forceGlsl(ft)}
 
 void main() {
@@ -293,8 +319,7 @@ void main() {
       idx = clamp(idx, 0, int(u_maskCount) - 1);
       off = texelFetch(u_maskTbl, ivec2(idx % 2048, idx / 2048), 0).rg;
     }
-    else if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); off = vec2(cos(a), sin(a)) * u_shapeR * sqrt(rnd(s, 9.0)); }
-    else if (u_shape == 2) { off = (vec2(rnd(s, 1.0), rnd(s, 2.0)) - 0.5) * u_shapeSize; }
+    else off = shapeOffset(s, rel / max(u_spawnCount, 1.0));
     o_pos  = u_emitter + off;
     o_vel  = mix(u_velMin, u_velMax, vec2(rnd(s, 3.0), rnd(s, 4.0)));
     o_life = mix(u_lifeMin, u_lifeMax, rnd(s, 5.0));
@@ -371,9 +396,35 @@ uniform float u_frame;
 uniform int   u_shape;
 uniform float u_shapeR;
 uniform vec2  u_shapeSize;
+uniform vec2  u_shapeA;
+uniform vec2  u_shapeB;
 
 float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
 float rnd(float s, float k) { return hash11(s * 57.31 + k * 131.7 + 0.123); }
+
+/**
+ * Spawn offset for the current shape, emitter-relative.
+ *
+ * t is an even-spacing parameter in 0..1 for the shapes that want the ring
+ * laid out rather than sampled (burstRing), or < 0 when the caller has no
+ * index to give -- the sub-emitter path spawns on parent deaths, not in a
+ * numbered window, so it falls back to a random angle there.
+ *
+ * u_shapeA / u_shapeB are per-shape: the point's offset, the torus's
+ * (inner, outer) radii, the chain's start and end.
+ */
+vec2 shapeOffset(float s, float t) {
+  // circle is the RING, as the compiled backends have always had it and as the
+  // catalog implies by offering torus alongside it. This used to spawn across
+  // the filled disc, so the same graph looked one way in an editor preview and
+  // another way in a game. A filled blob is a torus with an inner radius of 0.
+  if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); return vec2(cos(a), sin(a)) * u_shapeR; }
+  if (u_shape == 2) return (vec2(rnd(s, 1.0), rnd(s, 2.0)) - 0.5) * u_shapeSize;
+  if (u_shape == 3) { float a = 6.2831853 * rnd(s, 1.0); float r = mix(u_shapeA.x, u_shapeA.y, rnd(s, 9.0)); return vec2(cos(a), sin(a)) * r; }
+  if (u_shape == 4) { float a = 6.2831853 * (t >= 0.0 ? t : rnd(s, 1.0)); return vec2(cos(a), sin(a)) * u_shapeR; }
+  if (u_shape == 5) return mix(u_shapeA, u_shapeB, rnd(s, 1.0));
+  return u_shapeA; // point, at its offset
+}
 ${forceGlsl(ft)}
 
 void main() {
@@ -400,8 +451,7 @@ ${
   if (doSpawn) {
     float s = hash11(id * 7.77 + u_frame * 3.13 + ${burst ? 'float(u_burstK) * 2.0 + 1.0' : '1.0'});
     vec2 off = vec2(0.0);
-    if (u_shape == 1) { float a = 6.2831853 * rnd(s, 1.0); off = vec2(cos(a), sin(a)) * u_shapeR * sqrt(rnd(s, 9.0)); }
-    else if (u_shape == 2) { off = (vec2(rnd(s, 1.0), rnd(s, 2.0)) - 0.5) * u_shapeSize; }
+    off = shapeOffset(s, ${burst ? 'float(u_burstK) / max(float(burstN), 1.0)' : '-1.0'});
     o_pos  = i_pPos + off;
     o_vel  = mix(u_velMin, u_velMax, vec2(rnd(s, 3.0), rnd(s, 4.0)))${burst ? ' + u_inherit * i_pVel' : ''};
     o_life = mix(u_lifeMin, u_lifeMax, rnd(s, 5.0));
@@ -446,6 +496,12 @@ layout(location = 3) in float a_life;
 layout(location = 4) in float a_seed;    // [0,1) per particle
 
 uniform vec2  u_resolution;
+// Pans the view WITHOUT moving the effect: subtracted from world position, so
+// the same particles are drawn through a window that slid. An editor that
+// panned by transforming the canvas element instead was moving finished
+// pixels, which leaves the drawn area behind and cannot be combined with a
+// rendered zoom.
+uniform vec2  u_viewOffset;
 uniform vec4  u_colorFrom;
 uniform vec4  u_colorTo;
 uniform float u_sizeFrom;
@@ -506,7 +562,8 @@ void main() {
   float rs = sin(rot);
   vec2 off = a_corner * size;
   vec2 world = a_pos + vec2(off.x * rc - off.y * rs, off.x * rs + off.y * rc);
-  vec2 clip = vec2(world.x / u_resolution.x * 2.0 - 1.0, 1.0 - world.y / u_resolution.y * 2.0);
+  vec2 vp = world - u_viewOffset;
+  vec2 clip = vec2(vp.x / u_resolution.x * 2.0 - 1.0, 1.0 - vp.y / u_resolution.y * 2.0);
   gl_Position = vec4(clip, 0.0, 1.0);
 
   if (u_textured > 0.5) {

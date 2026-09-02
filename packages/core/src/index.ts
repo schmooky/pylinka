@@ -15,3 +15,4 @@ export { KnobStore, type KnobBus } from './knobs.js';
 export { clampDt, FixedStepDriver, DEFAULT_MAX_DT } from './time.js';
 export { createPathDriver, type PathDriver, type PathDriverOptions } from './path.js';
 export { playCode, type AtlasPlay } from './atlas.js';
+export { buildProject, systemsInBuildOrder, type ProjectParticles } from './project.js';

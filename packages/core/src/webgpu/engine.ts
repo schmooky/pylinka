@@ -36,17 +36,12 @@ const META_STRIDE = 8;
 const COUNTERS_SIZE = 12;
 const STATS_INTERVAL = 30; // frames between counter readbacks (§13.11 step 7)
 
+import { pickSystem } from '../system.js';
+export { pickSystem };
+
 /** handle → sim, so a sub-emitter child can reach its parent's GPU buffers. */
 const simOf = new WeakMap<CompiledParticlesHandle, WebGPUSystemSim>();
 
-/** Pick the system a handle drives (same rule as the interpreted backend). */
-export function pickSystem(project: PylinkaProject, systemName?: string): System | undefined {
-  return (
-    project.systems.find((s) => s.name === systemName) ??
-    project.systems.find((s) => s.enabled) ??
-    project.systems[0]
-  );
-}
 
 export interface WebGPUSimOptions {
   /** render target format (canvas preferred format / pixi's target) */
@@ -638,7 +633,9 @@ export async function createParticles(
   const system = pickSystem(project, opts.systemName);
   if (system === undefined) throw new Error('Project has no systems.');
 
-  const zoom = opts.zoom ?? 1;
+  let zoom = opts.zoom ?? 1;
+  let viewX = 0;
+  let viewY = 0;
   const sizeScale = opts.sizeScale ?? 1;
   const maxDt = opts.maxDt ?? 0.05;
   const uploadable = await toUploadable(opts.atlas);
@@ -676,6 +673,7 @@ export async function createParticles(
 
   const handle: CompiledParticlesHandle = {
     autoClear: true,
+    clearColor: [0, 0, 0, 0] as [number, number, number, number],
     backendName: 'webgpu',
     get stats() {
       return sim.stats;
@@ -695,22 +693,52 @@ export async function createParticles(
             view: context.getCurrentTexture().createView(),
             loadOp: this.autoClear ? 'clear' : 'load',
             storeOp: 'store',
-            clearValue: { r: 0, g: 0, b: 0, a: 0 },
+            clearValue: {
+              // premultiplied target — see the WebGL2 backend
+              r: this.clearColor[0] * this.clearColor[3],
+              g: this.clearColor[1] * this.clearColor[3],
+              b: this.clearColor[2] * this.clearColor[3],
+              a: this.clearColor[3],
+            },
           },
         ],
       });
       const w = canvas.width * zoom;
       const h = canvas.height * zoom;
-      sim.draw(pass, 2 / w, -2 / h, -1, 1, sizeScale);
+      // the two translation arguments carry the view offset — a shifted
+      // window over the same particles, with no shader change
+      sim.draw(pass, 2 / w, -2 / h, -1 - (2 * viewX) / w, 1 + (2 * viewY) / h, sizeScale);
       pass.end();
       const wantStats = sim.maybeEncodeStats(encoder);
       device.queue.submit([encoder.finish()]);
       if (wantStats) sim.resolveStats();
       sim.endFrame(dt);
     },
-    setEmitter(x: number, y: number) {
-      sim.clock.ex = x * zoom;
-      sim.clock.ey = y * zoom;
+    setEmitter(x: number, y: number, teleport = false) {
+      // canvas pixels -> world, through the same mapping the renderer draws
+      // with, so a panned view does not drag the emitter with it
+      sim.clock.ex = x * zoom + viewX;
+      sim.clock.ey = y * zoom + viewY;
+      if (teleport) {
+        sim.clock.px = sim.clock.ex;
+        sim.clock.py = sim.clock.ey;
+      }
+    },
+    get viewOffset(): [number, number] {
+      return [viewX, viewY];
+    },
+    set viewOffset(v: [number, number]) {
+      if (Number.isFinite(v[0]) && Number.isFinite(v[1])) {
+        viewX = v[0];
+        viewY = v[1];
+      }
+    },
+    get zoom() {
+      return zoom;
+    },
+    set zoom(z: number) {
+      // a zoom of 0 divides the world by nothing; ignore it rather than blanking
+      if (Number.isFinite(z) && z > 0) zoom = z;
     },
     spawnBurst(count: number) {
       sim.clock.spawnBurst(count);

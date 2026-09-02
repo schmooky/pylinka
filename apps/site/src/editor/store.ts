@@ -4,9 +4,47 @@ import { getSchema, V1_CATALOG } from '@pylinka/graph';
 import { seedProject } from './seed';
 import { autoLayout } from './layout';
 import { RECIPES, type RecipeAtlas } from '../recipes/data';
-import type { CommentFrame, EditorProject, EditorTexture, EmissionMaskData, EmitterPathData, ReferenceImage, ReferenceSettings, StickyNote } from './types';
-import { DEFAULT_REFERENCE } from './types';
+import type { CommentFrame, EditorProject, EditorTexture, EmissionMaskData, EmitterPathData, PreviewBackground, ReferenceImage, ReferenceSettings, StickyNote } from './types';
+import { DEFAULT_PREVIEW_BACKGROUND, DEFAULT_REFERENCE } from './types';
 import { generateAnnotations } from './annotate';
+import { copyEmitter, type ClipboardPayload } from './clipboard';
+
+type NodesPayload = Extract<ClipboardPayload, { kind: 'nodes' }>;
+type EmitterPayload = Extract<ClipboardPayload, { kind: 'emitter' }>;
+
+/**
+ * Ids that have to be unique are derived from the project, not from the clock.
+ * `Date.now()` looks unique and is not: two pastes in the same millisecond —
+ * a double-click, a test, a loop — produce the same id, and a second system
+ * sharing an id with the first quietly breaks everything keyed by it.
+ */
+function nextSystemId(p: EditorProject): string {
+  let max = 0;
+  for (const s of p.systems) {
+    const m = /^s(\d+)$/.exec(s.id);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `s${max + 1}`;
+}
+
+/** Edge ids only have to be unique within the graph. */
+function nextEdgeId(graph: System['graph']): string {
+  let max = 0;
+  for (const e of graph.edges) {
+    const m = /^e(\d+)$/.exec(e.id);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `e${max + 1}`;
+}
+
+/** "spark" -> "spark copy" -> "spark copy 2", so a duplicate is findable. */
+function uniqueSystemName(p: EditorProject, base: string): string {
+  const taken = new Set(p.systems.map((s) => s.name));
+  if (!taken.has(base)) return base;
+  const stem = `${base} copy`;
+  if (!taken.has(stem)) return stem;
+  for (let i = 2; ; i++) if (!taken.has(`${stem} ${i}`)) return `${stem} ${i}`;
+}
 
 const KEY = 'pylinka.editor.project';
 type XY = { x: number; y: number };
@@ -187,6 +225,12 @@ interface EditorState {
   toggleSystem(id: string): void;
   /** set the active system's blend mode (preview re-creates the engine) */
   setActiveBlend(mode: System['blendMode']): void;
+  /**
+   * Move an emitter one place in the project's order. That order IS the draw
+   * order — first is drawn first, so it ends up furthest back — and it is also
+   * what the tab strip shows.
+   */
+  moveSystem(id: string, dir: -1 | 1): void;
   /** make `childId` spawn on `parentId`'s particle deaths (null = born at cursor) */
   setSubParent(childId: string, parentId: string | null): void;
   /** which parent event the ACTIVE system spawns on ('death' by default) */
@@ -220,6 +264,11 @@ interface EditorState {
   // asset-manager modal (UI-only state, not part of the project / undo)
   assetsOpen: boolean;
   setAssetsOpen(open: boolean): void;
+  /** settings modal + which tree section it shows (UI-only, not undoable) */
+  configOpen: boolean;
+  configSection: string;
+  setConfigOpen(open: boolean): void;
+  setConfigSection(section: string): void;
   /** set/clear the painted emission area of the ACTIVE system */
   setMask(mask: EmissionMaskData | null): void;
   /** set/clear the emitter trajectory of the ACTIVE system (preview reads it live) */
@@ -233,6 +282,16 @@ interface EditorState {
   addNote(at?: { x: number; y: number }): void;
   updateNote(id: string, patch: Partial<Omit<StickyNote, 'id' | 'systemId'>>): void;
   removeNote(id: string): void;
+  /**
+   * Paste a clipboard payload into the ACTIVE system, at `at` in flow
+   * coordinates. Ids are rewritten, so pasting into the project you copied from
+   * makes a copy rather than merging into the original. Returns the new node ids.
+   */
+  pasteNodes(payload: NodesPayload, at: { x: number; y: number }): string[];
+  /** Copy a whole emitter into the project as a new one, and make it active. */
+  duplicateSystem(id: string): void;
+  /** Add an emitter from a clipboard payload, and make it active. */
+  pasteEmitter(payload: EmitterPayload): void;
   /** lock/unlock EVERY annotation on the active system in one go */
   lockAnnotations(locked: boolean): void;
   // scene reference (project-level asset library + how it sits under the preview)
@@ -242,6 +301,28 @@ interface EditorState {
   renameReference(id: string, name: string): void;
   /** patch how the active reference is displayed (opacity, scale, offset, …) */
   setReference(patch: Partial<ReferenceSettings>): void;
+  /** patch the preview's backdrop (grid or solid, and its colour) */
+  setPreviewBackground(patch: Partial<PreviewBackground>): void;
+  // saving
+  /**
+   * Why the last autosave failed, or null. Autosave writes the working copy on
+   * every edit; when it starts throwing (a full quota, a browser with storage
+   * disabled) the work only exists in this tab, and closing it loses the lot.
+   */
+  saveError: string | null;
+  /**
+   * Edits since the last time this project was written somewhere that outlives
+   * the working copy — the library, or a file.
+   *
+   * This is NOT "unsaved" in the usual sense: the working copy is written on
+   * every edit and comes back on reload. It is the gap between "this browser
+   * still has it" and "I could open it again from somewhere else".
+   */
+  dirty: boolean;
+  /** when that last real save happened (ISO), or null if it never has */
+  savedAt: string | null;
+  /** the project was written to the library or a file — the gap is closed */
+  markSaved(): void;
   // undo / redo
   /** how many steps are on each stack — the header buttons read these */
   past: number;
@@ -278,13 +359,31 @@ const COALESCE_MS = 700;
 
 const initial = load();
 
-function persist(project: EditorProject, positions: Record<string, XY>, activeSystemId: string) {
+/**
+ * Write the working copy to localStorage, and SAY whether it worked.
+ *
+ * This used to swallow the failure. That is the one case where the editor is
+ * genuinely lying: textures and reference images are base64 inside the project,
+ * so a few sprite sheets can push past the ~5MB origin quota, and every write
+ * from then on throws QuotaExceededError. The editor kept looking fine, and the
+ * work was gone at the next reload. Returns the message, or null on success.
+ */
+function persist(
+  project: EditorProject,
+  positions: Record<string, XY>,
+  activeSystemId: string,
+): string | null {
   const out = structuredClone(project);
   out.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: positions, activeSystemId };
   try {
     localStorage.setItem(KEY, JSON.stringify(out));
-  } catch {
-    /* ignore */
+    return null;
+  } catch (e) {
+    const msg = (e as Error).message;
+    // the quota case is the one worth naming, since the fix is a specific one
+    return /quota|exceeded/i.test(msg)
+      ? 'Browser storage is full — remove a texture or a reference image, or export this project to a file.'
+      : msg;
   }
 }
 
@@ -349,11 +448,13 @@ export const useEditor = create<EditorState>((set, get) => {
         extra?.(project, { positions: s.positions, activeSystemId: s.activeSystemId }) ?? {};
       const positions = more.positions ?? s.positions;
       const activeSystemId = more.activeSystemId ?? s.activeSystemId;
-      persist(project, positions, activeSystemId);
+      const saveError = persist(project, positions, activeSystemId);
       return {
         project,
         positions,
         activeSystemId,
+        saveError,
+        dirty: true,
         ...(more.selectedNodeId !== undefined ? { selectedNodeId: more.selectedNodeId } : {}),
         rev: s.rev + 1,
         past: past.length,
@@ -375,8 +476,8 @@ export const useEditor = create<EditorState>((set, get) => {
       future.length = 0;
       lastKey = null;
       const positions = next(s.positions);
-      persist(s.project, positions, s.activeSystemId);
-      return { positions, past: past.length, future: future.length };
+      const saveError = persist(s.project, positions, s.activeSystemId);
+      return { positions, saveError, dirty: true, past: past.length, future: future.length };
     });
   };
 
@@ -398,10 +499,14 @@ export const useEditor = create<EditorState>((set, get) => {
         ...(s.project.textures ? { textures: s.project.textures } : {}),
         ...(s.project.references ? { references: s.project.references } : {}),
       };
-      persist(project, snap.positions, snap.activeSystemId);
+      const saveError = persist(project, snap.positions, snap.activeSystemId);
       return {
         project,
         positions: snap.positions,
+        saveError,
+        // stepping back through history still leaves you somewhere the library
+        // has never seen; undo is not a way of un-editing a project
+        dirty: true,
         activeSystemId: project.systems.some((x) => x.id === snap.activeSystemId)
           ? snap.activeSystemId
           : project.systems[0]!.id,
@@ -424,13 +529,15 @@ export const useEditor = create<EditorState>((set, get) => {
       project.editor?.nodePositions && Object.keys(project.editor.nodePositions).length
         ? { ...project.editor.nodePositions }
         : project.systems.reduce<Record<string, XY>>((acc, s) => Object.assign(acc, autoLayout(s.graph)), {});
-    persist(project, positions, activeSystemId);
+    const saveError = persist(project, positions, activeSystemId);
     // a different project is a different timeline — do not let Ctrl+Z walk back
     // into the one that was open before it
     past.length = 0;
     future.length = 0;
     lastKey = null;
-    set((s) => ({ project, positions, activeSystemId, rev: s.rev + 1, texRev: s.texRev + 1, selectedNodeId: null, past: 0, future: 0 }));
+    // what was just loaded matches its source (a library entry, a file), so
+    // there is nothing to warn about until it is edited
+    set((s) => ({ project, positions, activeSystemId, rev: s.rev + 1, texRev: s.texRev + 1, selectedNodeId: null, saveError, dirty: false, past: 0, future: 0 }));
   };
 
   const initActive =
@@ -445,10 +552,19 @@ export const useEditor = create<EditorState>((set, get) => {
     selectedNodeId: null,
     rev: 0,
     texRev: 0,
+    saveError: null,
+    // a project restored from the working copy is as unsaved as it was when the
+    // tab closed; treating a reload as a save would hide exactly the gap this
+    // is here to show
+    dirty: false,
+    savedAt: null,
     past: 0,
     future: 0,
     assetsOpen: false,
+    configOpen: false,
+    configSection: 'project',
     system: () => activeSysOf(get().project),
+    markSaved: () => set({ dirty: false, savedAt: new Date().toISOString() }),
     snapshot: () => {
       const out = structuredClone(get().project);
       out.editor = { viewport: { x: 0, y: 0, zoom: 1 }, nodePositions: get().positions, activeSystemId: get().activeSystemId };
@@ -467,6 +583,22 @@ export const useEditor = create<EditorState>((set, get) => {
         for (const st of schema?.structural ?? []) structural[st.key] = st.default;
         const node: Node = { id: newId, kind, values };
         if (Object.keys(structural).length) node.structural = structural;
+        // A knob node with no knob behind it is a dead end, and making the user
+        // define one somewhere else first is exactly the split this node exists
+        // to close — so dropping one creates its knob.
+        if (kind === 'param.ref') {
+          const pid = nextParamId(p);
+          p.params.push({
+            id: pid,
+            name: uniqueParamName(p, 'knob'),
+            type: 'f32',
+            min: 0,
+            max: 1,
+            scale: 'linear',
+            default: { t: 'f32', v: 0.5 },
+          });
+          node.structural = { ...(node.structural ?? {}), param: pid };
+        }
         sys.graph.nodes.push(node);
       }, false, undefined, (_p, prev) => ({
         positions: { ...prev.positions, [newId]: { x, y } },
@@ -501,7 +633,7 @@ export const useEditor = create<EditorState>((set, get) => {
       commit((_p, sys) => {
         const g = sys.graph;
         g.edges = g.edges.filter((e) => !(e.to.nodeId === to.nodeId && e.to.portId === to.portId));
-        g.edges.push({ id: `e${Date.now()}_${Math.floor(Math.random() * 1e4)}`, from, to });
+        g.edges.push({ id: nextEdgeId(g), from, to });
       });
     },
 
@@ -542,15 +674,15 @@ export const useEditor = create<EditorState>((set, get) => {
 
     setActiveSystem(id) {
       if (!get().project.systems.some((s) => s.id === id)) return;
-      set({ activeSystemId: id, selectedNodeId: null });
-      persist(get().project, get().positions, id);
+      set({ activeSystemId: id, selectedNodeId: null, saveError: persist(get().project, get().positions, id) });
     },
 
     addSystem() {
       const p0 = get().project;
       const base = Number(/\d+/.exec(nextNodeId(p0))?.[0] ?? '1');
       const n = p0.systems.length + 1;
-      const sys = makeSystem(`emitter ${n}`, base);
+      // the first emitter in a project is "default"; the rest are numbered
+      const sys = makeSystem(p0.systems.length === 0 ? 'default' : `emitter ${n}`, base);
       const layout = autoLayout(sys.graph);
       commit(
         (p) => {
@@ -609,6 +741,19 @@ export const useEditor = create<EditorState>((set, get) => {
 
     setActiveBlend(mode) {
       commit((_p, sys) => { sys.blendMode = mode; }, true);
+    },
+
+    moveSystem(id, dir) {
+      // the preview builds one engine per emitter in this order and composites
+      // them in the order it built them, so a reorder is a re-create
+      commit((p) => {
+        const i = p.systems.findIndex((x) => x.id === id);
+        const j = i + dir;
+        if (i < 0 || j < 0 || j >= p.systems.length) return;
+        const moved = p.systems[i]!;
+        p.systems[i] = p.systems[j]!;
+        p.systems[j] = moved;
+      }, true);
     },
 
     setSubParent(childId, parentId) {
@@ -797,6 +942,14 @@ export const useEditor = create<EditorState>((set, get) => {
       set({ assetsOpen: open });
     },
 
+    setConfigOpen(open) {
+      set({ configOpen: open });
+    },
+
+    setConfigSection(section) {
+      set({ configSection: section });
+    },
+
     removeTexture(id) {
       commit((p) => {
         p.textures = (p.textures ?? []).filter((t) => t.id !== id);
@@ -845,7 +998,7 @@ export const useEditor = create<EditorState>((set, get) => {
           w: rect?.w ?? 420,
           h: rect?.h ?? 260,
           title: 'Comment',
-          color: '#a78bfa',
+          color: 'oklch(0.72 0 0)',
         });
       });
     },
@@ -874,7 +1027,7 @@ export const useEditor = create<EditorState>((set, get) => {
           w: 220,
           h: 150,
           text: 'Double-click to edit…',
-          color: '#fbbf24',
+          color: 'oklch(0.82 0 0)',
         });
       });
     },
@@ -890,6 +1043,145 @@ export const useEditor = create<EditorState>((set, get) => {
       commit((p) => {
         if (p.annotations) p.annotations.notes = p.annotations.notes.filter((x) => x.id !== id);
       });
+    },
+
+    pasteNodes(payload, at) {
+      const fresh: string[] = [];
+      commit(
+        (p, sys) => {
+          // knobs first: a pasted param.ref has to point at something, and a
+          // knob of the same NAME already here is the one it should reuse
+          const paramIdMap = new Map<string, string>();
+          for (const src of payload.params) {
+            const existing = p.params.find((x) => x.name === src.name);
+            if (existing) {
+              paramIdMap.set(src.id, existing.id);
+              continue;
+            }
+            const id = nextParamId(p);
+            p.params.push({ ...structuredClone(src), id, name: uniqueParamName(p, src.name) });
+            paramIdMap.set(src.id, id);
+          }
+
+          const nodeIdMap = new Map<string, string>();
+          for (const src of payload.nodes) {
+            // safe to ask each time here: the node IS pushed before the next
+            // call, so the scan sees it
+            const id = nextNodeId(p);
+            nodeIdMap.set(src.id, id);
+            const node: Node = structuredClone(src);
+            node.id = id;
+            if (node.structural?.param) {
+              node.structural = {
+                ...node.structural,
+                param: paramIdMap.get(node.structural.param) ?? '',
+              };
+            }
+            if (node.knobBindings) {
+              node.knobBindings = Object.fromEntries(
+                Object.entries(node.knobBindings).map(([port, pid]) => [
+                  port,
+                  paramIdMap.get(pid) ?? pid,
+                ]),
+              );
+            }
+            sys.graph.nodes.push(node);
+            fresh.push(id);
+          }
+
+          for (const e of payload.edges) {
+            const from = nodeIdMap.get(e.from.nodeId);
+            const to = nodeIdMap.get(e.to.nodeId);
+            if (from === undefined || to === undefined) continue;
+            sys.graph.edges.push({
+              id: nextEdgeId(sys.graph),
+              from: { nodeId: from, portId: e.from.portId },
+              to: { nodeId: to, portId: e.to.portId },
+            });
+          }
+        },
+        false,
+        undefined,
+        (_p, prev) => {
+          const positions = { ...prev.positions };
+          payload.nodes.forEach((src, i) => {
+            const id = fresh[i];
+            if (id === undefined) return;
+            const off = payload.offsets[src.id] ?? { x: 0, y: 0 };
+            positions[id] = { x: at.x + off.x, y: at.y + off.y };
+          });
+          return { positions, selectedNodeId: fresh[0] ?? null };
+        },
+      );
+      return fresh;
+    },
+
+    duplicateSystem(id) {
+      const payload = copyEmitter(get().project, id);
+      if (payload) get().pasteEmitter(payload);
+    },
+
+    pasteEmitter(payload) {
+      let newId = '';
+      const idMap = new Map<string, string>();
+      commit(
+        (p) => {
+          const paramIdMap = new Map<string, string>();
+          for (const src of payload.params) {
+            const existing = p.params.find((x) => x.name === src.name);
+            if (existing) {
+              paramIdMap.set(src.id, existing.id);
+              continue;
+            }
+            const pid = nextParamId(p);
+            p.params.push({ ...structuredClone(src), id: pid, name: uniqueParamName(p, src.name) });
+            paramIdMap.set(src.id, pid);
+          }
+
+          newId = nextSystemId(p);
+          const sys: System = structuredClone(payload.system);
+          sys.id = newId;
+          sys.name = uniqueSystemName(p, payload.system.name);
+          // node ids are unique across the WHOLE project (positions are keyed by
+          // bare node id), so every node in the copy needs a fresh one
+          // `nextNodeId` scans the project for the highest n<number>, and the
+          // copy is not in the project yet — so take the number once and count
+          // up locally rather than asking for the same id every iteration
+          let next = Number(/\d+/.exec(nextNodeId(p))?.[0] ?? '1');
+          for (const n of sys.graph.nodes) {
+            const id = `n${next++}`;
+            idMap.set(n.id, id);
+            n.id = id;
+            if (n.structural?.param) {
+              n.structural = { ...n.structural, param: paramIdMap.get(n.structural.param) ?? '' };
+            }
+            if (n.knobBindings) {
+              n.knobBindings = Object.fromEntries(
+                Object.entries(n.knobBindings).map(([port, pid]) => [port, paramIdMap.get(pid) ?? pid]),
+              );
+            }
+          }
+          sys.graph.edges = sys.graph.edges.map((e, i) => ({
+            id: `e${i + 1}`,
+            from: { nodeId: idMap.get(e.from.nodeId) ?? e.from.nodeId, portId: e.from.portId },
+            to: { nodeId: idMap.get(e.to.nodeId) ?? e.to.nodeId, portId: e.to.portId },
+          }));
+          p.systems.push(sys);
+          if (payload.texture) p.systemTextures = { ...(p.systemTextures ?? {}), [newId]: payload.texture };
+          if (payload.mask) p.systemMasks = { ...(p.systemMasks ?? {}), [newId]: structuredClone(payload.mask) };
+          if (payload.path) p.systemPaths = { ...(p.systemPaths ?? {}), [newId]: structuredClone(payload.path) };
+        },
+        true,
+        undefined,
+        (_p, prev) => {
+          const positions = { ...prev.positions };
+          for (const [oldId, id] of idMap) {
+            const at = payload.positions[oldId];
+            if (at) positions[id] = { ...at };
+          }
+          return { positions, activeSystemId: newId, selectedNodeId: null };
+        },
+      );
     },
 
     lockAnnotations(locked) {
@@ -925,6 +1217,16 @@ export const useEditor = create<EditorState>((set, get) => {
       commit((p) => {
         p.reference = { ...DEFAULT_REFERENCE, ...(p.reference ?? {}), ...patch };
       }, false, 'reference');
+    },
+
+    setPreviewBackground(patch) {
+      commit((p) => {
+        p.previewBackground = {
+          ...DEFAULT_PREVIEW_BACKGROUND,
+          ...(p.previewBackground ?? {}),
+          ...patch,
+        };
+      }, false, 'previewBackground');
     },
 
     undo() {

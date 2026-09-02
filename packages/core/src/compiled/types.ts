@@ -19,7 +19,17 @@ export interface CompiledParticlesHandle {
   /** Step the simulation and render one frame. Call once per rAF tick. */
   update(dtSeconds: number): void;
   /** Move where new particles are born (canvas pixels). */
-  setEmitter(x: number, y: number): void;
+  /**
+   * Move where new particles are born (world/canvas pixels).
+   *
+   * `teleport` moves the emitter WITHOUT counting the distance travelled. That
+   * distance is what `rateOverDistance` turns into spawns — the feature that
+   * lays a trail behind a dragged emitter — so jumping the emitter somewhere
+   * for one frame otherwise fires a spawn proportional to how far it jumped,
+   * and another one when it jumps back. Teleport when the move is a cut rather
+   * than a motion: placing a one-off burst, or repositioning between shots.
+   */
+  setEmitter(x: number, y: number, teleport?: boolean): void;
   /** Emit an extra burst next frame. */
   spawnBurst(count: number): void;
   /** Set a named knob live — writes a value-table slot, never recompiles. */
@@ -34,7 +44,37 @@ export interface CompiledParticlesHandle {
   /** Reset the pool + scheduler (§11.5 restart). */
   restart(): void;
   /** Whether the canvas is cleared each frame (default true). */
+  /**
+   * How much world the canvas shows, live.
+   *
+   * `1` maps one world unit to one canvas PIXEL, so on a 2x-density display an
+   * effect authored at 100px covers 50 CSS px — pass `1 / devicePixelRatio` to
+   * make world units device-independent. Above 1 shows more world in the same
+   * canvas (zoom out), below 1 less (zoom in), and because it changes what the
+   * renderer draws rather than stretching a finished image, it stays sharp at
+   * any level. Emitter coordinates stay in canvas pixels.
+   */
+  zoom: number;
+  /**
+   * Slide the view without moving the effect, in world units.
+   *
+   * Panning by transforming the canvas ELEMENT moves finished pixels: the drawn
+   * area slides out of the viewport and leaves an empty margin, and it does not
+   * combine with a rendered zoom. This shifts the window the renderer draws
+   * through instead.
+   */
+  viewOffset: [number, number];
   autoClear: boolean;
+  /**
+   * What `autoClear` clears to, as straight (non-premultiplied) `[r,g,b,a]` in
+   * 0..1. Defaults to fully transparent.
+   *
+   * A light blend mode can only add to pixels that are IN this framebuffer, so
+   * clearing to the colour the effect will really play on is what makes `add`
+   * and `screen` show what they will actually do. Over a transparent clear
+   * there is nothing to add to.
+   */
+  clearColor: [number, number, number, number];
   /**
    * Alive particle count. webgl2: synchronous readback on call (debug-tier);
    * webgpu: the §13.11 async counter readback, refreshed every 30 frames.

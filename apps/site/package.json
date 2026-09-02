@@ -16,6 +16,8 @@
     "@pylinka/core": "workspace:*",
     "@pylinka/graph": "workspace:*",
     "@xyflow/react": "^12.3.0",
+    "driver.js": "^1.8.0",
+    "lucide-react": "^1.39.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zustand": "^5.0.0"
@@ -28,8 +30,8 @@
     "@types/react-dom": "^19.0.0",
     "astro": "^5.1.0",
     "pixi.js": "^8.19.0",
+    "playwright": "1.61.1",
     "tailwindcss": "^4.0.0",
-    "typescript": "^5.7.2",
-    "playwright": "1.61.1"
+    "typescript": "^5.7.2"
   }
 }

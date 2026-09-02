@@ -34,6 +34,8 @@ export {
   type TextureInput,
   type TextureImage,
 } from './texture.js';
+// the mask options CreateOptions takes, so a caller can name the type
+export type { CompiledMaskOptions, MaskTable } from '../compiled/mask.js';
 export {
   registerSimBackend,
   getSimBackendFactory,

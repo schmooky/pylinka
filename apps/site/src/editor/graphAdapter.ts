@@ -33,7 +33,8 @@ export function toFlow(
   for (const n of sys.graph.nodes) {
     nodes.push({
       id: n.id,
-      type: 'pylinka',
+      // a knob draws itself: name, range and live value on the node face
+      type: n.kind === 'param.ref' ? 'param' : 'pylinka',
       position: positions[n.id] ?? { x: 0, y: 0 },
       selected: n.id === selectedNodeId,
       data: { nodeId: n.id },

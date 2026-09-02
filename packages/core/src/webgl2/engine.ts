@@ -29,7 +29,7 @@ import type {
 } from '../compiled/types.js';
 import { KnobStore } from '../knobs.js';
 import { clampDt } from '../time.js';
-import { pickSystem } from '../webgpu/engine.js';
+import { pickSystem } from '../system.js';
 import { COMPILED_RENDER_FS, COMPILED_RENDER_VS } from './shaders.js';
 
 const STRIDE = WEBGL2_LAYOUT.strideBytes;
@@ -496,6 +496,8 @@ export class WebGL2CompiledSim {
 
     gl.enable(gl.BLEND);
     const mode = this.system.blendMode;
+    // additive blends alpha too — see webgl/engine.ts render() for why leaving
+    // the destination alpha alone makes the compositor discard the pixel
     if (mode === 'add') gl.blendFunc(gl.ONE, gl.ONE);
     else if (mode === 'screen') gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_COLOR, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -524,7 +526,8 @@ export class WebGL2CompiledSim {
 
   /** Same semantics as the WebGPU sim: zero-recompile for value edits. */
   applyProject(next: PylinkaProject, systemName?: string): boolean {
-    const sys = pickSystem(next, systemName ?? this.system.name);
+    // by ID first: a rename must not silently rebind this handle to another system
+    const sys = pickSystem(next, systemName ?? this.system.name, this.system.id);
     if (sys === undefined || sys.capacity !== this.capacity) return false;
 
     for (const pd of next.params) {
@@ -606,7 +609,9 @@ export function createParticles(
   if (system === undefined) throw new Error('Project has no systems.');
 
   const canvas = gl.canvas as HTMLCanvasElement;
-  const zoom = opts.zoom ?? 1;
+  let zoom = opts.zoom ?? 1;
+  let viewX = 0;
+  let viewY = 0;
   const sizeScale = opts.sizeScale ?? 1;
   const maxDt = opts.maxDt ?? 0.05;
   const maskTable = buildMaskTable(opts.emissionMask);
@@ -651,6 +656,7 @@ export function createParticles(
   let destroyed = false;
   const handle: CompiledParticlesHandle = {
     autoClear: true,
+    clearColor: [0, 0, 0, 0] as [number, number, number, number],
     backendName: 'webgl2',
     get stats() {
       return sim.stats;
@@ -674,16 +680,42 @@ export function createParticles(
       sim.step(dt);
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (this.autoClear) {
-        gl.clearColor(0, 0, 0, 0);
+        const [cr, cg, cb, ca] = this.clearColor;
+        // premultiplied target — scale by alpha or the clear arrives washed out
+        gl.clearColor(cr * ca, cg * ca, cb * ca, ca);
         gl.clear(gl.COLOR_BUFFER_BIT);
       }
       const w = canvas.width * zoom;
       const h = canvas.height * zoom;
-      sim.draw(2 / w, -2 / h, -1, 1, sizeScale);
+      // the last two arguments are the clip-space translation, so the view
+      // offset rides along for free: no shader change, just a shifted window
+      sim.draw(2 / w, -2 / h, -1 - (2 * viewX) / w, 1 + (2 * viewY) / h, sizeScale);
     },
-    setEmitter(x: number, y: number) {
-      sim.clock.ex = x * zoom;
-      sim.clock.ey = y * zoom;
+    setEmitter(x: number, y: number, teleport = false) {
+      // canvas pixels -> world, through the same mapping the renderer draws
+      // with, so a panned view does not drag the emitter with it
+      sim.clock.ex = x * zoom + viewX;
+      sim.clock.ey = y * zoom + viewY;
+      if (teleport) {
+        sim.clock.px = sim.clock.ex;
+        sim.clock.py = sim.clock.ey;
+      }
+    },
+    get viewOffset(): [number, number] {
+      return [viewX, viewY];
+    },
+    set viewOffset(v: [number, number]) {
+      if (Number.isFinite(v[0]) && Number.isFinite(v[1])) {
+        viewX = v[0];
+        viewY = v[1];
+      }
+    },
+    get zoom() {
+      return zoom;
+    },
+    set zoom(z: number) {
+      // a zoom of 0 divides the world by nothing; ignore it rather than blanking
+      if (Number.isFinite(z) && z > 0) zoom = z;
     },
     spawnBurst(count: number) {
       sim.clock.spawnBurst(count);

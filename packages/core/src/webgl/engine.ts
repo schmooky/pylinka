@@ -413,6 +413,8 @@ export class WebGL2Engine {
     gl.uniform1i(u.get('u_shape')!, p.shape);
     gl.uniform1f(u.get('u_shapeR')!, p.shapeRadius);
     gl.uniform2f(u.get('u_shapeSize')!, p.shapeSize[0], p.shapeSize[1]);
+    gl.uniform2f(u.get('u_shapeA')!, p.shapeA[0], p.shapeA[1]);
+    gl.uniform2f(u.get('u_shapeB')!, p.shapeB[0], p.shapeB[1]);
 
     const pf = p.pointFields;
     gl.uniform1f(u.get('u_pfCount')!, Math.min(pf.length, 4));
@@ -525,12 +527,13 @@ export class WebGL2Engine {
   }
 
   /** Draw the current state into the bound framebuffer at the given size. */
-  render(width: number, height: number, p: EngineParams): void {
+  render(width: number, height: number, p: EngineParams, viewX = 0, viewY = 0): void {
     if (this.lost || this.needsRebuild) return;
     const gl = this.gl;
     const u = this.uRender;
     gl.useProgram(this.renderProg);
     gl.uniform2f(u.get('u_resolution')!, width, height);
+    gl.uniform2f(u.get('u_viewOffset')!, viewX, viewY);
     gl.uniform4fv(u.get('u_colorFrom')!, p.colorFrom);
     gl.uniform4fv(u.get('u_colorTo')!, p.colorTo);
     gl.uniform1f(u.get('u_sizeFrom')!, p.sizeFrom * this.sizeScale);
@@ -568,8 +571,21 @@ export class WebGL2Engine {
     }
 
     gl.enable(gl.BLEND);
+    /*
+     * Additive has to blend the alpha too, however wrong that looks.
+     *
+     * The canvas is premultiplied, so the compositor reads its RGB as already
+     * scaled by alpha. Leaving dst alpha at 0 while RGB carries light is not a
+     * representable premultiplied colour, and the compositor throws the pixel
+     * away — measured: an additive emitter rendered NOTHING at all.
+     *
+     * So additive composites against whatever is inside this framebuffer, not
+     * against the page behind it. That is why the preview clears to its
+     * backdrop colour rather than to transparent (see `clearColor`): a light
+     * mode can only add to pixels that are actually here.
+     */
     if (p.blend === 'add') gl.blendFunc(gl.ONE, gl.ONE);
-    else if (p.blend === 'screen') gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_COLOR);
+    else if (p.blend === 'screen') gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_COLOR, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
     gl.bindVertexArray(this.renderVAOs[this.cur]!);
@@ -637,6 +653,8 @@ const UPDATE_UNIFORMS = [
   'u_shape',
   'u_shapeR',
   'u_shapeSize',
+  'u_shapeA',
+  'u_shapeB',
   'u_pfCount',
   'u_pfA',
   'u_pfB',
@@ -661,6 +679,7 @@ const UPDATE_UNIFORMS = [
 ];
 const RENDER_UNIFORMS = [
   'u_resolution',
+  'u_viewOffset',
   'u_colorFrom',
   'u_colorTo',
   'u_sizeFrom',

@@ -38,7 +38,7 @@ import {
   type CurveKey,
 } from '@pylinka/compiler';
 
-const ACCENT = '#a78bfa';
+const ACCENT = 'oklch(0.82 0 0)';
 // vertical view range — headroom so overshooting curves (back.out, anticipating
 // beziers) stay visible instead of clipping at the unit box.
 const V_MIN = -0.35;
@@ -597,7 +597,7 @@ export function PresetGrid({
             className="flex flex-col items-center gap-0.5 rounded-md border p-1 hover:bg-black/20"
             style={{
               borderColor: active ? ACCENT : 'var(--color-border)',
-              background: active ? 'color-mix(in oklab, #a78bfa 16%, transparent)' : 'transparent',
+              background: active ? 'color-mix(in oklab, var(--color-foreground) 14%, transparent)' : 'transparent',
             }}
             title={k}
             onClick={() => onChange(k)}>
@@ -638,7 +638,7 @@ export function EaseControl({
     <>
       <button
         ref={btnRef}
-        className="nodrag flex w-full items-center gap-2 rounded-md border px-1.5 py-1 text-left hover:border-[color:var(--accent,#a78bfa)]"
+        className="nodrag flex w-full items-center gap-2 rounded-md border px-1.5 py-1 text-left hover:border-foreground/40"
         style={{ borderColor: 'var(--color-border)', background: 'color-mix(in oklab, var(--color-card) 60%, transparent)' }}
         title="Click to pick or customize the ease curve"
         onPointerDown={(e) => e.stopPropagation()}

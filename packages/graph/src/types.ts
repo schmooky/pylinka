@@ -113,6 +113,18 @@ export interface PylinkaProject {
   params: ParamDef[];
   assets: Asset[];
   systems: System[];
+  /**
+   * Sub-emitter links: `child system id` → `parent system id`. The child's
+   * particles are born from the parent's, at the event the child's
+   * `output.deathBurst` names.
+   *
+   * This is part of the DOCUMENT, not editor decoration. It was an undeclared
+   * extra key for a while, written by the editor and read by nothing except
+   * the pixi runtime, so a project that looked complete in the editor lost its
+   * sub-emitters the moment a game loaded it — the systems all came back, and
+   * the child spawned at its own emitter instead of on its parent's deaths.
+   */
+  subEmitters?: Record<string, string>;
   /** presentation-only: never hashed, never read by runtime */
   editor?: EditorViewState;
 }
@@ -255,6 +267,10 @@ export type DiagnosticCode =
   | 'V011_UNKNOWN_ASSET'
   | 'V012_BAD_LOG_PARAM'
   | 'W101_CAPACITY_OVERFLOW'
+  | 'W104_BURST_CLAMPED'
+  | 'W105_ROTATION_UNSEEN'
+  | 'W106_SUB_EMITTER_HALF_LINKED'
+  | 'W107_EMITTER_NEVER_FIRES'
   | 'W102_HIGH_IMPACT'
   | 'W103_DEAD_NODE'
   | 'E201_UNKNOWN_KIND_PRESERVED';
