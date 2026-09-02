@@ -91,13 +91,12 @@ function roundSpriteWarning(project: EditorProject, system: System): Diagnostic 
 }
 
 /**
- * A sub-emitter needs BOTH halves, and each half is silent without the other.
+ * A burst node that nothing feeds.
  *
- * The link says which emitter's particles this one is born from; the
- * `output.deathBurst` node says how many and on which event. A burst node with
- * no parent spawns nothing at all — the node is simply never reached — and a
- * parent with no burst node gets one particle per event, which on a slow
- * parent looks like nothing much. Both read as "sub-emitters do not work".
+ * `output.deathBurst` says how many children a parent event makes; the LINK
+ * says which emitter those events come from. Without the link the node is
+ * never reached and the burst silently never fires — the one half that is
+ * genuinely broken rather than merely minimal.
  */
 function subEmitterWarning(project: EditorProject, system: System): Diagnostic | undefined {
   const burst = system.graph.nodes.find((n) => n.kind === 'output.deathBurst');
@@ -113,13 +112,13 @@ function subEmitterWarning(project: EditorProject, system: System): Diagnostic |
       nodeId: burst.id,
     };
   }
-  if (burst === undefined && parent !== undefined) {
-    return {
-      severity: 'warning',
-      code: 'W106_SUB_EMITTER_HALF_LINKED',
-      message: `Born from “${parent.name}”, but with no “Burst from parent” node it spawns a single particle per event. Add one to choose how many, and whether they come on birth or on death.`,
-    };
-  }
+  /*
+   * The other half — a parent with no burst node — is NOT a warning. It spawns
+   * one particle per event, which is a perfectly good effect and exactly what
+   * Settings gives you when you pick a parent; saying so in red across the
+   * graph is nagging about a working configuration.
+   */
+  void parent;
   return undefined;
 }
 
