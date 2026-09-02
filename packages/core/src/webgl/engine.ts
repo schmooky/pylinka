@@ -598,6 +598,28 @@ export class WebGL2Engine {
    * is a synchronous GPU readback and stalls the pipeline — use for debugging /
    * a stats HUD, not every frame.
    */
+  /**
+   * Empty the pool.
+   *
+   * Live edits normally leave the particles alone — you are tuning a running
+   * effect and wiping it on every keystroke would be useless. A STRUCTURAL
+   * change is different: delete the node that shaped the spawn area and the
+   * particles already in the air keep the old shape for the rest of their
+   * lives, which reads as the deletion not having taken. The compiled
+   * backends already clear here, because a changed graph means a changed
+   * kernel; this brings the interpreted one in line.
+   */
+  resetPool(): void {
+    const gl = this.gl;
+    const zero = new Float32Array(this.capacity * STATE_FLOATS);
+    for (const b of this.bufs) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, zero);
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    this.spawnBase = 0;
+  }
+
   aliveCount(): number {
     if (this.lost || this.needsRebuild) return 0;
     const gl = this.gl;

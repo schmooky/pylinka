@@ -17,7 +17,7 @@
  * fx.setKnob('windPower', 40);
  * ```
  */
-import type { PylinkaProject } from '@pylinka/graph';
+import { hashGraph, type PylinkaProject } from '@pylinka/graph';
 import { SpawnScheduler } from '../scheduler.js';
 import { clampDt } from '../time.js';
 import { featuresOf, WebGL2Engine, type AtlasConfig, type MaskConfig } from './engine.js';
@@ -426,6 +426,9 @@ export function createParticles(
 
   const canvas = gl.canvas as HTMLCanvasElement;
   let zoom = opts.zoom ?? 1;
+  // what the graph looked like last time: a change here means a structural
+  // edit, not a value one
+  let graphHash = hashGraph(system.graph);
   let viewX = 0;
   let viewY = 0;
   let ex = (canvas.width * zoom) / 2;
@@ -496,6 +499,30 @@ export function createParticles(
       const was = featuresOf(params);
       const now = featuresOf(np);
       if (was.obstacles !== now.obstacles || was.colliders !== now.colliders) return false;
+      /*
+       * A STRUCTURAL edit starts from now, not from whatever is still in the
+       * air.
+       *
+       * Uniforms are read per frame, so a changed value reaches the next spawn
+       * immediately — that part always worked. Particles already alive do not
+       * re-read anything, though: delete the node that shaped the spawn area
+       * and everything currently on screen keeps the old shape until it dies,
+       * which with a two-second lifetime is indistinguishable from the
+       * deletion not having taken. The next unrelated edit that happens to
+       * force a rebuild then snaps it, so it looks like the fix was that edit.
+       *
+       * The compiled backends already clear on a structural change, because a
+       * changed graph means a changed kernel and the old state is not theirs
+       * to keep. This makes the interpreted one behave the same way. VALUE
+       * edits still leave the pool alone: you are tuning a running effect, and
+       * wiping it on every keystroke would make tuning impossible.
+       */
+      const nextHash = hashGraph(sys.graph);
+      if (nextHash !== graphHash) {
+        graphHash = nextHash;
+        engine.resetPool();
+        scheduler.reset();
+      }
       curSystem = sys;
       curParams = next.params;
       Object.assign(params, np);
