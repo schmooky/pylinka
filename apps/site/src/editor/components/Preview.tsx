@@ -6,7 +6,7 @@ import {
   type ParticlesHandle,
 } from '@pylinka/core/webgl';
 import { createCompiledParticles, type CompiledParticlesHandle } from '@pylinka/core/gpu';
-import { createPathDriver, type PathDriver } from '@pylinka/core';
+import { createPathDriver, systemsInBuildOrder, type PathDriver } from '@pylinka/core';
 import type { System } from '@pylinka/graph';
 import { useEditor } from '../store';
 import { usePreview, type BackendChoice } from '../previewStore';
@@ -307,26 +307,10 @@ export function Preview() {
       }
       return;
     }
-    const enabled = proj.systems.filter((s) => s.enabled);
-    const enabledIds = new Set(enabled.map((s) => s.id));
-    const links = proj.subEmitters ?? {};
-    // effective parent = the declared parent, only if it's also enabled
-    const parentOf = (id: string): string | undefined => {
-      const p = links[id];
-      return p && enabledIds.has(p) ? p : undefined;
-    };
-    // topological order: a system comes after its parent
-    const ordered: typeof enabled = [];
-    const placed = new Set<string>();
-    let guard = enabled.length + 1;
-    while (ordered.length < enabled.length && guard-- > 0) {
-      for (const s of enabled) {
-        if (placed.has(s.id)) continue;
-        const par = parentOf(s.id);
-        if (!par || placed.has(par)) { ordered.push(s); placed.add(s.id); }
-      }
-    }
-    for (const s of enabled) if (!placed.has(s.id)) ordered.push(s); // cycle fallback
+    // the same ordering a consumer gets from core, rather than a second copy
+    // of it that can drift: parents first, links filtered to enabled systems
+    const { systems: ordered, links: linkMap } = systemsInBuildOrder(proj);
+    const parentOf = (id: string): string | undefined => linkMap.get(id);
 
     const byId = new Map<string, AnyHandle>();
     const handles: AnyHandle[] = [];

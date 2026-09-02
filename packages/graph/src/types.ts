@@ -113,6 +113,18 @@ export interface PylinkaProject {
   params: ParamDef[];
   assets: Asset[];
   systems: System[];
+  /**
+   * Sub-emitter links: `child system id` → `parent system id`. The child's
+   * particles are born from the parent's, at the event the child's
+   * `output.deathBurst` names.
+   *
+   * This is part of the DOCUMENT, not editor decoration. It was an undeclared
+   * extra key for a while, written by the editor and read by nothing except
+   * the pixi runtime, so a project that looked complete in the editor lost its
+   * sub-emitters the moment a game loaded it — the systems all came back, and
+   * the child spawned at its own emitter instead of on its parent's deaths.
+   */
+  subEmitters?: Record<string, string>;
   /** presentation-only: never hashed, never read by runtime */
   editor?: EditorViewState;
 }

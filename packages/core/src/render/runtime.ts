@@ -254,8 +254,7 @@ function linksByName(project: PylinkaProject, opts: CreateOptions): Map<string, 
     }
     return out;
   }
-  const fromProject = (project as PylinkaProject & { subEmitters?: Record<string, string> }).subEmitters;
-  for (const [childId, parentId] of Object.entries(fromProject ?? {})) {
+  for (const [childId, parentId] of Object.entries(project.subEmitters ?? {})) {
     const child = enabled.get(childId);
     const parent = enabled.get(parentId);
     if (child !== undefined && parent !== undefined && child !== parent) out.set(child, parent);
