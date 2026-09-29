@@ -7,7 +7,7 @@ import { RECIPES, type RecipeAtlas } from '../recipes/data';
 import type { CommentFrame, EditorProject, EditorTexture, EmissionMaskData, EmitterPathData, PreviewBackground, ReferenceImage, ReferenceSettings, StickyNote } from './types';
 import { DEFAULT_PREVIEW_BACKGROUND, DEFAULT_REFERENCE } from './types';
 import { generateAnnotations } from './annotate';
-import { copyEmitter, type ClipboardPayload } from './clipboard';
+import { copyEmitter, emitterPayload, type ClipboardPayload } from './clipboard';
 
 type NodesPayload = Extract<ClipboardPayload, { kind: 'nodes' }>;
 type EmitterPayload = Extract<ClipboardPayload, { kind: 'emitter' }>;
@@ -61,7 +61,7 @@ function normalize(p: EditorProject): EditorProject {
   return p;
 }
 
-function forkRecipe(slug: string): EditorProject | undefined {
+export function forkRecipe(slug: string): EditorProject | undefined {
   const recipe = RECIPES.find((r) => r.slug === slug);
   if (!recipe) return undefined;
   const project = normalize(structuredClone(recipe.project) as EditorProject);
@@ -109,6 +109,60 @@ function forkRecipe(slug: string): EditorProject | undefined {
     project.annotations = generateAnnotations(project, nodePositions, `${recipe.title}\n\n${recipe.oneLiner}`);
   }
   return project;
+}
+
+/**
+ * Add one emitter payload to a project in place, rewriting every id so it can
+ * never merge into something already there. Node ids are project-wide (editor
+ * positions are keyed by bare node id), so `idMap` is shared across calls when
+ * several emitters are added in one step. Returns the new system id.
+ */
+function insertEmitter(p: EditorProject, payload: EmitterPayload, idMap: Map<string, string>): string {
+  const paramIdMap = new Map<string, string>();
+  for (const src of payload.params) {
+    const existing = p.params.find((x) => x.name === src.name);
+    if (existing) {
+      paramIdMap.set(src.id, existing.id);
+      continue;
+    }
+    const pid = nextParamId(p);
+    p.params.push({ ...structuredClone(src), id: pid, name: uniqueParamName(p, src.name) });
+    paramIdMap.set(src.id, pid);
+  }
+
+  const newId = nextSystemId(p);
+  const sys: System = structuredClone(payload.system);
+  sys.id = newId;
+  sys.name = uniqueSystemName(p, payload.system.name);
+  // `nextNodeId` scans the project for the highest n<number>, and the copy is
+  // not in the project yet — so take the number once and count up locally
+  // rather than asking for the same id every iteration
+  let next = Number(/\d+/.exec(nextNodeId(p))?.[0] ?? '1');
+  const local = new Map<string, string>();
+  for (const n of sys.graph.nodes) {
+    const id = `n${next++}`;
+    local.set(n.id, id);
+    idMap.set(n.id, id);
+    n.id = id;
+    if (n.structural?.param) {
+      n.structural = { ...n.structural, param: paramIdMap.get(n.structural.param) ?? '' };
+    }
+    if (n.knobBindings) {
+      n.knobBindings = Object.fromEntries(
+        Object.entries(n.knobBindings).map(([port, pid]) => [port, paramIdMap.get(pid) ?? pid]),
+      );
+    }
+  }
+  sys.graph.edges = sys.graph.edges.map((e, i) => ({
+    id: `e${i + 1}`,
+    from: { nodeId: local.get(e.from.nodeId) ?? e.from.nodeId, portId: e.from.portId },
+    to: { nodeId: local.get(e.to.nodeId) ?? e.to.nodeId, portId: e.to.portId },
+  }));
+  p.systems.push(sys);
+  if (payload.texture) p.systemTextures = { ...(p.systemTextures ?? {}), [newId]: payload.texture };
+  if (payload.mask) p.systemMasks = { ...(p.systemMasks ?? {}), [newId]: structuredClone(payload.mask) };
+  if (payload.path) p.systemPaths = { ...(p.systemPaths ?? {}), [newId]: structuredClone(payload.path) };
+  return newId;
 }
 
 function load(): EditorProject {
@@ -292,6 +346,12 @@ interface EditorState {
   duplicateSystem(id: string): void;
   /** Add an emitter from a clipboard payload, and make it active. */
   pasteEmitter(payload: EmitterPayload): void;
+  /**
+   * Add every emitter of another project (a recipe, a saved project) to this
+   * one — with its textures, masks, paths, knobs and sub-emitter links — as a
+   * single undo step. The first added emitter becomes active.
+   */
+  addEmittersFrom(src: EditorProject): void;
   /** lock/unlock EVERY annotation on the active system in one go */
   lockAnnotations(locked: boolean): void;
   // scene reference (project-level asset library + how it sits under the preview)
@@ -1126,50 +1186,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const idMap = new Map<string, string>();
       commit(
         (p) => {
-          const paramIdMap = new Map<string, string>();
-          for (const src of payload.params) {
-            const existing = p.params.find((x) => x.name === src.name);
-            if (existing) {
-              paramIdMap.set(src.id, existing.id);
-              continue;
-            }
-            const pid = nextParamId(p);
-            p.params.push({ ...structuredClone(src), id: pid, name: uniqueParamName(p, src.name) });
-            paramIdMap.set(src.id, pid);
-          }
-
-          newId = nextSystemId(p);
-          const sys: System = structuredClone(payload.system);
-          sys.id = newId;
-          sys.name = uniqueSystemName(p, payload.system.name);
-          // node ids are unique across the WHOLE project (positions are keyed by
-          // bare node id), so every node in the copy needs a fresh one
-          // `nextNodeId` scans the project for the highest n<number>, and the
-          // copy is not in the project yet — so take the number once and count
-          // up locally rather than asking for the same id every iteration
-          let next = Number(/\d+/.exec(nextNodeId(p))?.[0] ?? '1');
-          for (const n of sys.graph.nodes) {
-            const id = `n${next++}`;
-            idMap.set(n.id, id);
-            n.id = id;
-            if (n.structural?.param) {
-              n.structural = { ...n.structural, param: paramIdMap.get(n.structural.param) ?? '' };
-            }
-            if (n.knobBindings) {
-              n.knobBindings = Object.fromEntries(
-                Object.entries(n.knobBindings).map(([port, pid]) => [port, paramIdMap.get(pid) ?? pid]),
-              );
-            }
-          }
-          sys.graph.edges = sys.graph.edges.map((e, i) => ({
-            id: `e${i + 1}`,
-            from: { nodeId: idMap.get(e.from.nodeId) ?? e.from.nodeId, portId: e.from.portId },
-            to: { nodeId: idMap.get(e.to.nodeId) ?? e.to.nodeId, portId: e.to.portId },
-          }));
-          p.systems.push(sys);
-          if (payload.texture) p.systemTextures = { ...(p.systemTextures ?? {}), [newId]: payload.texture };
-          if (payload.mask) p.systemMasks = { ...(p.systemMasks ?? {}), [newId]: structuredClone(payload.mask) };
-          if (payload.path) p.systemPaths = { ...(p.systemPaths ?? {}), [newId]: structuredClone(payload.path) };
+          newId = insertEmitter(p, payload, idMap);
         },
         true,
         undefined,
@@ -1180,6 +1197,55 @@ export const useEditor = create<EditorState>((set, get) => {
             if (at) positions[id] = { ...at };
           }
           return { positions, activeSystemId: newId, selectedNodeId: null };
+        },
+      );
+    },
+
+    addEmittersFrom(src) {
+      const idMap = new Map<string, string>();
+      const sysMap = new Map<string, string>();
+      const srcPositions = src.editor?.nodePositions ?? {};
+      commit(
+        (p) => {
+          // textures: reuse one already in the project with the same image,
+          // so adding the same recipe twice does not duplicate its atlas
+          const texMap = new Map<string, string>();
+          for (const t of src.textures ?? []) {
+            const same = (p.textures ?? []).find((x) => x.src === t.src && x.cols === t.cols && x.rows === t.rows);
+            if (same) texMap.set(t.id, same.id);
+            else {
+              const id = crypto.randomUUID();
+              p.textures = [...(p.textures ?? []), { ...structuredClone(t), id }];
+              texMap.set(t.id, id);
+            }
+          }
+          for (const sys of src.systems) {
+            const texId = src.systemTextures?.[sys.id];
+            const payload: EmitterPayload = {
+              ...emitterPayload(sys, {}),
+              params: src.params,
+              texture: texId ? texMap.get(texId) ?? null : null,
+              mask: src.systemMasks?.[sys.id] ?? null,
+              path: src.systemPaths?.[sys.id] ?? null,
+            };
+            sysMap.set(sys.id, insertEmitter(p, payload, idMap));
+          }
+          // sub-emitter links travel with their emitters
+          for (const [child, parent] of Object.entries(src.subEmitters ?? {})) {
+            const c = sysMap.get(child), pa = sysMap.get(parent);
+            if (c && pa) p.subEmitters = { ...(p.subEmitters ?? {}), [c]: pa };
+          }
+        },
+        true,
+        undefined,
+        (_p, prev) => {
+          const positions = { ...prev.positions };
+          for (const [oldId, id] of idMap) {
+            const at = srcPositions[oldId];
+            if (at) positions[id] = { ...at };
+          }
+          const first = sysMap.get(src.systems[0]?.id ?? '');
+          return { positions, activeSystemId: first ?? prev.activeSystemId, selectedNodeId: null };
         },
       );
     },

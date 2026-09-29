@@ -29,6 +29,8 @@ import { ProjectsMenu } from './components/ProjectsMenu';
 import { SaveState } from './components/SaveState';
 import { Shortcuts } from './components/Shortcuts';
 import { AssetManager } from './components/AssetManager';
+import { ParticleCard } from './components/ParticleCard';
+import { LibraryPanel, useLibraryOpen } from './components/LibraryPanel';
 
 const nodeTypes = { pylinka: PylinkaNode, param: ParamNode, comment: CommentNode, note: NoteNode };
 
@@ -203,6 +205,7 @@ function EditorApp() {
   }, [dirty, saveError]);
 
   const [menu, setMenu] = useState<MenuTarget | null>(null);
+  const [libraryOpen, setLibraryOpen] = useLibraryOpen();
   // the shortcut handler is registered once, so it reads these through refs
   const rfNodesRef = useRef<RFNode[]>([]);
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -318,6 +321,12 @@ function EditorApp() {
           Assets
         </button>
         <button
+          onClick={() => setLibraryOpen(!libraryOpen)}
+          className={`rounded-md px-2 py-1 text-[11px] ${libraryOpen ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+          title="Recipes, starters and your saved projects — preview them and add them to this project">
+          Library
+        </button>
+        <button
           onClick={startTour}
           className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
           title="Walk through building an effect: emitters, nodes and how to link them">
@@ -407,6 +416,7 @@ function EditorApp() {
               {diags.loose.map((d) => d.message).join(' · ')}
             </div>
           )}
+          <ParticleCard offsetTop={diags.loose.length > 0 ? 34 : 0} />
           {!menu && (
             <span className="pointer-events-none absolute bottom-2 right-3 z-10 text-[10px] text-muted-foreground/70">
               right-click for nodes
@@ -418,6 +428,7 @@ function EditorApp() {
         <div className="min-w-0 flex-1">
           <Preview />
         </div>
+        {libraryOpen && <LibraryPanel onClose={() => setLibraryOpen(false)} />}
       </div>
       <AssetManager />
       <ConfigModal />

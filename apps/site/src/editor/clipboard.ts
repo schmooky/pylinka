@@ -12,7 +12,7 @@
  * copy into the original.
  */
 import type { Node, ParamDef, System } from '@pylinka/graph';
-import type { EditorProject } from './types';
+import type { EditorProject, EmissionMaskData, EmitterPathData } from './types';
 
 const TAG = 'pylinka/clipboard@1';
 
@@ -35,8 +35,8 @@ interface EmitterPayload {
   positions: Record<string, { x: number; y: number }>;
   /** editor extras that belong to the emitter rather than the graph */
   texture?: string | null;
-  mask?: EditorProject['systemMasks'] extends Record<string, infer M> ? M : never;
-  path?: EditorProject['systemPaths'] extends Record<string, infer P> ? P : never;
+  mask?: EmissionMaskData | null;
+  path?: EmitterPathData | null;
 }
 
 export type ClipboardPayload = NodesPayload | EmitterPayload;

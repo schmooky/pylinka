@@ -8,6 +8,9 @@ import { useDiagnostics } from '../diagnostics';
 import { usePreview } from '../previewStore';
 import { isInterpreted } from '@pylinka/core/webgl';
 import { EaseControl } from './CurvePicker';
+import { LifePreview } from './LifePreview';
+import { ParticleThumb, useSystemTexture } from './ParticleThumb';
+import { lifeSeconds, trackFor } from '../lifePreview';
 
 const HEADER_H = 30;
 const ROW_H = 26;
@@ -119,6 +122,8 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
   const unbindKnob = useEditor((s) => s.unbindKnob);
   const toggleNodeDisabled = useEditor((s) => s.toggleNodeDisabled);
   const muted = useEditor((s) => s.project.disabledNodes?.includes(nodeId) ?? false);
+  const system = useEditor((s) => s.system());
+  const systemTex = useSystemTexture(system.id);
   /*
    * The interpreted backend recognises node PATTERNS rather than evaluating the
    * graph, so a kind it does not know contributes nothing — silently, until you
@@ -135,6 +140,18 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
     for (const e of edges) if (e.to.nodeId === nodeId) set.add(e.to.portId);
     return set;
   }, [edges, nodeId]);
+
+  // what this node does to one particle over its life, looped — or, for a
+  // texture node, the sprite it picks. Undefined for nodes with nothing to show.
+  const preview = useMemo(() => {
+    if (!node) return undefined;
+    if (node.kind.startsWith('tex.')) {
+      return { kind: 'tex' as const, tex: textures?.find((t) => t.id === node.structural?.asset) ?? null };
+    }
+    const track = trackFor(system, node);
+    return track ? { kind: 'life' as const, track, life: lifeSeconds(system) } : undefined;
+  }, [node, system, textures]);
+  const tracks = useMemo(() => (preview?.kind === 'life' ? [preview.track] : []), [preview]);
 
   if (!node) return null;
   const schema = getSchema(V1_CATALOG, node.kind);
@@ -257,13 +274,21 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
 
         {structural.map((s) =>
           s.key === 'ease' ? (
-            <div key={s.key} className="flex flex-col justify-center" style={{ height: EASE_H }}>
-              <EaseControl
-                value={node.structural?.[s.key] ?? s.default}
-                onChange={(v) => setStructural(node.id, s.key, v)}
-                nodeId={node.id}
-                nodeLabel={schema?.label ?? node.kind}
-              />
+            <div key={s.key} className="flex items-center gap-1.5" style={{ height: EASE_H }}>
+              <div className="min-w-0 flex-1">
+                <EaseControl
+                  value={node.structural?.[s.key] ?? s.default}
+                  onChange={(v) => setStructural(node.id, s.key, v)}
+                  nodeId={node.id}
+                  nodeLabel={schema?.label ?? node.kind}
+                />
+              </div>
+              {/* the curve says how; this says what it looks like on a particle */}
+              {preview?.kind === 'life' && !muted && (
+                <span title={`One particle over its ${preview.life.toFixed(1)}s life, looped — ${preview.track.prop} only`}>
+                  <LifePreview tracks={tracks} tex={systemTex} life={preview.life} width={46} height={46} />
+                </span>
+              )}
             </div>
           ) : s.key === 'asset' ? (
             <div key={s.key} className="flex items-center gap-1" style={{ height: STRUCT_H }}>
@@ -306,6 +331,23 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
             <span className="inline-block h-1 w-1 rounded-full" style={{ background: typeColor[p.type] }} />
           </div>
         ))}
+
+        {/* below the ports, so it never moves a handle */}
+        {preview?.kind === 'life' && !muted && !structural.some((x) => x.key === 'ease') && (
+          <div className="mb-1 mt-0.5" title={`One particle over its ${preview.life.toFixed(1)}s life, looped — ${preview.track.prop} only`}>
+            <LifePreview tracks={tracks} tex={systemTex} life={preview.life} width={WIDTH - 20} height={30} show={preview.track.prop} />
+          </div>
+        )}
+        {preview?.kind === 'tex' && (
+          <div className="mb-1 mt-0.5 flex items-center gap-2">
+            <ParticleThumb tex={preview.tex} size={40} animate className="rounded border border-border" />
+            <span className="min-w-0 truncate text-[9px] text-muted-foreground">
+              {preview.tex
+                ? preview.tex.frames ? `${preview.tex.frames.length}-frame sequence` : preview.tex.cols * preview.tex.rows > 1 ? `${preview.tex.cols}×${preview.tex.rows} sheet` : 'sprite'
+                : 'no texture picked'}
+            </span>
+          </div>
+        )}
       </div>
 
       {inputs.map((p, i) => (

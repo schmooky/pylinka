@@ -17,41 +17,9 @@ import type { AtlasPlay } from '@pylinka/core';
 import type { EditorTexture } from '../types';
 import { VFX_ASSETS, type VfxAsset } from '../../recipes/vfxAssets';
 import { addReferenceFile, useReference } from '../reference';
+import { bakeStrip, loadImage, readFile, replacementPatch } from '../textureFiles';
 
 const EMPTY: EditorTexture[] = [];
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((res, rej) => {
-    const i = new Image();
-    i.onload = () => res(i);
-    i.onerror = rej;
-    i.src = src;
-  });
-}
-function readFile(file: File): Promise<string> {
-  return new Promise((res) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result as string);
-    r.readAsDataURL(file);
-  });
-}
-
-/** Pack frame images into a 1×N horizontal strip (rows=1, cols=N) — the grid
- *  the runtime animates, one column per frame. Frames are centred in a cell
- *  sized to the largest frame. */
-async function bakeStrip(frames: string[]) {
-  const imgs = await Promise.all(frames.map(loadImage));
-  const fw = Math.max(1, ...imgs.map((i) => i.naturalWidth));
-  const fh = Math.max(1, ...imgs.map((i) => i.naturalHeight));
-  const canvas = document.createElement('canvas');
-  canvas.width = fw * imgs.length;
-  canvas.height = fh;
-  const ctx = canvas.getContext('2d')!;
-  imgs.forEach((img, i) => {
-    ctx.drawImage(img, i * fw + (fw - img.naturalWidth) / 2, (fh - img.naturalHeight) / 2);
-  });
-  return { src: canvas.toDataURL('image/png'), cols: imgs.length, rows: 1, width: canvas.width, height: canvas.height };
-}
 
 export function AssetManager() {
   const open = useEditor((s) => s.assetsOpen);
@@ -70,6 +38,15 @@ export function AssetManager() {
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const selected = textures.find((t) => t.id === selId) ?? null;
+  const systemTextures = useEditor((s) => s.project.systemTextures);
+  const systems = useEditor((s) => s.project.systems);
+  const usersOf = (id: string) => systems.filter((sys) => systemTextures?.[sys.id] === id).map((sys) => sys.name);
+
+  // open on the texture the active emitter draws with — that is almost always
+  // the one being asked about
+  useEffect(() => {
+    if (open) setSelId((cur) => cur ?? activeId);
+  }, [open, activeId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
@@ -101,6 +78,21 @@ export function AssetManager() {
         name: 'sequence', ...baked, pad: 0, fps: 12, play: 'loop', pick: 'per-particle', frames,
       });
       setSelId(id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // swap the pixels, keep the texture: same id, so every emitter and node
+  // pointing at it follows without being re-wired
+  const replace = async (id: string, files: File[]) => {
+    const tex = textures.find((t) => t.id === id);
+    if (!tex) return;
+    setBusy(true);
+    try {
+      updateTexture(id, await replacementPatch(tex, files));
+    } catch (e) {
+      alert('Could not replace the image: ' + (e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -228,6 +220,8 @@ export function AssetManager() {
                 busy={busy}
                 isActive={selected.id === activeId}
                 activeSystemName={activeSystemName}
+                usedBy={usersOf(selected.id)}
+                onReplace={(files) => void replace(selected.id, files)}
                 onName={(name) => updateTexture(selected.id, { name })}
                 onPatch={(patch) => updateTexture(selected.id, patch)}
                 onFrames={(frames) => void rebake(selected.id, frames)}
@@ -384,12 +378,14 @@ function VfxPicker({ onPick, onClose }: { onPick(a: VfxAsset): void; onClose(): 
 function num(v: string, d: number) { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : d; }
 
 function AssetDetail({
-  tex, busy, isActive, activeSystemName, onName, onPatch, onFrames, onAddFrames, onUse, onDelete,
+  tex, busy, isActive, activeSystemName, usedBy, onReplace, onName, onPatch, onFrames, onAddFrames, onUse, onDelete,
 }: {
   tex: EditorTexture;
   busy: boolean;
   isActive: boolean;
   activeSystemName: string;
+  usedBy: string[];
+  onReplace(files: File[]): void;
   onName(name: string): void;
   onPatch(patch: Partial<Omit<EditorTexture, 'id'>>): void;
   onFrames(frames: string[]): void;
@@ -415,11 +411,30 @@ function AssetDetail({
           onChange={(e) => onName(e.target.value)} aria-label="Asset name"
         />
         {busy && <span className="text-[10px] text-amber-300">baking…</span>}
+        <label
+          className="cursor-pointer rounded-md border px-2.5 py-1 text-foreground hover:bg-black/20"
+          style={{ borderColor: 'var(--color-border)' }}
+          title="Swap the image for another file, keeping this asset — every emitter using it updates. Pick several files for a sequence.">
+          Replace image…
+          <input type="file" accept="image/*" multiple className="hidden"
+            onChange={(e) => { const fs = [...(e.target.files ?? [])]; e.target.value = ''; if (fs.length) onReplace(fs); }} />
+        </label>
         <button className="rounded-md border px-2.5 py-1 text-muted-foreground hover:bg-black/20 hover:text-foreground" style={{ borderColor: 'var(--color-border)' }} onClick={onDelete}>Delete</button>
       </div>
 
-      <div className="grid place-items-center rounded-lg border bg-[repeating-conic-gradient(#0000_0_25%,#ffffff08_0_50%)] p-3" style={{ borderColor: 'var(--color-border)', backgroundSize: '16px 16px' }}>
+      <div
+        className="relative grid place-items-center rounded-lg border bg-[repeating-conic-gradient(#0000_0_25%,#ffffff08_0_50%)] p-3"
+        style={{ borderColor: 'var(--color-border)', backgroundSize: '16px 16px' }}
+        title="Drop an image here to replace this one"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => { e.preventDefault(); const fs = [...(e.dataTransfer.files ?? [])]; if (fs.length) onReplace(fs); }}>
         <img src={tex.src} alt="" className="max-h-56 max-w-full object-contain" style={{ imageRendering: 'pixelated' }} />
+        <span className="pointer-events-none absolute bottom-1.5 right-2 text-[9px] text-muted-foreground">drop an image to replace</span>
+      </div>
+      <div className="-mt-2 text-[10px] text-muted-foreground">
+        {usedBy.length === 0
+          ? 'Not used by any emitter yet.'
+          : `Used by ${usedBy.map((n) => `“${n}”`).join(', ')} — replacing the image updates ${usedBy.length === 1 ? 'it' : 'all of them'}.`}
       </div>
 
       {isSeq ? (

@@ -12,14 +12,14 @@ import type { EditorProject } from '../types';
  */
 const LIB_KEY = 'pylinka.editor.library';
 
-interface LibEntry {
+export interface LibEntry {
   id: string;
   name: string;
   updatedAt: string;
   data: EditorProject;
 }
 
-function readLib(): LibEntry[] {
+export function readLib(): LibEntry[] {
   try {
     const raw = localStorage.getItem(LIB_KEY);
     if (raw) return JSON.parse(raw) as LibEntry[];

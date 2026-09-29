@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { useEditor } from '../store';
 import type { EmitterPathData } from '../types';
 import { MaskEditor } from './MaskEditor';
+import { useParticleLife, useSystemTexture } from './ParticleThumb';
+import { LifePreview } from './LifePreview';
+import { loadImage, readFile, replacementPatch } from '../textureFiles';
 
 /**
  * "Emitter" tab: where particles are born (painted emission area) and how the
@@ -43,6 +46,8 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
 
   return (
     <div className="text-xs">
+      <ParticleSection />
+
       {/* ---- where particles come from ---- */}
       {parentChoices.length > 0 && (
         <>
@@ -227,6 +232,99 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
           onSave={(m) => { setMask(m); setMaskOpen(false); }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * What this emitter draws, shown as the particle itself.
+ *
+ * In a project with several emitters and a dozen textures, the only place the
+ * pairing lived was a "live" badge inside the asset manager, so telling which
+ * emitter drew which sprite meant opening a modal and reading. Here the picture
+ * is next to the emitter's settings, and the two things people actually do with
+ * it — pick another texture, or swap the image for a new version of the same
+ * art — are one click.
+ */
+function ParticleSection() {
+  const activeId = useEditor((s) => s.activeSystemId);
+  const tex = useSystemTexture(activeId);
+  const textures = useEditor((s) => s.project.textures) ?? [];
+  const systems = useEditor((s) => s.project.systems);
+  const systemTextures = useEditor((s) => s.project.systemTextures);
+  const setActiveTexture = useEditor((s) => s.setActiveTexture);
+  const updateTexture = useEditor((s) => s.updateTexture);
+  const addTextureId = useEditor((s) => s.addTextureId);
+  const setAssetsOpen = useEditor((s) => s.setAssetsOpen);
+  const [busy, setBusy] = useState(false);
+  const { tracks, life } = useParticleLife(activeId);
+  const shared = tex ? systems.filter((x) => systemTextures?.[x.id] === tex.id).length : 0;
+
+  const onFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setBusy(true);
+    try {
+      if (tex) {
+        updateTexture(tex.id, await replacementPatch(tex, files));
+      } else {
+        const src = await readFile(files[0]!);
+        const img = await loadImage(src);
+        addTextureId({
+          name: files[0]!.name.replace(/\.[^.]+$/, ''),
+          src, width: img.naturalWidth, height: img.naturalHeight,
+          cols: 1, rows: 1, pad: 0, fps: 12, play: 'loop', pick: 'per-particle',
+        });
+      }
+    } catch (e) {
+      alert('Could not load the image: ' + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-4">
+      <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        Particle
+      </div>
+      <div
+        className="flex items-start gap-3"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => { e.preventDefault(); void onFiles([...(e.dataTransfer.files ?? [])]); }}>
+        <span title={`One particle over its ${life.toFixed(1)}s life, looped — every over-life node wired into a Write node`}>
+          <LifePreview tracks={tracks} tex={tex} life={life} width={72} height={72} className="border border-border" />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <select
+            className="sel sel-wide"
+            value={tex?.id ?? ''}
+            onChange={(e) => setActiveTexture(e.target.value || null)}>
+            <option value="">no texture (soft dot)</option>
+            {textures.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <div className="flex flex-wrap gap-1.5">
+            <label
+              className="cursor-pointer rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              title={tex ? 'Swap this image for another file, keeping the asset — pick several files for a sequence' : 'Load an image for this emitter'}>
+              {busy ? 'loading…' : tex ? 'Replace image…' : '+ Image…'}
+              <input type="file" accept="image/*" multiple className="hidden"
+                onChange={(e) => { const fs = [...(e.target.files ?? [])]; e.target.value = ''; void onFiles(fs); }} />
+            </label>
+            <button
+              className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => setAssetsOpen(true)}>
+              Assets…
+            </button>
+          </div>
+          <span className="text-[10px] leading-snug text-muted-foreground">
+            {tex
+              ? `${tex.name} · ${tex.frames ? `${tex.frames.length} frames` : tex.cols * tex.rows > 1 ? `${tex.cols}×${tex.rows} sheet` : 'single sprite'}${shared > 1 ? ` · shared by ${shared} emitters, a replace changes all` : ''}`
+              : 'drop an image here to give this emitter a sprite'}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
