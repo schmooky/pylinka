@@ -63,5 +63,25 @@ export async function replacementPatch(
     // a sequence replaced by one image is a sequence of one — keep it editable
     return { ...(await bakeStrip([src])), frames: [src] };
   }
-  return { src, width: img.naturalWidth, height: img.naturalHeight };
+  return { src, width: img.naturalWidth, height: img.naturalHeight, ...gridForReplacement(tex, img.naturalWidth, img.naturalHeight) };
+}
+
+/**
+ * Whether a replacement image keeps the old sprite-sheet grid.
+ *
+ * A re-exported sheet with the same layout has the same proportions (at any
+ * resolution), and should drop straight in. Anything else — typically a
+ * single sprite dropped onto a sheet — would be sliced into the old grid's
+ * cells, so it becomes a single sprite instead.
+ */
+export function gridForReplacement(
+  tex: Pick<EditorTexture, 'cols' | 'rows' | 'pad' | 'width' | 'height'>,
+  width: number,
+  height: number,
+): Partial<Pick<EditorTexture, 'cols' | 'rows' | 'pad'>> {
+  if (tex.cols * tex.rows <= 1) return {};
+  const before = tex.width / Math.max(1, tex.height);
+  const after = width / Math.max(1, height);
+  if (Math.abs(after - before) / before < 0.02) return {};
+  return { cols: 1, rows: 1, pad: 0 };
 }

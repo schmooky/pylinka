@@ -70,7 +70,6 @@ export function LifePreview({
 
     let raf = 0;
     let visible = true;
-    const start = performance.now();
     const io = new IntersectionObserver(([e]) => {
       visible = e?.isIntersecting ?? true;
       if (visible && !raf) raf = requestAnimationFrame(draw);
@@ -80,7 +79,9 @@ export function LifePreview({
     function draw(now: number) {
       raf = 0;
       if (!visible) return;
-      const t = (((now - start) / 1000) % life) / life;
+      // one clock for every preview: they stay in step with each other, and an
+      // edit (which re-runs this effect) does not snap the particle back to birth
+      const t = ((now / 1000) % life) / life;
       const s = stateAt(tracks, t, life);
       const box = Math.min(canvas!.width, canvas!.height) * 0.9;
       const px = Math.max(1, box * (Math.abs(s.scale) / peak));

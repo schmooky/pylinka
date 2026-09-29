@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { System } from '@pylinka/graph';
 import { useEditor } from '../store';
 import { lifeSeconds, particleTracks, type Track } from '../lifePreview';
+import { bakeStrip, loadImage, readFile, replacementPatch } from '../textureFiles';
 import type { EditorTexture } from '../types';
 import { frameSize } from '../types';
 
@@ -102,4 +103,39 @@ export function useParticleLife(systemId: string): { tracks: Track[]; life: numb
     const system = { graph: graph ?? { nodes: [], edges: [] } } as System;
     return { tracks: particleTracks(system, disabled), life: lifeSeconds(system) };
   }, [graph, disabled]);
+}
+
+/**
+ * Give an emitter new art from image files: replace the pixels of the texture
+ * it already draws with (so every emitter sharing it follows), or, when it has
+ * none, add one and bind it. Several files become a sequence.
+ */
+export function useSetParticleImage(systemId: string): (files: File[]) => Promise<void> {
+  const tex = useSystemTexture(systemId);
+  const updateTexture = useEditor((s) => s.updateTexture);
+  const addTextureId = useEditor((s) => s.addTextureId);
+  return async (files: File[]) => {
+    const images = files.filter((f) => f.type.startsWith('image/'));
+    if (!images.length) return;
+    try {
+      if (tex) {
+        updateTexture(tex.id, await replacementPatch(tex, images));
+        return;
+      }
+      if (images.length > 1) {
+        const frames = await Promise.all(images.map(readFile));
+        addTextureId({ name: 'sequence', ...(await bakeStrip(frames)), pad: 0, fps: 12, play: 'loop', pick: 'per-particle', frames });
+        return;
+      }
+      const src = await readFile(images[0]!);
+      const img = await loadImage(src);
+      addTextureId({
+        name: images[0]!.name.replace(/\.[^.]+$/, ''),
+        src, width: img.naturalWidth, height: img.naturalHeight,
+        cols: 1, rows: 1, pad: 0, fps: 12, play: 'loop', pick: 'per-particle',
+      });
+    } catch (e) {
+      alert('Could not load the image: ' + (e as Error).message);
+    }
+  };
 }

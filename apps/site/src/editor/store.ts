@@ -395,17 +395,24 @@ interface EditorState {
 }
 
 /**
- * One undo step. The asset LIBRARIES (`textures`, `references`) are deliberately
- * left out: they hold data-URL images, and keeping dozens of copies of a sprite
- * sheet on a history stack is how an editor quietly starts eating hundreds of
- * megabytes. Undo carries the current libraries forward instead, so adding or
- * deleting an image is the one thing Ctrl+Z does not reach — everything on the
- * canvas, including a deleted node, is covered.
+ * One undo step. The asset LIBRARIES (`textures`, `references`) are left out
+ * of the project copy: they hold data-URL images, and keeping a copy of every
+ * sprite sheet on every step is how an editor quietly starts eating hundreds
+ * of megabytes. Undo carries the current libraries forward instead.
+ *
+ * Textures are the exception that has to be undoable. "Replace image" swaps
+ * the art under every emitter using it, and a replace you cannot take back
+ * destroys the old art. So a step that edits textures records just the ones it
+ * touched, as they were (null: did not exist), and where they sat in the list.
+ * Memory grows by the images actually changed, not by the library.
  */
 interface Snapshot {
   project: Omit<EditorProject, 'textures' | 'references'>;
   positions: Record<string, XY>;
   activeSystemId: string;
+  textures?: { id: string; index: number; tex: EditorTexture | null }[];
+  /** whether the project had a `textures` key at all, so undoing the first add removes it again */
+  hadLibrary?: boolean;
 }
 
 /** How many steps to keep. Deep past is rarely useful and always costs memory. */
@@ -458,15 +465,38 @@ export const useEditor = create<EditorState>((set, get) => {
   let lastKey: string | null = null;
   let lastAt = 0;
 
-  const snapshot = (s: {
-    project: EditorProject;
-    positions: Record<string, XY>;
-    activeSystemId: string;
-  }): Snapshot => {
+  const snapshot = (
+    s: {
+      project: EditorProject;
+      positions: Record<string, XY>;
+      activeSystemId: string;
+    },
+    textureIds?: readonly string[],
+  ): Snapshot => {
     const rest = { ...s.project };
     delete rest.textures;
     delete rest.references;
-    return { project: rest, positions: s.positions, activeSystemId: s.activeSystemId };
+    const snap: Snapshot = { project: rest, positions: s.positions, activeSystemId: s.activeSystemId };
+    if (textureIds?.length) {
+      const lib = s.project.textures ?? [];
+      snap.textures = textureIds.map((id) => {
+        const index = lib.findIndex((t) => t.id === id);
+        return { id, index, tex: index >= 0 ? lib[index]! : null };
+      });
+      snap.hadLibrary = s.project.textures !== undefined;
+    }
+    return snap;
+  };
+
+  /** Put recorded textures back into a library: restore, re-insert, or drop. */
+  const restoreTextures = (lib: EditorTexture[] | undefined, saved: NonNullable<Snapshot['textures']>) => {
+    const out = [...(lib ?? [])];
+    for (const { id, index, tex } of saved) {
+      const at = out.findIndex((t) => t.id === id);
+      if (at >= 0) out.splice(at, 1);
+      if (tex) out.splice(index >= 0 ? Math.min(index, out.length) : out.length, 0, tex);
+    }
+    return out;
   };
 
   /**
@@ -480,6 +510,8 @@ export const useEditor = create<EditorState>((set, get) => {
    *   one undo step — a slider drag, a number typed digit by digit.
    * @param extra  editor state the mutation implies, applied atomically with
    *   the project so one step covers the whole change.
+   * @param textureIds  textures the mutation adds, changes or removes — the
+   *   step keeps their previous versions so undo can restore them.
    */
   const commit = (
     mutate: (p: EditorProject, sys: System) => void,
@@ -489,12 +521,14 @@ export const useEditor = create<EditorState>((set, get) => {
       p: EditorProject,
       prev: { positions: Record<string, XY>; activeSystemId: string },
     ) => { positions?: Record<string, XY>; activeSystemId?: string; selectedNodeId?: string | null },
+    textureIds?: readonly string[],
   ) => {
     set((s) => {
       const now = Date.now();
-      const merge = coalesce !== undefined && coalesce === lastKey && now - lastAt < COALESCE_MS;
+      const merge =
+        textureIds === undefined && coalesce !== undefined && coalesce === lastKey && now - lastAt < COALESCE_MS;
       if (!merge) {
-        past.push(snapshot(s));
+        past.push(snapshot(s, textureIds));
         if (past.length > HISTORY_LIMIT) past.shift();
         future.length = 0; // a fresh edit forks the timeline
       }
@@ -551,12 +585,17 @@ export const useEditor = create<EditorState>((set, get) => {
     const snap = from.pop();
     if (snap === undefined) return;
     set((s) => {
-      to.push(snapshot(s));
+      // the reverse step records the same textures as they are now, so redo
+      // (or undo, going the other way) can put them back
+      to.push(snapshot(s, snap.textures?.map((t) => t.id)));
       lastKey = null; // never coalesce across a jump
+      let textures = snap.textures ? restoreTextures(s.project.textures, snap.textures) : s.project.textures;
+      if (snap.textures && !snap.hadLibrary && textures?.length === 0) textures = undefined;
       const project: EditorProject = {
         ...(snap.project as EditorProject),
-        // the libraries live outside history — carry today's forward
-        ...(s.project.textures ? { textures: s.project.textures } : {}),
+        // the libraries live outside history — carry today's forward, with any
+        // textures this step recorded put back the way they were
+        ...(textures ? { textures } : {}),
         ...(s.project.references ? { references: s.project.references } : {}),
       };
       const saveError = persist(project, snap.positions, snap.activeSystemId);
@@ -974,17 +1013,29 @@ export const useEditor = create<EditorState>((set, get) => {
 
     addTextureId(tex) {
       const id = crypto.randomUUID();
-      commit((p, sys) => {
-        p.textures = [...(p.textures ?? []), { ...tex, id }];
-        p.systemTextures = { ...(p.systemTextures ?? {}), [sys.id]: id };
-      }, true);
+      commit(
+        (p, sys) => {
+          p.textures = [...(p.textures ?? []), { ...tex, id }];
+          p.systemTextures = { ...(p.systemTextures ?? {}), [sys.id]: id };
+        },
+        true,
+        undefined,
+        undefined,
+        [id],
+      );
       return id;
     },
 
     updateTexture(id, patch) {
-      commit((p) => {
-        p.textures = (p.textures ?? []).map((t) => (t.id === id ? { ...t, ...patch } : t));
-      }, true);
+      commit(
+        (p) => {
+          p.textures = (p.textures ?? []).map((t) => (t.id === id ? { ...t, ...patch } : t));
+        },
+        true,
+        undefined,
+        undefined,
+        [id],
+      );
     },
 
     setNodeAsset(nodeId, textureId) {
@@ -1011,12 +1062,18 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     removeTexture(id) {
-      commit((p) => {
-        p.textures = (p.textures ?? []).filter((t) => t.id !== id);
-        p.systemTextures = Object.fromEntries(
-          Object.entries(p.systemTextures ?? {}).map(([k, v]) => [k, v === id ? null : v]),
-        );
-      }, true);
+      commit(
+        (p) => {
+          p.textures = (p.textures ?? []).filter((t) => t.id !== id);
+          p.systemTextures = Object.fromEntries(
+            Object.entries(p.systemTextures ?? {}).map(([k, v]) => [k, v === id ? null : v]),
+          );
+        },
+        true,
+        undefined,
+        undefined,
+        [id],
+      );
     },
 
     setActiveTexture(id) {
@@ -1205,20 +1262,25 @@ export const useEditor = create<EditorState>((set, get) => {
       const idMap = new Map<string, string>();
       const sysMap = new Map<string, string>();
       const srcPositions = src.editor?.nodePositions ?? {};
+      // textures: reuse one already in the project with the same image, so
+      // adding the same recipe twice does not duplicate its atlas. Decided up
+      // front so the undo step can record exactly which textures it adds.
+      const texMap = new Map<string, string>();
+      const added: EditorTexture[] = [];
+      for (const t of src.textures ?? []) {
+        const same = (get().project.textures ?? []).find(
+          (x) => x.src === t.src && x.cols === t.cols && x.rows === t.rows,
+        );
+        if (same) texMap.set(t.id, same.id);
+        else {
+          const id = crypto.randomUUID();
+          added.push({ ...structuredClone(t), id });
+          texMap.set(t.id, id);
+        }
+      }
       commit(
         (p) => {
-          // textures: reuse one already in the project with the same image,
-          // so adding the same recipe twice does not duplicate its atlas
-          const texMap = new Map<string, string>();
-          for (const t of src.textures ?? []) {
-            const same = (p.textures ?? []).find((x) => x.src === t.src && x.cols === t.cols && x.rows === t.rows);
-            if (same) texMap.set(t.id, same.id);
-            else {
-              const id = crypto.randomUUID();
-              p.textures = [...(p.textures ?? []), { ...structuredClone(t), id }];
-              texMap.set(t.id, id);
-            }
-          }
+          if (added.length) p.textures = [...(p.textures ?? []), ...added];
           for (const sys of src.systems) {
             const texId = src.systemTextures?.[sys.id];
             const payload: EmitterPayload = {
@@ -1247,6 +1309,7 @@ export const useEditor = create<EditorState>((set, get) => {
           const first = sysMap.get(src.systems[0]?.id ?? '');
           return { positions, activeSystemId: first ?? prev.activeSystemId, selectedNodeId: null };
         },
+        added.map((t) => t.id),
       );
     },
 

@@ -18,8 +18,11 @@ import type { EditorTexture } from '../types';
 import { VFX_ASSETS, type VfxAsset } from '../../recipes/vfxAssets';
 import { addReferenceFile, useReference } from '../reference';
 import { bakeStrip, loadImage, readFile, replacementPatch } from '../textureFiles';
+import { LifePreview } from './LifePreview';
+import { useParticleLife } from './ParticleThumb';
 
 const EMPTY: EditorTexture[] = [];
+const NO_TRACKS: never[] = [];
 
 export function AssetManager() {
   const open = useEditor((s) => s.assetsOpen);
@@ -40,6 +43,8 @@ export function AssetManager() {
   const selected = textures.find((t) => t.id === selId) ?? null;
   const systemTextures = useEditor((s) => s.project.systemTextures);
   const systems = useEditor((s) => s.project.systems);
+  const activeSystemId = useEditor((s) => s.activeSystemId);
+  const { life } = useParticleLife(activeSystemId);
   const usersOf = (id: string) => systems.filter((sys) => systemTextures?.[sys.id] === id).map((sys) => sys.name);
 
   // open on the texture the active emitter draws with — that is almost always
@@ -221,6 +226,7 @@ export function AssetManager() {
                 isActive={selected.id === activeId}
                 activeSystemName={activeSystemName}
                 usedBy={usersOf(selected.id)}
+                life={life}
                 onReplace={(files) => void replace(selected.id, files)}
                 onName={(name) => updateTexture(selected.id, { name })}
                 onPatch={(patch) => updateTexture(selected.id, patch)}
@@ -378,13 +384,15 @@ function VfxPicker({ onPick, onClose }: { onPick(a: VfxAsset): void; onClose(): 
 function num(v: string, d: number) { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : d; }
 
 function AssetDetail({
-  tex, busy, isActive, activeSystemName, usedBy, onReplace, onName, onPatch, onFrames, onAddFrames, onUse, onDelete,
+  tex, busy, isActive, activeSystemName, usedBy, life, onReplace, onName, onPatch, onFrames, onAddFrames, onUse, onDelete,
 }: {
   tex: EditorTexture;
   busy: boolean;
   isActive: boolean;
   activeSystemName: string;
   usedBy: string[];
+  /** seconds the active emitter's particles live — what 'stretch over life' spans */
+  life: number;
   onReplace(files: File[]): void;
   onName(name: string): void;
   onPatch(patch: Partial<Omit<EditorTexture, 'id'>>): void;
@@ -430,6 +438,15 @@ function AssetDetail({
         onDrop={(e) => { e.preventDefault(); const fs = [...(e.dataTransfer.files ?? [])]; if (fs.length) onReplace(fs); }}>
         <img src={tex.src} alt="" className="max-h-56 max-w-full object-contain" style={{ imageRendering: 'pixelated' }} />
         <span className="pointer-events-none absolute bottom-1.5 right-2 text-[9px] text-muted-foreground">drop an image to replace</span>
+      </div>
+      {/* the file above is the sheet; this is what one particle actually shows */}
+      <div className="-mt-1 flex items-center gap-3">
+        <LifePreview tracks={NO_TRACKS} tex={tex} life={life} width={72} height={72} className="border" />
+        <span className="text-[10px] leading-relaxed text-muted-foreground">
+          One particle, as it plays: {tex.cols > 1 ? `${tex.cols} frames, ` : ''}
+          {tex.play === 'once' ? `stretched over a ${life.toFixed(1)}s life` : tex.play === 'hold' ? `once at ${tex.fps} fps, then held` : `looping at ${tex.fps} fps`}
+          {tex.rows > 1 ? ` · each particle picks one of ${tex.rows} rows` : ''}.
+        </span>
       </div>
       <div className="-mt-2 text-[10px] text-muted-foreground">
         {usedBy.length === 0

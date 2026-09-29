@@ -2,9 +2,8 @@ import { useState } from 'react';
 import { useEditor } from '../store';
 import type { EmitterPathData } from '../types';
 import { MaskEditor } from './MaskEditor';
-import { useParticleLife, useSystemTexture } from './ParticleThumb';
+import { useParticleLife, useSetParticleImage, useSystemTexture } from './ParticleThumb';
 import { LifePreview } from './LifePreview';
-import { loadImage, readFile, replacementPatch } from '../textureFiles';
 
 /**
  * "Emitter" tab: where particles are born (painted emission area) and how the
@@ -253,30 +252,17 @@ function ParticleSection() {
   const systems = useEditor((s) => s.project.systems);
   const systemTextures = useEditor((s) => s.project.systemTextures);
   const setActiveTexture = useEditor((s) => s.setActiveTexture);
-  const updateTexture = useEditor((s) => s.updateTexture);
-  const addTextureId = useEditor((s) => s.addTextureId);
   const setAssetsOpen = useEditor((s) => s.setAssetsOpen);
   const [busy, setBusy] = useState(false);
   const { tracks, life } = useParticleLife(activeId);
   const shared = tex ? systems.filter((x) => systemTextures?.[x.id] === tex.id).length : 0;
 
+  const setImage = useSetParticleImage(activeId);
   const onFiles = async (files: File[]) => {
     if (!files.length) return;
     setBusy(true);
     try {
-      if (tex) {
-        updateTexture(tex.id, await replacementPatch(tex, files));
-      } else {
-        const src = await readFile(files[0]!);
-        const img = await loadImage(src);
-        addTextureId({
-          name: files[0]!.name.replace(/\.[^.]+$/, ''),
-          src, width: img.naturalWidth, height: img.naturalHeight,
-          cols: 1, rows: 1, pad: 0, fps: 12, play: 'loop', pick: 'per-particle',
-        });
-      }
-    } catch (e) {
-      alert('Could not load the image: ' + (e as Error).message);
+      await setImage(files);
     } finally {
       setBusy(false);
     }
