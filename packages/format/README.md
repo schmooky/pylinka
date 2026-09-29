@@ -15,6 +15,11 @@ file, or kept as blob references.
 `migrate` runs versioned schema migrations, which is what keeps old project files loading after the
 format moves on.
 
+`bundleProject` / `unbundleProject` write and read a `.pylinka.zip`: `project.json` with every image
+replaced by an `assets/…` path, the images themselves, and a `meta.json` describing the project and
+each asset. `externalizeAssets` does the first half alone, for a minimal JSON when your game ships
+its textures some other way.
+
 ```bash
 npm i @pylinka/format
 ```

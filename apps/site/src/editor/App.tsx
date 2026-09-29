@@ -29,6 +29,7 @@ import { ProjectsMenu } from './components/ProjectsMenu';
 import { SaveState } from './components/SaveState';
 import { Shortcuts } from './components/Shortcuts';
 import { AssetManager } from './components/AssetManager';
+import { isProjectFile, readProjectFile } from './projectFile';
 
 const nodeTypes = { pylinka: PylinkaNode, param: ParamNode, comment: CommentNode, note: NoteNode };
 
@@ -67,16 +68,12 @@ function EditorApp() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
 
-  const onImportFile = (file: File) => {
-    const r = new FileReader();
-    r.onload = () => {
-      try {
-        importProject(JSON.parse(String(r.result)));
-      } catch (e) {
-        alert('Could not load project: ' + (e as Error).message);
-      }
-    };
-    r.readAsText(file);
+  const onImportFile = async (file: File) => {
+    try {
+      importProject(await readProjectFile(file));
+    } catch (e) {
+      alert('Could not load project: ' + (e as Error).message);
+    }
   };
 
   /** Graph nodes currently selected on the canvas, annotations excluded. */
@@ -158,7 +155,7 @@ function EditorApp() {
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
 
-  // drop a .pylinka.json anywhere on the editor to import it
+  // drop a .pylinka.json or .pylinka.zip anywhere on the editor to import it
   useEffect(() => {
     const isJsonFileDrag = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false;
     const over = (e: DragEvent) => {
@@ -166,9 +163,9 @@ function EditorApp() {
     };
     const drop = (e: DragEvent) => {
       const f = e.dataTransfer?.files?.[0];
-      if (!f || !(f.type === 'application/json' || f.name.endsWith('.json'))) return;
+      if (!f || !isProjectFile(f)) return;
       e.preventDefault();
-      if (confirm(`Import "${f.name}" and replace the current project?`)) onImportFile(f);
+      if (confirm(`Import "${f.name}" and replace the current project?`)) void onImportFile(f);
     };
     window.addEventListener('dragover', over);
     window.addEventListener('drop', drop);
