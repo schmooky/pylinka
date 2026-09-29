@@ -32,6 +32,7 @@ import { AssetManager } from './components/AssetManager';
 import { ParticleCard } from './components/ParticleCard';
 import { LibraryModal } from './components/LibraryModal';
 import { isProjectFile, readProjectFile } from './projectFile';
+import { setNodePreviews, useNodePreviews } from './previewPrefs';
 
 const nodeTypes = { pylinka: PylinkaNode, param: ParamNode, comment: CommentNode, note: NoteNode };
 
@@ -204,6 +205,7 @@ function EditorApp() {
   const [menu, setMenu] = useState<MenuTarget | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const closeLibrary = useCallback(() => setLibraryOpen(false), []);
+  const nodePreviews = useNodePreviews();
   // the shortcut handler is registered once, so it reads these through refs
   const rfNodesRef = useRef<RFNode[]>([]);
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -420,6 +422,13 @@ function EditorApp() {
               right-click for nodes
             </span>
           )}
+          <button
+            className="absolute right-2 z-10 rounded-md border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            style={{ top: 8 + (diags.loose.length > 0 ? 34 : 0), background: 'color-mix(in oklab, var(--color-card) 92%, transparent)' }}
+            title="Show or hide the previews drawn inside nodes — hide them if an older layout is too tight for them"
+            onClick={() => setNodePreviews(!nodePreviews)}>
+            previews: {nodePreviews ? 'on' : 'off'}
+          </button>
           {menu && <GraphMenu target={menu} onClose={() => setMenu(null)} />}
           </div>
         </div>

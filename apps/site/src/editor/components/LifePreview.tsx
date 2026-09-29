@@ -15,7 +15,8 @@ import { peakScale, stateAt, type LifeProp, type Track } from '../lifePreview';
  */
 
 const images = new Map<string, HTMLImageElement>();
-function image(src: string): HTMLImageElement {
+/** One decoded image per source, shared by every preview that draws it. */
+export function spriteImage(src: string): HTMLImageElement {
   let img = images.get(src);
   if (!img) {
     img = new Image();
@@ -66,10 +67,16 @@ export function LifePreview({
     const scratch = document.createElement('canvas');
     const sctx = scratch.getContext('2d')!;
     const peak = peakScale(tracks, life);
-    const img = tex ? image(tex.src) : null;
+    const img = tex ? spriteImage(tex.src) : null;
 
     let raf = 0;
     let visible = true;
+    let last = -Infinity;
+    // one scratch buffer big enough for the particle at its largest, reused
+    // every frame (resizing a canvas reallocates it)
+    const maxPx = Math.ceil(Math.min(canvas.width, canvas.height) * 0.9) + 1;
+    scratch.width = maxPx;
+    scratch.height = maxPx;
     const io = new IntersectionObserver(([e]) => {
       visible = e?.isIntersecting ?? true;
       if (visible && !raf) raf = requestAnimationFrame(draw);
@@ -79,6 +86,11 @@ export function LifePreview({
     function draw(now: number) {
       raf = 0;
       if (!visible) return;
+      if (now - last < 32) {
+        raf = requestAnimationFrame(draw);
+        return;
+      }
+      last = now;
       // one clock for every preview: they stay in step with each other, and an
       // edit (which re-runs this effect) does not snap the particle back to birth
       const t = ((now / 1000) % life) / life;
@@ -88,9 +100,8 @@ export function LifePreview({
 
       ctx.clearRect(0, 0, canvas!.width, canvas!.height);
       // draw the particle into a scratch square: sprite × tint, alpha kept
-      const n = Math.ceil(px);
-      scratch.width = n;
-      scratch.height = n;
+      const n = Math.min(maxPx, Math.ceil(px));
+      sctx.clearRect(0, 0, maxPx, maxPx);
       const shape = (ink: string) => {
         if (img && tex && img.complete && img.naturalWidth > 0) {
           const { frameW, frameH } = frameSize(tex);
@@ -122,7 +133,7 @@ export function LifePreview({
       ctx.globalAlpha = Math.min(1, Math.max(0, s.alpha));
       ctx.translate(canvas!.width / 2, canvas!.height / 2);
       ctx.rotate((s.rotation * Math.PI) / 180);
-      ctx.drawImage(scratch, -n / 2, -n / 2);
+      ctx.drawImage(scratch, 0, 0, n, n, -n / 2, -n / 2, n, n);
       ctx.restore();
 
       if (barRef.current) barRef.current.style.width = `${t * 100}%`;

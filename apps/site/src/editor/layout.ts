@@ -1,4 +1,5 @@
 import type { Graph } from '@pylinka/graph';
+import { nodeHeight } from './nodeSize';
 
 /**
  * Simple left-to-right auto-layout for a graph without saved node positions
@@ -7,7 +8,10 @@ import type { Graph } from '@pylinka/graph';
  */
 export function autoLayout(graph: Graph): Record<string, { x: number; y: number }> {
   const COL = 300;
+  // rows are at least this far apart, and further when a node in the row is
+  // taller (previews under the ports) — so nothing overlaps the node below
   const ROW = 132;
+  const GAP = 24;
   const isOut = (id: string) => graph.nodes.find((n) => n.id === id)?.kind.startsWith('output.');
 
   const feeders = new Map<string, string[]>();
@@ -50,11 +54,20 @@ export function autoLayout(graph: Graph): Record<string, { x: number; y: number 
   }
 
   const numId = (id: string) => Number(/\d+/.exec(id)?.[0] ?? 0);
-  const pos: Record<string, { x: number; y: number }> = {};
-  for (const [lvl, ids] of byLevel) {
+  // row i of every column shares one height: the tallest node in that row
+  const rowH: number[] = [];
+  for (const ids of byLevel.values()) {
     ids.sort((a, b) => numId(a) - numId(b) || (a < b ? -1 : 1));
     ids.forEach((id, i) => {
-      pos[id] = { x: (maxL - lvl) * COL, y: i * ROW };
+      const node = graph.nodes.find((n) => n.id === id)!;
+      rowH[i] = Math.max(rowH[i] ?? ROW, nodeHeight(node, graph) + GAP);
+    });
+  }
+  const rowY = rowH.reduce<number[]>((acc, h, i) => (acc.push(i === 0 ? 0 : acc[i - 1]! + rowH[i - 1]!), acc), []);
+  const pos: Record<string, { x: number; y: number }> = {};
+  for (const [lvl, ids] of byLevel) {
+    ids.forEach((id, i) => {
+      pos[id] = { x: (maxL - lvl) * COL, y: rowY[i]! };
     });
   }
   return pos;

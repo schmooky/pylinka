@@ -12,16 +12,9 @@ import { LifePreview } from './LifePreview';
 import { ParticleThumb, useSystemTexture } from './ParticleThumb';
 import { lifeSeconds, trackFor } from '../lifePreview';
 
-const HEADER_H = 30;
-const ROW_H = 26;
-const STRUCT_H = 30;
-const EASE_H = 56; // taller structural row: the `ease` param draws its curve inline
-const WIDTH = 210;
-
-/** Structural rows are fixed-height except `ease`, which shows a curve plot. */
-const structuralRowH = (key: string) => (key === 'ease' ? EASE_H : STRUCT_H);
-const structuralTotalH = (specs: readonly { key: string }[]) =>
-  specs.reduce((a, s) => a + structuralRowH(s.key), 0);
+import { bodyPreviewOf, EASE_H, HEADER_H, ROW_H, STRUCT_H, structuralTotalH, WIDTH } from '../nodeSize';
+import { NodePreview, previewData } from './NodePreviews';
+import { useNodePreviews } from '../previewPrefs';
 
 const typeColor: Record<PortType, string> = {
   f32: 'var(--t-f32)',
@@ -91,13 +84,29 @@ function ValueEditor({ nodeId, portId, type, value }: { nodeId: string; portId: 
     );
   }
   if (type === 'color') {
+    // The native picker only knows RGB, and the alpha used to ride along
+    // unseen: a colour with 00 alpha looked like a solid swatch while the
+    // particle faded out. The swatch now shows its real opacity over a
+    // checkerboard, and the percentage beside it edits it.
     const hex = value?.t === 'color' ? value.v : '#ffffffff';
     const rgb = hex.slice(0, 7);
     const aa = hex.slice(7, 9) || 'ff';
+    const pct = Math.round((parseInt(aa, 16) / 255) * 100);
+    const toAA = (p: number) =>
+      Math.round((Math.min(100, Math.max(0, p)) / 100) * 255).toString(16).padStart(2, '0');
     return (
-      <input {...stop} className="nodrag" type="color" value={rgb}
-        style={{ width: 30, height: 20, padding: 0, background: 'none', border: 'none' }}
-        onChange={(e) => setValue(nodeId, portId, { t: 'color', v: `${e.target.value}${aa}` })} />
+      <span className="flex items-center gap-1">
+        <label {...stop} className="nodrag relative block cursor-pointer overflow-hidden rounded-sm border border-border"
+          style={{ width: 26, height: 16, background: 'repeating-conic-gradient(#8a8a8a 0% 25%, #d6d6d6 0% 50%) 0 0 / 8px 8px' }}
+          title={`${hex} — opacity ${pct}%`}>
+          <span className="absolute inset-0" style={{ background: rgb, opacity: pct / 100 }} />
+          <input type="color" value={rgb} className="absolute inset-0 cursor-pointer opacity-0"
+            onChange={(e) => setValue(nodeId, portId, { t: 'color', v: `${e.target.value}${aa}` })} />
+        </label>
+        <input {...stop} className="nodrag num" style={{ width: 38 }} type="number" min={0} max={100} step={5}
+          value={pct} title="Opacity %"
+          onChange={(e) => setValue(nodeId, portId, { t: 'color', v: `${rgb}${toAA(Number(e.target.value))}` })} />
+      </span>
     );
   }
   if (type === 'bool') {
@@ -124,6 +133,8 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
   const muted = useEditor((s) => s.project.disabledNodes?.includes(nodeId) ?? false);
   const system = useEditor((s) => s.system());
   const systemTex = useSystemTexture(system.id);
+  const disabledNodes = useEditor((s) => s.project.disabledNodes);
+  const previewsOn = useNodePreviews();
   /*
    * The interpreted backend recognises node PATTERNS rather than evaluating the
    * graph, so a kind it does not know contributes nothing — silently, until you
@@ -152,6 +163,13 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
     return track ? { kind: 'life' as const, track, life: lifeSeconds(system) } : undefined;
   }, [node, system, textures]);
   const tracks = useMemo(() => (preview?.kind === 'life' ? [preview.track] : []), [preview]);
+  // spawn areas, random samples, sprays and trajectories (NodePreviews.tsx)
+  const sampled = useMemo(() => {
+    if (!node || !previewsOn) return undefined;
+    const kind = bodyPreviewOf(node, system.graph);
+    if (!kind || kind === 'tex' || kind === 'life') return undefined;
+    return previewData(kind, node, system, params, disabledNodes ?? []);
+  }, [node, system, params, disabledNodes, previewsOn]);
 
   if (!node) return null;
   const schema = getSchema(V1_CATALOG, node.kind);
@@ -284,7 +302,7 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
                 />
               </div>
               {/* the curve says how; this says what it looks like on a particle */}
-              {preview?.kind === 'life' && !muted && (
+              {preview?.kind === 'life' && !muted && previewsOn && (
                 <span title={`One particle over its ${preview.life.toFixed(1)}s life, looped — ${preview.track.prop} only`}>
                   <LifePreview tracks={tracks} tex={systemTex} life={preview.life} width={46} height={46} />
                 </span>
@@ -333,12 +351,13 @@ function PylinkaNodeInner({ data, selected }: NodeProps) {
         ))}
 
         {/* below the ports, so it never moves a handle */}
-        {preview?.kind === 'life' && !muted && !structural.some((x) => x.key === 'ease') && (
+        {preview?.kind === 'life' && !muted && previewsOn && !structural.some((x) => x.key === 'ease') && (
           <div className="mb-1 mt-0.5" title={`One particle over its ${preview.life.toFixed(1)}s life, looped — ${preview.track.prop} only`}>
             <LifePreview tracks={tracks} tex={systemTex} life={preview.life} width={WIDTH - 20} height={30} show={preview.track.prop} />
           </div>
         )}
-        {preview?.kind === 'tex' && (
+        {sampled && !muted && <NodePreview data={sampled} tex={systemTex} width={WIDTH - 20} />}
+        {preview?.kind === 'tex' && previewsOn && (
           <div className="mb-1 mt-0.5 flex items-center gap-2">
             <ParticleThumb tex={preview.tex} size={40} animate className="rounded border border-border" />
             <span className="min-w-0 truncate text-[9px] text-muted-foreground">

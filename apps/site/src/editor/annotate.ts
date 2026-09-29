@@ -5,6 +5,7 @@
  */
 import { getSchema, V1_CATALOG, type Graph, type PylinkaProject } from '@pylinka/graph';
 import { NS_TINT } from './nsMeta';
+import { nodeHeight } from './nodeSize';
 import type { Annotations, CommentFrame, StickyNote } from './types';
 
 /**
@@ -52,11 +53,12 @@ export function nodesBBox(
   for (const id of ids) {
     const p = positions[id];
     if (!p) continue;
-    const kind = graph.nodes.find((n) => n.id === id)?.kind ?? '';
+    const node = graph.nodes.find((n) => n.id === id);
     x0 = Math.min(x0, p.x);
     y0 = Math.min(y0, p.y);
     x1 = Math.max(x1, p.x + NODE_W);
-    y1 = Math.max(y1, p.y + estimateNodeHeight(kind));
+    // the node's real height, previews included, or a frame edge cuts through it
+    y1 = Math.max(y1, p.y + (node ? nodeHeight(node, graph) : estimateNodeHeight('')));
   }
   if (!isFinite(x0)) return undefined;
   const PAD = 26;
