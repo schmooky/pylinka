@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   Controls,
@@ -30,7 +30,7 @@ import { SaveState } from './components/SaveState';
 import { Shortcuts } from './components/Shortcuts';
 import { AssetManager } from './components/AssetManager';
 import { ParticleCard } from './components/ParticleCard';
-import { LibraryPanel, useLibraryOpen } from './components/LibraryPanel';
+import { LibraryModal } from './components/LibraryModal';
 
 const nodeTypes = { pylinka: PylinkaNode, param: ParamNode, comment: CommentNode, note: NoteNode };
 
@@ -205,7 +205,8 @@ function EditorApp() {
   }, [dirty, saveError]);
 
   const [menu, setMenu] = useState<MenuTarget | null>(null);
-  const [libraryOpen, setLibraryOpen] = useLibraryOpen();
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const closeLibrary = useCallback(() => setLibraryOpen(false), []);
   // the shortcut handler is registered once, so it reads these through refs
   const rfNodesRef = useRef<RFNode[]>([]);
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -321,8 +322,8 @@ function EditorApp() {
           Assets
         </button>
         <button
-          onClick={() => setLibraryOpen(!libraryOpen)}
-          className={`rounded-md px-2 py-1 text-[11px] ${libraryOpen ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+          onClick={() => setLibraryOpen(true)}
+          className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
           title="Recipes, starters and your saved projects — preview them and add them to this project">
           Library
         </button>
@@ -428,9 +429,9 @@ function EditorApp() {
         <div className="min-w-0 flex-1">
           <Preview />
         </div>
-        {libraryOpen && <LibraryPanel onClose={() => setLibraryOpen(false)} />}
       </div>
       <AssetManager />
+      {libraryOpen && <LibraryModal onClose={closeLibrary} />}
       <ConfigModal />
       {shortcutsOpen && <Shortcuts onClose={() => setShortcutsOpen(false)} />}
     </div>
