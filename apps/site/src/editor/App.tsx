@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   Controls,
@@ -29,6 +29,10 @@ import { ProjectsMenu } from './components/ProjectsMenu';
 import { SaveState } from './components/SaveState';
 import { Shortcuts } from './components/Shortcuts';
 import { AssetManager } from './components/AssetManager';
+import { ParticleCard } from './components/ParticleCard';
+import { LibraryModal } from './components/LibraryModal';
+import { isProjectFile, readProjectFile } from './projectFile';
+import { setNodePreviews, useNodePreviews } from './previewPrefs';
 
 const nodeTypes = { pylinka: PylinkaNode, param: ParamNode, comment: CommentNode, note: NoteNode };
 
@@ -67,16 +71,12 @@ function EditorApp() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
 
-  const onImportFile = (file: File) => {
-    const r = new FileReader();
-    r.onload = () => {
-      try {
-        importProject(JSON.parse(String(r.result)));
-      } catch (e) {
-        alert('Could not load project: ' + (e as Error).message);
-      }
-    };
-    r.readAsText(file);
+  const onImportFile = async (file: File) => {
+    try {
+      importProject(await readProjectFile(file));
+    } catch (e) {
+      alert('Could not load project: ' + (e as Error).message);
+    }
   };
 
   /** Graph nodes currently selected on the canvas, annotations excluded. */
@@ -158,7 +158,7 @@ function EditorApp() {
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
 
-  // drop a .pylinka.json anywhere on the editor to import it
+  // drop a .pylinka.json or .pylinka.zip anywhere on the editor to import it
   useEffect(() => {
     const isJsonFileDrag = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false;
     const over = (e: DragEvent) => {
@@ -166,9 +166,9 @@ function EditorApp() {
     };
     const drop = (e: DragEvent) => {
       const f = e.dataTransfer?.files?.[0];
-      if (!f || !(f.type === 'application/json' || f.name.endsWith('.json'))) return;
+      if (!f || !isProjectFile(f)) return;
       e.preventDefault();
-      if (confirm(`Import "${f.name}" and replace the current project?`)) onImportFile(f);
+      if (confirm(`Import "${f.name}" and replace the current project?`)) void onImportFile(f);
     };
     window.addEventListener('dragover', over);
     window.addEventListener('drop', drop);
@@ -203,6 +203,9 @@ function EditorApp() {
   }, [dirty, saveError]);
 
   const [menu, setMenu] = useState<MenuTarget | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const closeLibrary = useCallback(() => setLibraryOpen(false), []);
+  const nodePreviews = useNodePreviews();
   // the shortcut handler is registered once, so it reads these through refs
   const rfNodesRef = useRef<RFNode[]>([]);
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -318,6 +321,12 @@ function EditorApp() {
           Assets
         </button>
         <button
+          onClick={() => setLibraryOpen(true)}
+          className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="Recipes, starters and your saved projects — preview them and add them to this project">
+          Library
+        </button>
+        <button
           onClick={startTour}
           className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
           title="Walk through building an effect: emitters, nodes and how to link them">
@@ -407,11 +416,19 @@ function EditorApp() {
               {diags.loose.map((d) => d.message).join(' · ')}
             </div>
           )}
+          <ParticleCard offsetTop={diags.loose.length > 0 ? 34 : 0} />
           {!menu && (
             <span className="pointer-events-none absolute bottom-2 right-3 z-10 text-[10px] text-muted-foreground/70">
               right-click for nodes
             </span>
           )}
+          <button
+            className="absolute right-2 z-10 rounded-md border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            style={{ top: 8 + (diags.loose.length > 0 ? 34 : 0), background: 'color-mix(in oklab, var(--color-card) 92%, transparent)' }}
+            title="Show or hide the previews drawn inside nodes — hide them if an older layout is too tight for them"
+            onClick={() => setNodePreviews(!nodePreviews)}>
+            previews: {nodePreviews ? 'on' : 'off'}
+          </button>
           {menu && <GraphMenu target={menu} onClose={() => setMenu(null)} />}
           </div>
         </div>
@@ -420,6 +437,7 @@ function EditorApp() {
         </div>
       </div>
       <AssetManager />
+      {libraryOpen && <LibraryModal onClose={closeLibrary} />}
       <ConfigModal />
       {shortcutsOpen && <Shortcuts onClose={() => setShortcutsOpen(false)} />}
     </div>

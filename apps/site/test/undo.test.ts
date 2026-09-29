@@ -312,29 +312,56 @@ describe('undo — the documented exclusions', () => {
     expect(store().project.references?.find((r) => r.id === id)?.name).toBe('renamed');
   });
 
-  it('undoing a deleted image leaves the binding without the image, and degrades quietly', () => {
-    // the library is carried forward, so the image does NOT come back while the
-    // system's binding does. Nothing crashes: an unresolvable texture id falls
-    // through to the untextured sprite, the same as no texture at all.
-    const id = store().addTextureId({
-      name: 'sheet', src: 'data:image/png;base64,AA', width: 8, height: 8,
-      cols: 1, rows: 1, pad: 0, fps: 12, play: 'loop', pick: 'per-particle',
-    });
-    store().removeTexture(id);
-    store().undo();
-    expect(store().project.systemTextures?.[store().activeSystemId]).toBe(id);
-    expect(store().project.textures?.some((t) => t.id === id)).toBe(false);
+  it('undoes deleting a texture: the image comes back, in its place, with its binding', () => {
+    const a = store().addTextureId(TEX('a'));
+    const b = store().addTextureId(TEX('b'));
+    store().setActiveTexture(a);
+    roundTrip(() => store().removeTexture(a));
+    expect(store().project.textures?.map((t) => t.id)).toEqual([a, b]);
   });
 
-  it('carries the asset library forward rather than snapshotting it', () => {
-    // adding an image is deliberately not undoable: the library holds data URLs
-    const id = store().addTextureId({
-      name: 'sheet', src: 'data:image/png;base64,AA', width: 8, height: 8,
-      cols: 1, rows: 1, pad: 0, fps: 12, play: 'loop', pick: 'per-particle',
-    });
-    store().undo();
-    expect(store().project.textures?.some((t) => t.id === id)).toBe(true);
+  it('undoes adding a texture', () => roundTrip(() => store().addTextureId(TEX('sheet'))));
+
+  it('undoes replacing an image — the old art comes back', () => {
+    const id = store().addTextureId(TEX('art'));
+    roundTrip(() =>
+      store().updateTexture(id, { src: 'data:image/png;base64,BBBB', width: 32, height: 32 }),
+    );
+    expect(store().project.textures?.find((t) => t.id === id)?.src).toBe('data:image/png;base64,AA');
   });
+
+  it('only keeps the textures a step touched, not the library', () => {
+    store().addTextureId(TEX('big'));
+    const id = store().addTextureId(TEX('small'));
+    store().setActiveTexture(id);
+    // a graph edit after texture work: undoing it carries the library forward
+    // as it is, rather than restoring a copy
+    store().setValue('n7', 'g', { t: 'vec2', v: [0, 1] });
+    const lib = store().project.textures;
+    store().undo();
+    expect(store().project.textures).toBe(lib);
+  });
+
+  it('undoes adding a recipe, textures included', () => {
+    const src = structuredClone(store().project);
+    const texId = 'recipe-tex';
+    src.textures = [{ ...TEX('coins'), id: texId }];
+    src.systemTextures = { [src.systems[0]!.id]: texId };
+    roundTrip(() => store().addEmittersFrom(src));
+  });
+});
+
+const TEX = (name: string) => ({
+  name,
+  src: 'data:image/png;base64,AA',
+  width: 8,
+  height: 8,
+  cols: 1,
+  rows: 1,
+  pad: 0,
+  fps: 12,
+  play: 'loop' as const,
+  pick: 'per-particle' as const,
 });
 
 describe('copy, paste and duplicate', () => {

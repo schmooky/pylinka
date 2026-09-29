@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useEditor } from '../store';
+import { ParticleThumb, useSystemTexture } from './ParticleThumb';
 import { TabMenu, type TabMenuTarget } from './TabMenu';
 import { TemplatePicker } from './TemplatePicker';
 
@@ -119,6 +120,7 @@ export function Systems() {
                     ↳
                   </span>
                 )}
+                <TabThumb systemId={sys.id} />
                 {sys.name}
               </button>
             )}
@@ -191,4 +193,11 @@ function Flare({ side }: { side: 'left' | 'right' }) {
       }}
     />
   );
+}
+
+/** Which sprite a tab's emitter draws — the fastest way to tell emitters apart. */
+function TabThumb({ systemId }: { systemId: string }) {
+  const tex = useSystemTexture(systemId);
+  if (!tex) return null;
+  return <ParticleThumb tex={tex} size={14} className="mr-1 inline-grid align-[-3px]" />;
 }

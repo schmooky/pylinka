@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../store';
 import type { EditorProject } from '../types';
+import { exportBundle, exportFull, exportMinimal, readProjectFile } from '../projectFile';
 
 /**
  * The "Project" menu — the editor's only chrome besides Assets.
@@ -12,14 +13,14 @@ import type { EditorProject } from '../types';
  */
 const LIB_KEY = 'pylinka.editor.library';
 
-interface LibEntry {
+export interface LibEntry {
   id: string;
   name: string;
   updatedAt: string;
   data: EditorProject;
 }
 
-function readLib(): LibEntry[] {
+export function readLib(): LibEntry[] {
   try {
     const raw = localStorage.getItem(LIB_KEY);
     if (raw) return JSON.parse(raw) as LibEntry[];
@@ -92,21 +93,17 @@ export function ProjectsMenu() {
     setOpen(false);
   };
 
-  // export stripped of comment frames / sticky notes — they are notes to the
-  // person editing, not part of the effect a game loads
-  const exportWithoutNotes = () => {
-    const p = snapshot();
-    delete p.annotations;
-    const blob = new Blob([JSON.stringify(p, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${(p.name || 'effect').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.pylinka.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    // a file on disk outlives this browser, so it closes the same gap the
-    // library does — the header should stop saying the work is unsaved
-    markSaved();
-    setOpen(false);
+  // a complete file outlives this browser, so it closes the same gap the
+  // library does — the header should stop saying the work is unsaved. The
+  // minimal JSON is not complete (no images), so it does not count.
+  const exportAs = async (write: (p: EditorProject) => void | Promise<unknown>, complete = true) => {
+    try {
+      await write(snapshot());
+      if (complete) markSaved();
+      setOpen(false);
+    } catch (e) {
+      alert('Export failed: ' + (e as Error).message);
+    }
   };
 
   const copyJson = async () => {
@@ -118,17 +115,13 @@ export function ProjectsMenu() {
     }
   };
 
-  const onImportFile = (file: File) => {
-    const r = new FileReader();
-    r.onload = () => {
-      try {
-        importProject(JSON.parse(String(r.result)));
-        setOpen(false);
-      } catch (e) {
-        alert('Could not load project: ' + (e as Error).message);
-      }
-    };
-    r.readAsText(file);
+  const onImportFile = async (file: File) => {
+    try {
+      importProject(await readProjectFile(file));
+      setOpen(false);
+    } catch (e) {
+      alert('Could not load project: ' + (e as Error).message);
+    }
   };
 
   const item =
@@ -167,11 +160,17 @@ export function ProjectsMenu() {
           <div className="my-1 border-t border-border" />
           <label className={item + ' cursor-pointer'}>
             Import file…
-            <input type="file" accept=".json,application/json" className="hidden"
-              onChange={(e) => e.target.files?.[0] && onImportFile(e.target.files[0])} />
+            <input type="file" accept=".json,.zip,application/json,application/zip" className="hidden"
+              onChange={(e) => e.target.files?.[0] && void onImportFile(e.target.files[0])} />
           </label>
-          <button className={item} onClick={exportWithoutNotes} title="Export the project with comment frames and sticky notes stripped">
+          <button className={item} onClick={() => void exportAs(exportFull)} title="One self-contained JSON: images inlined, comment frames and sticky notes stripped">
             Export file (no notes)
+          </button>
+          <button className={item} onClick={() => void exportAs(exportMinimal, false)} title="JSON without images: each one is replaced by an assets/… path. For a game that ships its textures itself">
+            Export minimal JSON (no assets)
+          </button>
+          <button className={item} onClick={() => void exportAs(exportBundle)} title="A .zip with project.json, the images under assets/, and meta.json. Opens again via Import">
+            Export bundle (.zip)
           </button>
           <button className={item} onClick={copyJson}>Copy JSON to clipboard</button>
           <div className="my-1 border-t border-border" />
