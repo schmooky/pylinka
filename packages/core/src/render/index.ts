@@ -23,6 +23,7 @@ export { registerCompiledBackends } from './backends.js';
 export {
   createPylinka,
   createParticleSystem,
+  resolveAssetUrl,
   type CreateOptions,
   type ParticleSystemView,
   type PylinkaRuntime,

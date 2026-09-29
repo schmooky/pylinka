@@ -51,6 +51,14 @@ export interface CreateOptions {
    * they are read from there when this option is absent.
    */
   subEmitters?: Record<string, string>;
+  /**
+   * Where relative texture paths in the project resolve from. A project
+   * exported with external assets (a `.pylinka.zip`, or the minimal JSON)
+   * holds `assets/flame.png` instead of a data URI; set this to the URL the
+   * project JSON was served from (or its folder) so those load next to it.
+   * Absent, relative paths resolve against the page, like any `<img src>`.
+   */
+  assetBase?: string | URL;
 }
 
 /** Editor-exported project JSON carries per-system textures (not part of the
@@ -61,12 +69,22 @@ interface TexturedProject {
   systemTextures?: Record<string, string | null>;
 }
 
-function projectTextureFor(project: PylinkaProject, system: System): TextureInput | undefined {
+function projectTextureFor(
+  project: PylinkaProject,
+  system: System,
+  assetBase: string | URL | undefined,
+): TextureInput | undefined {
   const p = project as PylinkaProject & TexturedProject;
   const texId = p.systemTextures?.[system.id];
   const t = texId != null ? p.textures?.find((x) => x.id === texId) : undefined;
   if (t === undefined) return undefined;
-  return { image: t.src, cols: t.cols, rows: t.rows, pad: t.pad, fps: t.fps, play: t.play, pick: t.pick };
+  return { image: resolveAssetUrl(t.src, assetBase), cols: t.cols, rows: t.rows, pad: t.pad, fps: t.fps, play: t.play, pick: t.pick };
+}
+
+/** Resolve a project-relative asset path against `assetBase`; data/absolute URLs pass through. */
+export function resolveAssetUrl(src: string, assetBase: string | URL | undefined): string {
+  if (assetBase === undefined || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(src)) return src;
+  return new URL(src, assetBase).href;
 }
 
 /** Resolve the texture a system should use (option → per-system → project JSON). */
@@ -75,7 +93,7 @@ async function atlasFor(
   system: System,
   opts: CreateOptions,
 ): Promise<CompiledAtlasOptions | undefined> {
-  const input = opts.textures?.[system.name] ?? opts.texture ?? projectTextureFor(project, system);
+  const input = opts.textures?.[system.name] ?? opts.texture ?? projectTextureFor(project, system, opts.assetBase);
   return input === undefined ? undefined : resolveTexture(input);
 }
 

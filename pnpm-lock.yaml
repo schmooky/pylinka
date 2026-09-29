@@ -66,6 +66,9 @@ importers:
       '@pylinka/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@pylinka/format':
+        specifier: workspace:*
+        version: link:../../packages/format
       '@pylinka/graph':
         specifier: workspace:*
         version: link:../../packages/graph
