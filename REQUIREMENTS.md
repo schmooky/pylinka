@@ -52,7 +52,7 @@ Around the engine sits a static site with an `/editor` route (IndexedDB-cached p
 - **No physics solver** (no constraints, no particle-particle collision). Field forces and simple bounds only.
 - **No depth sorting** of particles in v1. Additive/premultiplied blending is the recommended documented path; alpha-blended smoke will exhibit draw-order artifacts (§13.8).
 - **No sub-emitters / death-event chains** in v1. Candidate for M3.
-- **No WebGL1.** The fallback floor is WebGL2.
+- **No GPU simulation on WebGL1.** The GPU fallback floor is WebGL2. A WebGL1 host gets a CPU simulation of the interpreted node set with a WebGL1 instanced draw (`webgl1` SimBackend), so an effect still plays, at CPU cost per particle and without the compiled-only nodes.
 
 ### 1.4 Target platforms & consumers (governs everything)
 

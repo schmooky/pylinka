@@ -50,6 +50,19 @@ trajectories.
 The base `@pylinka/core` entry holds the CPU scheduler, the knob bus and the timing helpers that
 every backend shares.
 
+## WebGL1
+
+WebGL1 has no transform feedback, so neither WebGL backend can simulate there. When pixi runs
+WebGL1 (`preferWebGLVersion: 1`, or a device without WebGL2), `createPylinka` uses a third backend
+on its own: the simulation runs on the CPU and the particles are drawn with one instanced WebGL1
+draw in pixi's context, so masks, filters and z-order still work. `createParticles` from
+`@pylinka/core/webgl` falls back the same way, and `simulation: 'cpu'` forces it on any context so
+you can see what a WebGL1 device will show.
+
+The CPU path reads the interpreted node set (`INTERPRETED_KINDS` in `@pylinka/core/webgl`). Nodes
+that only the compiled backends implement do nothing there. Its cost is CPU time per particle; it
+draws only the particles that are alive.
+
 ## When the GPU disappears
 
 Phones take the GPU away: background the tab, reset the driver, let another page get greedy. Both

@@ -11,8 +11,19 @@
  *
  * WebGL2: the TF step + instanced draw run between pixi's own draws;
  * `renderer.resetState()` re-syncs pixi's GL state cache afterwards.
+ *
+ * WebGL1: no transform feedback, so the step runs on the CPU (webgl1/sim.ts)
+ * and only the instanced draw touches GL, with the same re-sync after it.
  */
+import type { ParamDef, System } from '@pylinka/graph';
 import type { Renderer, WebGPURenderer } from 'pixi.js';
+import { SystemClock } from '../compiled/emitter.js';
+import type { KnobStore } from '../knobs.js';
+import { pickSystem } from '../system.js';
+import { extractParams, type EngineParams, type KnobValues } from '../webgl/params.js';
+import type { AtlasConfig } from '../webgl/engine.js';
+import { CpuSim } from '../webgl1/sim.js';
+import { CpuRenderer } from '../webgl1/renderer.js';
 import { WebGL2CompiledSim } from '../webgl2/engine.js';
 import { WebGPUSystemSim } from '../webgpu/engine.js';
 import { resolveAnim, resolveSprite } from '../compiled/sprite.js';
@@ -240,24 +251,9 @@ class WebGL2SimBackend implements SimBackend {
   }
 
   draw(worldTransform: Affine): void {
-    // use pixi's CURRENT render-target projection so a filtered / cached
-    // container renders the particles into its off-screen FBO, not the screen.
-    const proj = (this.renderer as unknown as { renderTarget: { projectionMatrix: Mat2D } }).renderTarget.projectionMatrix;
-    const [sx, sy, ox, oy] = projScaleOffset(proj, worldTransform);
+    const [sx, sy, ox, oy] = glScaleOffset(this.renderer, worldTransform);
     this.sim.draw(sx, sy, ox, oy, 1);
-    // invalidate exactly the pixi GL caches the raw draw dirtied (program, VAO,
-    // blend, texture units). renderer.resetState() would also null the CURRENT
-    // RENDER TARGET mid-frame and break pixi's pass teardown.
-    const r = this.renderer as unknown as {
-      shader: { resetState(): void };
-      geometry: { resetState(): void };
-      state: { resetState(): void };
-      texture: { resetState(): void };
-    };
-    r.shader.resetState();
-    r.geometry.resetState();
-    r.state.resetState();
-    r.texture.resetState();
+    resyncPixiGl(this.renderer);
   }
 
   apply(project: Parameters<SimBackend['apply']>[0]): boolean {
@@ -274,8 +270,201 @@ class WebGL2SimBackend implements SimBackend {
   }
 }
 
-/** Register both built-in factories. Runs on import of '@pylinka/core/pixi'. */
+/** Use pixi's CURRENT render-target projection, so a filtered / cached
+ *  container renders the particles into its off-screen FBO, not the screen. */
+function glScaleOffset(renderer: Renderer, worldTransform: Affine): [number, number, number, number] {
+  const proj = (renderer as unknown as { renderTarget: { projectionMatrix: Mat2D } }).renderTarget.projectionMatrix;
+  return projScaleOffset(proj, worldTransform);
+}
+
+/** Invalidate exactly the pixi GL caches a raw draw dirtied (program, VAO,
+ *  blend, texture units). renderer.resetState() would also null the CURRENT
+ *  RENDER TARGET mid-frame and break pixi's pass teardown. */
+function resyncPixiGl(renderer: Renderer): void {
+  const r = renderer as unknown as {
+    shader: { resetState(): void };
+    geometry: { resetState(): void };
+    state: { resetState(): void };
+    texture: { resetState(): void };
+  };
+  r.shader.resetState();
+  r.geometry.resetState();
+  r.state.resetState();
+  r.texture.resetState();
+}
+
+/** The interpreted engine's atlas config, from the compiled backends' options. */
+function atlasConfig(deps: SimBackendDeps): AtlasConfig | undefined {
+  if (deps.atlas === undefined) return undefined; // procedural soft sprite
+  const s = resolveSprite(deps.atlas);
+  const a = resolveAnim(deps.atlas);
+  return { ...s, fps: a.fps, play: a.play, pick: a.pick, row: a.row };
+}
+
+/**
+ * Reads the f32 and vec2 knobs the interpreted params understand out of the
+ * shared KnobStore, and tells when one changed since the last read. Lets the
+ * CPU backend re-extract its params only on a knob edit, not every frame.
+ */
+class KnobSnapshot {
+  readonly values: KnobValues = {};
+  private readonly tmp = new Float32Array(4);
+  private defs: ParamDef[];
+
+  constructor(
+    private readonly knobs: KnobStore,
+    defs: ParamDef[],
+  ) {
+    this.defs = defs;
+    this.refresh();
+  }
+
+  setDefs(defs: ParamDef[]): void {
+    this.defs = defs;
+    this.refresh();
+  }
+
+  /** Re-read the store. True when any value differs from the last read. */
+  refresh(): boolean {
+    let changed = false;
+    for (const d of this.defs) {
+      if (d.default.t !== 'f32' && d.default.t !== 'vec2') continue;
+      this.knobs.vec4(d.name, this.tmp, 0);
+      const prev = this.values[d.name];
+      if (d.default.t === 'f32') {
+        const x = this.tmp[0]!;
+        if (prev !== x) {
+          this.values[d.name] = x;
+          changed = true;
+        }
+      } else {
+        const x = this.tmp[0]!;
+        const y = this.tmp[1]!;
+        if (!Array.isArray(prev) || prev[0] !== x || prev[1] !== y) {
+          this.values[d.name] = [x, y];
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  }
+}
+
+class WebGL1SimBackend implements SimBackend {
+  /** Readable by a sibling: a sub-emitter child steps off its parent's state. */
+  readonly sim: CpuSim;
+  readonly clock: SystemClock;
+  private readonly renderer: Renderer;
+  private readonly draw1: CpuRenderer;
+  private readonly queue: QueuedStep[] = [];
+  private readonly knobs: KnobSnapshot;
+  private readonly wind: [number, number] = [0, 0];
+  private readonly emitter: [number, number] = [0, 0];
+  private readonly isChild: boolean;
+  private system: System;
+  private params: EngineParams;
+  private defs: ParamDef[];
+  private readonly _stats: SimStats = { aliveCount: 0, overflowCount: 0, gpuMs: null };
+
+  constructor(deps: SimBackendDeps) {
+    this.renderer = deps.renderer as Renderer;
+    this.system = deps.system;
+    this.defs = deps.params;
+    this.knobs = new KnobSnapshot(deps.knobs, deps.params);
+    this.params = extractParams(deps.system, deps.params, this.knobs.values);
+    this.recomputeWind();
+    const parent = deps.subParent instanceof WebGL1SimBackend ? deps.subParent.sim : undefined;
+    if (deps.subParent !== undefined && parent === undefined) {
+      throw new Error('A WebGL1 sub-emitter needs a parent on the WebGL1 backend too.');
+    }
+    this.isChild = parent !== undefined;
+    this.sim = new CpuSim(this.params, {
+      ...(parent !== undefined ? { parent } : {}),
+      ...(deps.mask !== undefined ? { mask: deps.mask } : {}),
+    });
+    this.clock = new SystemClock(deps.system.emitter, this.sim.capacity, 0, 0, deps.seed);
+    this.draw1 = new CpuRenderer(deps.device as WebGLRenderingContext, this.sim.capacity, atlasConfig(deps));
+  }
+
+  get stats(): SimStats {
+    return this._stats;
+  }
+
+  private recomputeWind(): void {
+    this.wind[0] = Math.cos(this.params.windDir) * this.params.windPower;
+    this.wind[1] = Math.sin(this.params.windDir) * this.params.windPower;
+  }
+
+  prepare(dtSeconds: number): void {
+    // same queueing as the GPU backends, so a parent and its child step in
+    // the order pixi draws them and an off-screen view does not pile up work
+    queueStep(this.queue, dtSeconds, this.clock.ex, this.clock.ey);
+  }
+
+  setEmitter(x: number, y: number): void {
+    this.clock.ex = x;
+    this.clock.ey = y;
+  }
+
+  spawnBurst(count: number): void {
+    this.clock.spawnBurst(count);
+  }
+
+  simulate(): void {
+    if (this.queue.length === 0) return;
+    if (this.knobs.refresh()) {
+      Object.assign(this.params, extractParams(this.system, this.defs, this.knobs.values));
+      this.recomputeWind();
+    }
+    for (const s of this.queue) {
+      const c = this.clock;
+      c.ex = s.ex;
+      c.ey = s.ey;
+      c.tick(s.dt);
+      this.emitter[0] = c.ex;
+      this.emitter[1] = c.ey;
+      // a child spawns on its parent's events, never from the emitter window
+      this.sim.step(s.dt, this.isChild ? 0 : c.spawnCount, this.emitter, this.wind, this.params);
+      c.endFrame(s.dt);
+    }
+    this.queue.length = 0;
+  }
+
+  draw(worldTransform: Affine): void {
+    const [sx, sy, ox, oy] = glScaleOffset(this.renderer, worldTransform);
+    this.draw1.draw(this.sim.state, this.sim.capacity, this.params, 1, sx, sy, ox, oy);
+    this._stats.aliveCount = this.draw1.drawn;
+    resyncPixiGl(this.renderer);
+  }
+
+  apply(project: Parameters<SimBackend['apply']>[0]): boolean {
+    // by ID first: a rename must not rebind this view to another system
+    const sys = pickSystem(project, this.system.name, this.system.id);
+    if (sys === undefined) return false;
+    this.knobs.setDefs(project.params);
+    const np = extractParams(sys, project.params, this.knobs.values);
+    if (!this.sim.fits(np)) return false;
+    this.system = sys;
+    this.defs = project.params;
+    Object.assign(this.params, np);
+    this.recomputeWind();
+    this.clock.setEmitterSettings(sys.emitter, this.sim.capacity);
+    return true;
+  }
+
+  restart(): void {
+    this.sim.reset();
+    this.clock.reset();
+  }
+
+  destroy(): void {
+    this.draw1.destroy();
+  }
+}
+
+/** Register the built-in factories. Runs on import of '@pylinka/core/pixi'. */
 export function registerCompiledBackends(): void {
   registerSimBackend('webgpu', (deps) => new WebGPUSimBackend(deps));
   registerSimBackend('webgl2', (deps) => new WebGL2SimBackend(deps));
+  registerSimBackend('webgl1', (deps) => new WebGL1SimBackend(deps));
 }

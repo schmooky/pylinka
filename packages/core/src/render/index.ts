@@ -44,5 +44,6 @@ export {
   type SimBackend,
   type SimBackendDeps,
   type SimBackendFactory,
+  type SimBackendKind,
   type SimStats,
 } from './sim.js';

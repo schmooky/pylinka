@@ -214,7 +214,7 @@ function buildSystem(
   }
   if (resolved.device === undefined || resolved.device === null) {
     throw new Error(
-      `The host renderer exposed no ${resolved.kind === 'webgpu' ? 'GPUDevice' : 'WebGL2 context'} — ` +
+      `The host renderer exposed no ${resolved.kind === 'webgpu' ? 'GPUDevice' : 'WebGL context'} — ` +
         'pass a constructed pixi Renderer (await app.init() first).',
     );
   }

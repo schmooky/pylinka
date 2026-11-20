@@ -24,6 +24,18 @@ describe('resolveBackend — §7.2 (backend follows host)', () => {
     expect(b.kind).toBe('webgl2');
     expect(b.device).toBe(gl);
   });
+  it('selects the CPU backend for a WebGL1 renderer — no transform feedback there', () => {
+    const gl = { fake: 'WebGLRenderingContext' };
+    const renderer = { type: RendererType.WEBGL, gl, context: { webGLVersion: 1 } } as unknown as Renderer;
+    const b = resolveBackend(renderer);
+    expect(b.kind).toBe('webgl1');
+    expect(b.device).toBe(gl);
+  });
+
+  it('keeps WebGL2 when pixi reports version 2', () => {
+    const renderer = { type: RendererType.WEBGL, gl: {}, context: { webGLVersion: 2 } } as unknown as Renderer;
+    expect(resolveBackend(renderer).kind).toBe('webgl2');
+  });
 });
 
 describe('SimBackend registry — GPU seam', () => {
