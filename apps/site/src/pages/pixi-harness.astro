@@ -33,13 +33,16 @@
 
       async function boot() {
         const params = new URLSearchParams(location.search);
-        const preference = params.get('renderer') === 'webgl' ? 'webgl' : 'webgpu';
+        // ?renderer=webgl1 runs pixi on a WebGL1 context: the CPU-simulated webgl1 backend
+        const webgl1 = params.get('renderer') === 'webgl1';
+        const preference = params.get('renderer') === 'webgl' || webgl1 ? 'webgl' : 'webgpu';
         const recipe = RECIPES.find((r) => r.slug === (params.get('recipe') ?? 'coin-spark-trail'))!;
 
         registerPylinka();
         const app = new Application();
         await app.init({
           preference,
+          ...(webgl1 ? { preferWebGLVersion: 1 as const } : {}),
           background: '#0a0a0a',
           resizeTo: window,
           antialias: false,

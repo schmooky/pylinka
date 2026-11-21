@@ -87,8 +87,8 @@ export class WebGL1Engine {
       this.onRestored();
     }
     this.renderer.draw(
-      this.sim.state,
-      this.sim.capacity,
+      this.sim.drawData,
+      this.sim.drawCount,
       p,
       this.sizeScale,
       2 / width,

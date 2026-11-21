@@ -23,7 +23,8 @@ import { pickSystem } from '../system.js';
 import { extractParams, type EngineParams, type KnobValues } from '../webgl/params.js';
 import type { AtlasConfig } from '../webgl/engine.js';
 import { CpuSim } from '../webgl1/sim.js';
-import { CpuRenderer } from '../webgl1/renderer.js';
+import { CpuRenderer, NoInstancingError } from '../webgl1/renderer.js';
+import { unsupportedNodes } from '../webgl/support.js';
 import { WebGL2CompiledSim } from '../webgl2/engine.js';
 import { WebGPUSystemSim } from '../webgpu/engine.js';
 import { resolveAnim, resolveSprite } from '../compiled/sprite.js';
@@ -215,6 +216,8 @@ class WebGL2SimBackend implements SimBackend {
       ...spriteOpts(deps),
       ...(deps.mask !== undefined ? { mask: deps.mask } : {}),
     });
+    // building the TF program, buffers and VAOs moved bindings pixi caches
+    resyncPixiGl(this.renderer);
   }
 
   get stats(): SimStats {
@@ -281,16 +284,31 @@ function glScaleOffset(renderer: Renderer, worldTransform: Affine): [number, num
  *  blend, texture units). renderer.resetState() would also null the CURRENT
  *  RENDER TARGET mid-frame and break pixi's pass teardown. */
 function resyncPixiGl(renderer: Renderer): void {
+  // optional calls: a construction-time resync can run against a renderer that
+  // is only partly set up (or a test double), and must not throw there
   const r = renderer as unknown as {
-    shader: { resetState(): void };
-    geometry: { resetState(): void };
-    state: { resetState(): void };
-    texture: { resetState(): void };
+    shader?: { resetState?(): void };
+    geometry?: { resetState?(): void };
+    state?: { resetState?(): void };
+    texture?: { resetState?(): void };
   };
-  r.shader.resetState();
-  r.geometry.resetState();
-  r.state.resetState();
-  r.texture.resetState();
+  r.shader?.resetState?.();
+  r.geometry?.resetState?.();
+  r.state?.resetState?.();
+  r.texture?.resetState?.();
+}
+
+/** Warnings already printed, so a rebuild loop (an editor) does not spam the console. */
+const warned = new Set<string>();
+function warnOnce(key: string, message: string): void {
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(message);
+}
+
+/** A per-instance seed for the CPU sim when the host gave none. */
+function autoSeed(): number {
+  return (Math.random() * 0x100000000) >>> 0 || 1;
 }
 
 /** The interpreted engine's atlas config, from the compiled backends' options. */
@@ -324,6 +342,22 @@ class KnobSnapshot {
     this.refresh();
   }
 
+  /** The values `defs` would read, without changing this snapshot. */
+  peek(defs: ParamDef[]): KnobValues {
+    const out: KnobValues = {};
+    for (const d of defs) {
+      if (d.default.t !== 'f32' && d.default.t !== 'vec2') continue;
+      this.knobs.vec4(d.name, this.tmp, 0);
+      out[d.name] = d.default.t === 'f32' ? this.tmp[0]! : [this.tmp[0]!, this.tmp[1]!];
+    }
+    return out;
+  }
+
+  /** Knobs this snapshot cannot carry into the interpreted params (not f32 / vec2). */
+  skipped(): string[] {
+    return this.defs.filter((d) => d.default.t !== 'f32' && d.default.t !== 'vec2').map((d) => d.name);
+  }
+
   /** Re-read the store. True when any value differs from the last read. */
   refresh(): boolean {
     let changed = false;
@@ -355,7 +389,16 @@ class WebGL1SimBackend implements SimBackend {
   readonly sim: CpuSim;
   readonly clock: SystemClock;
   private readonly renderer: Renderer;
-  private readonly draw1: CpuRenderer;
+  /** null when the context cannot instance (no ANGLE_instanced_arrays): the effect simulates but draws nothing. */
+  private readonly draw1: CpuRenderer | null;
+  private readonly gl: WebGLRenderingContext;
+  private needsRebuild = false;
+  private readonly canvas: HTMLCanvasElement | OffscreenCanvas | undefined;
+  private readonly onRestored = (): void => {
+    // pixi restores its own objects on this event; ours are rebuilt lazily in
+    // draw(), inside pixi's pass, where a resync follows
+    this.needsRebuild = true;
+  };
   private readonly queue: QueuedStep[] = [];
   private readonly knobs: KnobSnapshot;
   private readonly wind: [number, number] = [0, 0];
@@ -381,9 +424,44 @@ class WebGL1SimBackend implements SimBackend {
     this.sim = new CpuSim(this.params, {
       ...(parent !== undefined ? { parent } : {}),
       ...(deps.mask !== undefined ? { mask: deps.mask } : {}),
+      // without a per-instance seed, two views of one system started on the
+      // same frame would draw identical particles
+      seed: deps.seed ?? autoSeed(),
     });
     this.clock = new SystemClock(deps.system.emitter, this.sim.capacity, 0, 0, deps.seed);
-    this.draw1 = new CpuRenderer(deps.device as WebGLRenderingContext, this.sim.capacity, atlasConfig(deps));
+    this.gl = deps.device as WebGLRenderingContext;
+    this.draw1 = this.makeRenderer(deps);
+    // creating GL objects moved pixi's VAO, element-buffer and texture-unit
+    // bindings behind its back: drop its caches before it draws again
+    resyncPixiGl(this.renderer);
+    this.canvas = (this.gl as { canvas?: HTMLCanvasElement | OffscreenCanvas }).canvas;
+    this.canvas?.addEventListener?.('webglcontextrestored', this.onRestored as EventListener);
+
+    const skippedNodes = unsupportedNodes(this.system);
+    if (skippedNodes.length > 0) {
+      warnOnce(
+        `nodes:${this.system.id}`,
+        `Pylinka (WebGL1): system '${this.system.name}' uses nodes the CPU simulation does not run ` +
+          `(${skippedNodes.join(', ')}). They contribute nothing on WebGL1; see INTERPRETED_KINDS.`,
+      );
+    }
+    const skippedKnobs = this.knobs.skipped();
+    if (skippedKnobs.length > 0) {
+      warnOnce(
+        `knobs:${this.system.id}`,
+        `Pylinka (WebGL1): knobs ${skippedKnobs.join(', ')} are not f32/vec2 and do not reach the CPU simulation.`,
+      );
+    }
+  }
+
+  private makeRenderer(deps: SimBackendDeps): CpuRenderer | null {
+    try {
+      return new CpuRenderer(this.gl, this.sim.capacity, atlasConfig(deps));
+    } catch (e) {
+      if (!(e instanceof NoInstancingError)) throw e;
+      warnOnce('instancing', `${e.message} Pylinka effects will not draw on this device.`);
+      return null;
+    }
   }
 
   get stats(): SimStats {
@@ -431,9 +509,17 @@ class WebGL1SimBackend implements SimBackend {
   }
 
   draw(worldTransform: Affine): void {
+    this._stats.aliveCount = this.sim.drawCount;
+    const r = this.draw1;
+    if (r === null || this.gl.isContextLost()) return;
+    if (this.needsRebuild) {
+      // the restored context has none of the old objects; the particle state
+      // lives on the CPU, so the effect carries on where it was
+      this.needsRebuild = false;
+      r.createResources();
+    }
     const [sx, sy, ox, oy] = glScaleOffset(this.renderer, worldTransform);
-    this.draw1.draw(this.sim.state, this.sim.capacity, this.params, 1, sx, sy, ox, oy);
-    this._stats.aliveCount = this.draw1.drawn;
+    r.draw(this.sim.drawData, this.sim.drawCount, this.params, 1, sx, sy, ox, oy);
     resyncPixiGl(this.renderer);
   }
 
@@ -441,9 +527,11 @@ class WebGL1SimBackend implements SimBackend {
     // by ID first: a rename must not rebind this view to another system
     const sys = pickSystem(project, this.system.name, this.system.id);
     if (sys === undefined) return false;
-    this.knobs.setDefs(project.params);
-    const np = extractParams(sys, project.params, this.knobs.values);
+    // decide before touching the knob snapshot, so a rejected apply leaves
+    // this backend exactly as it was
+    const np = extractParams(sys, project.params, this.knobs.peek(project.params));
     if (!this.sim.fits(np)) return false;
+    this.knobs.setDefs(project.params);
     this.system = sys;
     this.defs = project.params;
     Object.assign(this.params, np);
@@ -458,7 +546,8 @@ class WebGL1SimBackend implements SimBackend {
   }
 
   destroy(): void {
-    this.draw1.destroy();
+    this.canvas?.removeEventListener?.('webglcontextrestored', this.onRestored as EventListener);
+    this.draw1?.destroy();
   }
 }
 

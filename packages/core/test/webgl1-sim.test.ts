@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import type { System } from '@pylinka/graph';
 import { extractParams, type EngineParams } from '../src/webgl/params.js';
 import { EASE_LUT_CHANNELS, EASE_LUT_N } from '../src/webgl/shaders.js';
-import { CPU_STATE_FLOATS, CpuSim } from '../src/webgl1/sim.js';
+import { CPU_DRAW_FLOATS, CPU_STATE_FLOATS, CpuSim, seedOffset } from '../src/webgl1/sim.js';
 import { compactAlive, packEaseLut } from '../src/webgl1/renderer.js';
 import { CPU_RENDER_FS, CPU_RENDER_VS, DRAW_FLOATS } from '../src/webgl1/shaders.js';
 
@@ -288,5 +288,245 @@ describe('WebGL1 render side', () => {
     }
     expect(slots).toBeGreaterThan(30);
     expect(slots).toBeLessThanOrEqual(128);
+  });
+});
+
+/** One alive particle at (x, y) moving at (vx, vy), from a point spawn. */
+function launched(
+  over: Partial<EngineParams>,
+  vel: [number, number],
+): { sim: CpuSim; p: EngineParams } {
+  const p = params({ capacity: 1, lifeMin: 10, lifeMax: 10, velMin: vel, velMax: vel, ...over });
+  const sim = new CpuSim(p);
+  sim.step(0.1, 1, [0, 0], NO_WIND, p);
+  return { sim, p };
+}
+
+describe('CpuSim — colliders (every kind)', () => {
+  const col = (kind: 1 | 2 | 3 | 4 | 5, a: [number, number], b: [number, number], radius = 0) => ({
+    kind,
+    a,
+    b,
+    radius,
+    restitution: 1,
+    friction: 0,
+    relative: 0 as const,
+  });
+
+  it('keeps a particle inside a rect and reflects it off the wall', () => {
+    const { sim, p } = launched({ colliders: [col(2, [-5, -5], [5, 5])] }, [100, 0]);
+    sim.step(0.1, 0, [0, 0], NO_WIND, p); // would reach x = 10
+    expect(at(sim, 0).x).toBeCloseTo(5, 5);
+    expect(at(sim, 0).vx).toBeCloseTo(-100, 5);
+  });
+
+  it('ejects a particle out of a solid rect along the shortest axis', () => {
+    const { sim, p } = launched({ colliders: [col(3, [8, -50], [100, 50])] }, [100, 0]);
+    sim.step(0.1, 0, [0, 0], NO_WIND, p); // lands at x = 10, 2 px inside the left face
+    expect(at(sim, 0).x).toBeCloseTo(8, 5);
+    expect(at(sim, 0).vx).toBeCloseTo(-100, 5);
+  });
+
+  it('pushes a particle out of a disc and keeps another one inside a ring', () => {
+    const out = launched({ colliders: [col(4, [20, 0], [0, 0], 12)] }, [100, 0]);
+    out.sim.step(0.1, 0, [0, 0], NO_WIND, out.p); // x = 10, 10 px from the centre, r = 12
+    expect(at(out.sim, 0).x).toBeCloseTo(8, 5);
+    expect(at(out.sim, 0).vx).toBeCloseTo(-100, 5);
+
+    const inn = launched({ colliders: [col(5, [0, 0], [0, 0], 6)] }, [100, 0]);
+    inn.sim.step(0.1, 0, [0, 0], NO_WIND, inn.p); // x = 10, outside r = 6
+    expect(at(inn.sim, 0).x).toBeCloseTo(6, 5);
+    expect(at(inn.sim, 0).vx).toBeCloseTo(-100, 5);
+  });
+
+  it('kicks a particle with a moving disc', () => {
+    // a still particle just right of a disc moving at +50 px/s is pushed along +x
+    const { sim, p } = launched({ colliders: [col(4, [-1, 0], [50, 0], 12)] }, [0, 0]);
+    sim.step(0.1, 0, [0, 0], NO_WIND, p);
+    expect(at(sim, 0).vx).toBeGreaterThan(0);
+  });
+});
+
+describe('CpuSim — other forces', () => {
+  it('pushes away from an obstacle', () => {
+    const { sim, p } = launched(
+      {
+        obstacles: [
+          {
+            center: [5, 0],
+            velocity: [0, 0],
+            radius: 20,
+            strength: 100,
+            softness: 0.5,
+            swirl: 0,
+            carry: 0,
+            relative: 0,
+          },
+        ],
+      },
+      [0, 0],
+    );
+    sim.step(0.1, 0, [0, 0], NO_WIND, p);
+    expect(at(sim, 0).vx).toBeLessThan(0);
+  });
+
+  it('turbulence moves a particle and stays finite', () => {
+    const { sim, p } = launched({ turbulence: [500, 40, 1] }, [0, 0]);
+    for (let i = 0; i < 20; i++) sim.step(0.016, 0, [0, 0], NO_WIND, p);
+    const q = at(sim, 0);
+    expect(Number.isFinite(q.x) && Number.isFinite(q.y)).toBe(true);
+    expect(Math.hypot(q.vx, q.vy)).toBeGreaterThan(0);
+  });
+});
+
+describe('CpuSim — edge cases', () => {
+  it('runs a zero-capacity pool and a child of one without NaN or work', () => {
+    const p = params({ capacity: 0 });
+    const parent = new CpuSim(p);
+    const child = new CpuSim(params(), { parent });
+    for (let i = 0; i < 3; i++) {
+      parent.step(0.1, 5, [0, 0], NO_WIND, p);
+      child.step(0.1, 0, [0, 0], NO_WIND, p);
+    }
+    expect(parent.capacity).toBe(0);
+    expect(child.capacity).toBe(0);
+    expect(parent.aliveCount()).toBe(0);
+    expect(child.aliveCount()).toBe(0);
+    // the cursor stayed a number, so a later capacity-preserving apply still works
+    parent.step(0.1, 1, [0, 0], NO_WIND, p);
+    expect(parent.drawCount).toBe(0);
+  });
+
+  it('spawns at dt 0 and leaves the state still', () => {
+    const p = params({ capacity: 2, velMin: [10, 0], velMax: [10, 0] });
+    const sim = new CpuSim(p);
+    sim.step(0, 1, [3, 4], NO_WIND, p);
+    sim.step(0, 0, [3, 4], NO_WIND, p);
+    expect(at(sim, 0)).toMatchObject({ x: 3, y: 4, age: 0 });
+    expect(sim.aliveCount()).toBe(1);
+  });
+
+  it('stays finite with a very large dt', () => {
+    const p = params({
+      capacity: 4,
+      velMin: [1e3, -1e3],
+      velMax: [1e3, 1e3],
+      gravity: [0, 1e4],
+      drag: 5,
+      lifeMin: 1e6,
+      lifeMax: 1e6,
+    });
+    const sim = new CpuSim(p);
+    sim.step(0.1, 4, [0, 0], NO_WIND, p);
+    sim.step(100, 0, [0, 0], NO_WIND, p);
+    for (let i = 0; i < 4; i++) {
+      const q = at(sim, i);
+      expect(Number.isFinite(q.x) && Number.isFinite(q.vy)).toBe(true);
+    }
+  });
+
+  it('fills the whole pool when spawnCount exceeds capacity', () => {
+    const p = params({ capacity: 3 });
+    const sim = new CpuSim(p);
+    sim.step(0.1, 10, [0, 0], NO_WIND, p);
+    expect(sim.aliveCount()).toBe(3);
+  });
+
+  it('uses the single entry of a one-point mask for every spawn', () => {
+    const p = params({ capacity: 3 });
+    const sim = new CpuSim(p, { mask: { points: new Float32Array([2, -2]), count: 1 } });
+    sim.step(0.1, 3, [0, 0], NO_WIND, p);
+    for (let i = 0; i < 3; i++) expect(at(sim, i)).toMatchObject({ x: 2, y: -2 });
+  });
+});
+
+describe('CpuSim — seeds', () => {
+  const p = params({ capacity: 16, shape: 1, shapeRadius: 50 });
+  const spawnX = (seed?: number) => {
+    const sim = new CpuSim(p, seed === undefined ? {} : { seed });
+    sim.step(0.1, 16, [0, 0], NO_WIND, p);
+    return Array.from({ length: 16 }, (_, i) => at(sim, i).x);
+  };
+
+  it('seed 0 is the default and keeps the GPU hash input', () => {
+    expect(seedOffset(0)).toBe(0);
+    expect(spawnX(0)).toEqual(spawnX());
+  });
+
+  it('two seeds draw different particles; one seed repeats', () => {
+    expect(spawnX(1)).not.toEqual(spawnX(2));
+    expect(spawnX(7)).toEqual(spawnX(7));
+  });
+});
+
+describe('CpuSim — sub-emitter edge bookkeeping', () => {
+  it('does not fire an event twice when the child steps without its parent', () => {
+    const pp = params({ capacity: 1 });
+    const cp = params({ subOn: 'birth', lifeMin: 5, lifeMax: 5 });
+    const parent = new CpuSim(pp);
+    const child = new CpuSim(cp, { parent });
+    parent.step(0.1, 1, [0, 0], NO_WIND, pp);
+    child.step(0.1, 0, [0, 0], NO_WIND, cp);
+    expect(at(child, 0).age).toBe(0);
+    // parent hidden: only the child keeps stepping
+    child.step(0.1, 0, [0, 0], NO_WIND, cp);
+    child.step(0.1, 0, [0, 0], NO_WIND, cp);
+    expect(at(child, 0).age).toBeCloseTo(0.2, 5); // not respawned at age 0
+  });
+
+  it('fires a birth burst with inherited velocity', () => {
+    const pp = params({ capacity: 2, velMin: [40, 0], velMax: [40, 0] });
+    const cp = params({
+      deathBurst: { max: 2, countMin: 2, countMax: 2, inherit: 0.5, on: 'birth' },
+      subOn: 'birth',
+    });
+    const parent = new CpuSim(pp);
+    const child = new CpuSim(cp, { parent });
+    parent.step(0.1, 1, [0, 0], NO_WIND, pp);
+    child.step(0.1, 0, [0, 0], NO_WIND, cp);
+    expect(child.aliveCount()).toBe(2);
+    expect(at(child, 0).vx).toBeCloseTo(20, 5);
+    expect(at(child, 2).vx).toBeCloseTo(20, 5);
+  });
+
+  it('a burst size change needs a new pool, a count change does not', () => {
+    const parent = new CpuSim(params({ capacity: 2 }));
+    const db = { max: 4, countMin: 1, countMax: 3, inherit: 0, on: 'death' as const };
+    const cp = params({ deathBurst: db });
+    const child = new CpuSim(cp, { parent });
+    expect(child.fits(params({ deathBurst: { ...db, countMax: 4 } }))).toBe(true);
+    expect(child.fits(params({ deathBurst: { ...db, max: 8 } }))).toBe(false);
+    expect(child.fits(params())).toBe(false); // burst removed
+  });
+});
+
+describe('CpuSim — draw buffer', () => {
+  it('matches a separate compaction of the state, burst regions included', () => {
+    const pp = params({
+      capacity: 5,
+      lifeMin: 0.15,
+      lifeMax: 0.35,
+      velMin: [-9, -9],
+      velMax: [9, 9],
+    });
+    const cp = params({
+      deathBurst: { max: 3, countMin: 0, countMax: 3, inherit: 0.2, on: 'death' },
+      lifeMin: 0.2,
+      lifeMax: 0.4,
+    });
+    const parent = new CpuSim(pp, { seed: 3 });
+    const child = new CpuSim(cp, { parent, seed: 4 });
+    for (let f = 0; f < 30; f++) {
+      parent.step(0.05, f % 3, [0, 0], NO_WIND, pp);
+      child.step(0.05, 0, [0, 0], NO_WIND, cp);
+      for (const sim of [parent, child]) {
+        const out = new Float32Array(sim.capacity * DRAW_FLOATS);
+        const n = compactAlive(sim.state, sim.capacity, out);
+        expect(sim.drawCount).toBe(n);
+        expect(Array.from(sim.drawData.subarray(0, n * CPU_DRAW_FLOATS))).toEqual(
+          Array.from(out.subarray(0, n * DRAW_FLOATS)),
+        );
+      }
+    }
   });
 });

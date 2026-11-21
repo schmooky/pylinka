@@ -2,11 +2,14 @@
  * Instanced draw of CPU-simulated particles on WebGL1 (or a WebGL2 context
  * used through the WebGL1 API).
  *
- * Each draw copies the alive particles into a compact buffer and uploads it,
- * so the GPU only sees particles that are visible. Instancing comes from
+ * The simulation hands over a compact buffer of alive particles (CpuSim
+ * `drawData`), which is uploaded as is, so the GPU only sees particles that are
+ * visible. The upload orphans the buffer first, so a driver that still reads
+ * last frame's data does not stall this frame's write. Instancing comes from
  * `ANGLE_instanced_arrays` on WebGL1, which every WebGL1 implementation in use
- * exposes; a context without it throws at construction rather than drawing
- * nothing.
+ * exposes; a context without it throws `NoInstancingError` at construction
+ * rather than drawing nothing, and the pixi backend turns that into a warning
+ * and an effect that draws nothing.
  *
  * The renderer touches only global GL state that it can leave clean: it unbinds
  * any VAO before it sets attributes (so a host VAO is never modified), and it
@@ -16,7 +19,7 @@
 import type { AtlasConfig } from '../webgl/engine.js';
 import type { EngineParams } from '../webgl/params.js';
 import { EASE_LUT_CHANNELS, EASE_LUT_N } from '../webgl/shaders.js';
-import { CPU_STATE_FLOATS } from './sim.js';
+import { CPU_DRAW_FLOATS, CPU_STATE_FLOATS } from './sim.js';
 import { ATTR, CPU_RENDER_FS, CPU_RENDER_UNIFORMS, CPU_RENDER_VS, DRAW_FLOATS } from './shaders.js';
 
 const INSTANCED = [ATTR.pos, ATTR.age, ATTR.life, ATTR.seed] as const;
@@ -34,6 +37,14 @@ interface Instancing {
   draw(instances: number): void;
 }
 
+/** Thrown when a WebGL1 context has no ANGLE_instanced_arrays. */
+export class NoInstancingError extends Error {
+  constructor() {
+    super('Pylinka on WebGL1 needs the ANGLE_instanced_arrays extension.');
+    this.name = 'NoInstancingError';
+  }
+}
+
 function instancing(gl: AnyGL): Instancing | null {
   if (isWebGL2(gl)) {
     return {
@@ -49,13 +60,11 @@ function instancing(gl: AnyGL): Instancing | null {
   };
 }
 
-/** Unbind the current VAO, if the context has VAOs, so attribute calls hit the default one. */
-function unbindVao(gl: AnyGL): void {
-  if (isWebGL2(gl)) {
-    gl.bindVertexArray(null);
-    return;
-  }
-  gl.getExtension('OES_vertex_array_object')?.bindVertexArrayOES(null);
+/** Unbinds the current VAO, if the context has VAOs, so attribute calls hit the default one. */
+function vaoUnbinder(gl: AnyGL): () => void {
+  if (isWebGL2(gl)) return () => gl.bindVertexArray(null);
+  const ext = gl.getExtension('OES_vertex_array_object');
+  return ext ? () => ext.bindVertexArrayOES(null) : () => undefined;
 }
 
 function compile(gl: AnyGL, type: number, src: string): WebGLShader {
@@ -123,8 +132,14 @@ export class CpuRenderer {
   private readonly gl: AnyGL;
   private readonly capacity: number;
   private readonly atlas: AtlasConfig | undefined;
-  private readonly inst: Instancing;
-  private readonly drawData: Float32Array;
+  // Extension objects belong to one context generation: after a restore the old
+  // ones are dead (calls on them do nothing), so createResources() fetches both again.
+  private inst!: Instancing;
+  private unbindVao!: () => void;
+  private readonly bufBytes: number;
+  /** Cached upload view; WebGL1 has no (offset, length) bufferSubData, so a view is needed. */
+  private view: Float32Array | null = null;
+  private viewSrc: Float32Array | null = null;
   private readonly lut = new Float32Array(EASE_LUT_N * 4);
   private readonly uniforms = new Map<string, WebGLUniformLocation | null>();
 
@@ -138,19 +153,20 @@ export class CpuRenderer {
   drawn = 0;
 
   constructor(gl: AnyGL, capacity: number, atlas?: AtlasConfig) {
-    const inst = instancing(gl);
-    if (!inst) throw new Error('Pylinka on WebGL1 needs the ANGLE_instanced_arrays extension.');
     this.gl = gl;
-    this.inst = inst;
     this.capacity = capacity;
     this.atlas = atlas;
-    this.drawData = new Float32Array(capacity * DRAW_FLOATS);
+    this.bufBytes = capacity * DRAW_FLOATS * 4;
     this.createResources();
   }
 
   /** (Re)create every GL object. Call again after a context restore. */
   createResources(): void {
     const gl = this.gl;
+    const inst = instancing(gl);
+    if (!inst) throw new NoInstancingError();
+    this.inst = inst;
+    this.unbindVao = vaoUnbinder(gl);
     this.uniforms.clear();
     this.prog = link(gl);
     for (const n of CPU_RENDER_UNIFORMS) this.uniforms.set(n, gl.getUniformLocation(this.prog, n));
@@ -164,11 +180,11 @@ export class CpuRenderer {
     );
     this.instBuf = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, this.drawData.byteLength, gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, this.bufBytes, gl.DYNAMIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
     // the element binding lives in the VAO, so bind it with none bound
-    unbindVao(gl);
+    this.unbindVao();
     this.idxBuf = gl.createBuffer()!;
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.idxBuf);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0, 1, 2, 0, 2, 3]), gl.STATIC_DRAW);
@@ -194,12 +210,13 @@ export class CpuRenderer {
   }
 
   /**
-   * Draw `state` into the bound framebuffer. `sx, sy, ox, oy` map world px to
-   * clip space: clip = world * (sx, sy) + (ox, oy).
+   * Draw `count` particles from `data` (the compact layout, CPU_DRAW_FLOATS
+   * each, e.g. CpuSim `drawData`) into the bound framebuffer. `sx, sy, ox, oy`
+   * map world px to clip space: clip = world * (sx, sy) + (ox, oy).
    */
   draw(
-    state: Float32Array,
-    stateCapacity: number,
+    data: Float32Array,
+    count: number,
     p: EngineParams,
     sizeScale: number,
     sx: number,
@@ -209,7 +226,7 @@ export class CpuRenderer {
   ): void {
     const gl = this.gl;
     if (gl.isContextLost()) return;
-    const n = compactAlive(state, Math.min(stateCapacity, this.capacity), this.drawData);
+    const n = Math.min(count, this.capacity, Math.floor(data.length / CPU_DRAW_FLOATS));
     this.drawn = n;
     if (n === 0) return;
 
@@ -258,20 +275,17 @@ export class CpuRenderer {
       gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_COLOR, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
-    unbindVao(gl);
+    this.unbindVao();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instBuf);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.drawData.subarray(0, n * DRAW_FLOATS));
+    // orphan, then write: the driver can hand out fresh storage instead of
+    // waiting for last frame's draw to finish reading the old one
+    gl.bufferData(gl.ARRAY_BUFFER, this.bufBytes, gl.DYNAMIC_DRAW);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.uploadView(data, n));
 
-    const stride = DRAW_FLOATS * 4;
-    const inst = (loc: number, size: number, off: number) => {
-      gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, stride, off);
-      this.inst.divisor(loc, 1);
-    };
-    inst(ATTR.pos, 2, 0);
-    inst(ATTR.age, 1, 8);
-    inst(ATTR.life, 1, 12);
-    inst(ATTR.seed, 1, 16);
+    this.instAttr(ATTR.pos, 2, 0);
+    this.instAttr(ATTR.age, 1, 8);
+    this.instAttr(ATTR.life, 1, 12);
+    this.instAttr(ATTR.seed, 1, 16);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.cornerBuf);
     gl.enableVertexAttribArray(ATTR.corner);
     gl.vertexAttribPointer(ATTR.corner, 2, gl.FLOAT, false, 0, 0);
@@ -285,6 +299,23 @@ export class CpuRenderer {
     gl.disableVertexAttribArray(ATTR.corner);
     for (const loc of INSTANCED) gl.disableVertexAttribArray(loc);
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
+  }
+
+  private instAttr(loc: number, size: number, off: number): void {
+    const gl = this.gl;
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, size, gl.FLOAT, false, DRAW_FLOATS * 4, off);
+    this.inst.divisor(loc, 1);
+  }
+
+  /** A view of the first n particles of data, reused while n and data are unchanged. */
+  private uploadView(data: Float32Array, n: number): Float32Array {
+    const len = n * DRAW_FLOATS;
+    if (this.viewSrc !== data || this.view === null || this.view.length !== len) {
+      this.view = data.subarray(0, len);
+      this.viewSrc = data;
+    }
+    return this.view;
   }
 
   destroy(): void {

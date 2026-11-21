@@ -3,22 +3,37 @@
  *
  * This is a line-by-line port of the interpreted WebGL2 step shaders
  * (`updateVs` / `updateVsSub` in webgl/shaders.ts) to TypeScript: the same
- * 7-float state layout, the same cursor-window spawning, the same hashes, the
- * same force model and collider resolve. It reads the same `EngineParams`, so
+ * 7-float state layout, the same cursor-window spawning, the same hash
+ * formulas, the same force model and collider resolve. It reads the same `EngineParams`, so
  * an effect behaves the same way it does on the interpreted WebGL2 engine. It
  * does NOT run the compiled graph: node kinds outside `INTERPRETED_KINDS`
  * contribute nothing here, exactly as on the interpreted engine.
  *
  * State is double-buffered like the GPU version. A sub-emitter reads its
  * parent's current and previous buffers to find the birth/death edge, so the
- * parent must be stepped first in a frame.
+ * parent must be stepped first in a frame. A child only looks for edges after
+ * the parent has advanced since the child's last step: a child stepped twice
+ * against one parent step (a catch-up queue, or a hidden parent) does not
+ * fire the same event twice.
+ *
+ * Numerics differ from the GPU in one way: the hashes and forces run in float64
+ * here and in float32 there, so the same seed and frame give statistically the
+ * same effect, not bit-identical particles. State is stored as float32.
+ *
+ * `step()` also writes the alive particles into a compact draw buffer
+ * (`drawData`, DRAW_FLOATS per particle, slot order) and counts them, so the
+ * renderer and `aliveCount()` need no second pass over the pool.
  *
  * Steady-state `step()` allocates nothing.
  */
 import type { EngineParams } from '../webgl/params.js';
+import { DRAW_FLOATS } from './shaders.js';
 
 /** Floats per particle: pos.xy, vel.xy, age, life, seed. Same as the GPU layout. */
 export const CPU_STATE_FLOATS = 7;
+
+/** Floats per drawn particle in `drawData`: pos.xy, age, life, seed (the render layout). */
+export const CPU_DRAW_FLOATS = DRAW_FLOATS;
 
 /** Emitter-relative spawn offsets, one xy pair per entry (an emission mask). */
 export interface CpuMask {
@@ -31,6 +46,19 @@ export interface CpuSimOptions {
   parent?: CpuSim;
   /** Emission mask point table. Ignored for a sub-emitter. */
   mask?: CpuMask;
+  /**
+   * Per-instance seed. Two sims with different seeds draw different particles
+   * from the same params; 0 (the default) matches the interpreted GPU step's
+   * hashes, which take no seed.
+   */
+  seed?: number;
+}
+
+/** A seed folded into a hash-input offset in [0, 1024). 0 stays 0. */
+export function seedOffset(seed: number): number {
+  const u = seed >>> 0;
+  if (u === 0) return 0;
+  return fract(u * 0.6180339887498949) * 1024;
 }
 
 const TAU = 6.2831853;
@@ -104,9 +132,20 @@ export class CpuSim {
   private readonly subOn: 'death' | 'birth';
   private readonly mask: CpuMask | undefined;
 
+  /** Compact alive particles of the current state, CPU_DRAW_FLOATS each, slot order. */
+  readonly drawData: Float32Array;
+  /** How many particles `drawData` holds (the alive count of the current state). */
+  drawCount = 0;
+  /** Monotonic step counter, never reset; a child compares it to see whether its parent advanced. */
+  stepId = 0;
+
   private spawnBase = 0;
   private frame = 0;
   private time = 0;
+  private readonly seedOff: number;
+  private lastParentStep = 0;
+  /** Sub-emitter scratch: per parent slot, how many burst copies fire this step (0 = none). */
+  private readonly fireN: Int32Array;
   private readonly fr: Frame;
 
   constructor(params: EngineParams, opts: CpuSimOptions = {}) {
@@ -120,6 +159,10 @@ export class CpuSim {
       opts.parent === undefined && opts.mask && opts.mask.count > 0 ? opts.mask : undefined;
     const n = this.capacity * CPU_STATE_FLOATS;
     this.bufs = [new Float32Array(n), new Float32Array(n)];
+    this.drawData = new Float32Array(this.capacity * CPU_DRAW_FLOATS);
+    this.seedOff = seedOffset(opts.seed ?? 0);
+    this.fireN = new Int32Array(opts.parent ? this.parentCap : 0);
+    if (opts.parent) this.lastParentStep = opts.parent.stepId;
     this.fr = { dt: 0, time: 0, frame: 0, ex: 0, ey: 0, gx: 0, gy: 0, dragK: 1, p: params };
   }
 
@@ -151,6 +194,8 @@ export class CpuSim {
     this.spawnBase = 0;
     this.frame = 0;
     this.time = 0;
+    this.drawCount = 0;
+    if (this.parent) this.lastParentStep = this.parent.stepId;
   }
 
   /** Advance by dt, spawning `spawnCount` particles in the cursor window. */
@@ -174,24 +219,37 @@ export class CpuSim {
 
     const src = this.bufs[this.cur]!;
     const dst = this.bufs[1 - this.cur]!;
+    this.drawCount = 0;
     if (this.parent) this.stepSub(src, dst);
     else this.stepRoot(src, dst, spawnCount);
 
     this.cur = 1 - this.cur;
-    if (!this.parent) this.spawnBase = (this.spawnBase + spawnCount) % this.capacity;
+    // capacity 0 would make the cursor NaN; there is nothing to spawn into anyway
+    if (!this.parent && this.capacity > 0)
+      this.spawnBase = (this.spawnBase + spawnCount) % this.capacity;
     this.frame += 1;
+    this.stepId += 1;
     this.time += dt;
   }
 
-  /** Alive count of the current state. */
+  /** Alive count of the current state (counted during the last step). */
   aliveCount(): number {
-    const s = this.state;
-    let n = 0;
-    for (let i = 0; i < this.capacity; i++) {
-      const o = i * CPU_STATE_FLOATS;
-      if (s[o + 5]! > 0 && s[o + 4]! < s[o + 5]!) n++;
-    }
-    return n;
+    return this.drawCount;
+  }
+
+  /** Append slot `o` of `dst` to the draw buffer when it is alive. */
+  private emit(dst: Float32Array, o: number): void {
+    const life = dst[o + 5]!;
+    const age = dst[o + 4]!;
+    if (!(life > 0 && age < life)) return;
+    const d = this.drawCount * CPU_DRAW_FLOATS;
+    const out = this.drawData;
+    out[d] = dst[o]!;
+    out[d + 1] = dst[o + 1]!;
+    out[d + 2] = age;
+    out[d + 3] = life;
+    out[d + 4] = dst[o + 6]!;
+    this.drawCount++;
   }
 
   private stepRoot(src: Float32Array, dst: Float32Array, spawnCount: number): void {
@@ -206,7 +264,7 @@ export class CpuSim {
       // GLSL mod() on floats: the result is always in [0, cap)
       const rel = (((id - this.spawnBase + cap) % cap) + cap) % cap;
       if (!alive && rel < spawnCount) {
-        const s = hash11(id * 7.77 + this.fr.frame * 3.13 + 1.0);
+        const s = hash11(id * 7.77 + this.fr.frame * 3.13 + 1.0 + this.seedOff);
         let offX: number;
         let offY: number;
         if (mask) {
@@ -225,13 +283,16 @@ export class CpuSim {
         dst[o + 4] = 0;
         dst[o + 5] = mix(p.lifeMin, p.lifeMax, rnd(s, 5.0));
         dst[o + 6] = s;
+        this.emit(dst, o);
         continue;
       }
       if (!alive) {
-        copyDead(src, dst, o);
+        // a slot dead in both buffers already holds life 0: nothing to write
+        if (dst[o + 5]! !== 0) copyDead(src, dst, o);
         continue;
       }
       this.integrate(src, dst, o);
+      this.emit(dst, o);
     }
   }
 
@@ -246,31 +307,41 @@ export class CpuSim {
     const inherit = db?.inherit ?? 0;
     const onBirth = this.subOn === 'birth';
     const pc = this.parentCap;
+    const fireN = this.fireN;
 
-    for (let k = 0; k < this.burstMax; k++) {
-      for (let id = 0; id < pc; id++) {
-        // child slot: burst region k, parent slot id
-        const o = (k * pc + id) * CPU_STATE_FLOATS;
+    // Edges exist only when the parent advanced since this child last looked;
+    // otherwise its (prev, cur) pair is the one already consumed.
+    const fresh = parent.stepId !== this.lastParentStep;
+    this.lastParentStep = parent.stepId;
+
+    // One pass over the parent: which slots fired, and how many copies each.
+    // (The GPU evaluates this per burst pass; the result is the same.)
+    for (let id = 0; id < pc; id++) {
+      let n = 0;
+      if (fresh) {
         const po = id * CPU_STATE_FLOATS;
-        const life = src[o + 5]!;
-        const age = src[o + 4]!;
-        const alive = life > 0 && age < life;
-
         const prevAlive = pPrev[po + 5]! > 0 && pPrev[po + 4]! < pPrev[po + 5]!;
         const currAlive = pCur[po + 5]! > 0 && pCur[po + 4]! < pCur[po + 5]!;
         const fired = onBirth ? !prevAlive && currAlive : prevAlive && !currAlive;
-
-        let doSpawn = fired;
-        let burstN = 1;
-        if (this.hasBurst) {
-          const dseed = hash11(id * 3.19 + this.fr.frame * 7.53 + 5.0);
-          burstN = Math.trunc(Math.max(Math.floor(mix(countMin, countMax, dseed) + 0.5), 0));
-          doSpawn = fired && k < burstN;
+        if (fired) {
+          if (this.hasBurst) {
+            const dseed = hash11(id * 3.19 + this.fr.frame * 7.53 + 5.0 + this.seedOff);
+            n = Math.trunc(Math.max(Math.floor(mix(countMin, countMax, dseed) + 0.5), 0));
+          } else n = 1;
         }
+      }
+      fireN[id] = n;
+    }
 
-        if (doSpawn) {
+    // burst region k, parent slot id: same slot order as the GPU passes
+    for (let k = 0; k < this.burstMax; k++) {
+      for (let id = 0; id < pc; id++) {
+        const o = (k * pc + id) * CPU_STATE_FLOATS;
+        const burstN = fireN[id]!;
+        if (k < burstN) {
+          const po = id * CPU_STATE_FLOATS;
           const s = hash11(
-            id * 7.77 + this.fr.frame * 3.13 + (this.hasBurst ? k * 2.0 + 1.0 : 1.0),
+            id * 7.77 + this.fr.frame * 3.13 + (this.hasBurst ? k * 2.0 + 1.0 : 1.0) + this.seedOff,
           );
           this.shapeOffset(s, this.hasBurst ? k / Math.max(burstN, 1) : -1);
           dst[o] = pCur[po]! + OFF[0]!;
@@ -284,13 +355,16 @@ export class CpuSim {
           dst[o + 4] = 0;
           dst[o + 5] = mix(p.lifeMin, p.lifeMax, rnd(s, 5.0));
           dst[o + 6] = s;
+          this.emit(dst, o);
           continue;
         }
-        if (!alive) {
-          copyDead(src, dst, o);
+        const life = src[o + 5]!;
+        if (!(life > 0 && src[o + 4]! < life)) {
+          if (dst[o + 5]! !== 0) copyDead(src, dst, o);
           continue;
         }
         this.integrate(src, dst, o);
+        this.emit(dst, o);
       }
     }
   }
@@ -354,7 +428,7 @@ export class CpuSim {
       const cy = e.center[1] + (e.relative > 0.5 ? fr.ey : 0);
       const dx = px - cx;
       const dy = py - cy;
-      const len = Math.max(Math.hypot(dx, dy), 1e-3);
+      const len = Math.max(Math.sqrt(dx * dx + dy * dy), 1e-3);
       const ux = dx / len;
       const uy = dy / len;
       const w = e.radius > 0 ? clamp(1 - len / e.radius, 0, 1) : 1;
@@ -384,7 +458,7 @@ export class CpuSim {
       const b = p.obstacles[k]!;
       const dx = px - (b.center[0] + (b.relative > 0.5 ? fr.ex : 0));
       const dy = py - (b.center[1] + (b.relative > 0.5 ? fr.ey : 0));
-      const len = Math.max(Math.hypot(dx, dy), 1e-3);
+      const len = Math.max(Math.sqrt(dx * dx + dy * dy), 1e-3);
       const ux = dx / len;
       const uy = dy / len;
       const t = clamp(1 - len / Math.max(b.radius, 1e-3), 0, 1);
@@ -452,7 +526,7 @@ function resolveCollider(c: EngineParams['colliders'][number], ex: number, ey: n
   const fric = c.friction;
 
   if (kind < 1.5) {
-    const bl = Math.max(Math.hypot(bx, by), 1e-6);
+    const bl = Math.max(Math.sqrt(bx * bx + by * by), 1e-6);
     const nx = bx / bl;
     const ny = by / bl;
     const sd = (POS[0]! - ax) * nx + (POS[1]! - ay) * ny;
@@ -527,7 +601,7 @@ function resolveCollider(c: EngineParams['colliders'][number], ex: number, ey: n
     const inside = kind > 4.5;
     const dx = POS[0]! - ax;
     const dy = POS[1]! - ay;
-    const len = Math.max(Math.hypot(dx, dy), 1e-4);
+    const len = Math.max(Math.sqrt(dx * dx + dy * dy), 1e-4);
     if (inside ? len > r : len < r) {
       const nx = dx / len;
       const ny = dy / len;
