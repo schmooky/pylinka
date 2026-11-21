@@ -83,6 +83,11 @@ particles that are alive.
   `null`.
 - **Context loss.** Particle state lives on the CPU, so it survives a lost context, both under pixi
   and standalone. Only the GL objects are rebuilt.
+- **Bundle size.** Under `@pylinka/core/pixi`, the WebGL1 backend is a separate chunk (about 12 KB
+  gzipped). `createPylinka` loads it only when pixi runs WebGL1, so WebGPU and WebGL2 apps never
+  fetch it. Standalone `@pylinka/core/webgl` has a synchronous `createParticles`, so the CPU path
+  ships inside that entry, which costs about 4.9 KB gzipped more. A custom pipeline that calls
+  `getSimBackendFactory('webgl1')` itself should `await ensureSimBackend('webgl1')` first.
 - **Instancing required.** WebGL1 needs `ANGLE_instanced_arrays`, which every WebGL1 browser in use
   exposes. Without it, an effect under `createPylinka` warns once and simulates but draws nothing.
   Standalone `createParticles` throws.

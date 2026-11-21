@@ -51,4 +51,23 @@ describe('SimBackend registry — GPU seam', () => {
     expect(getSimBackendFactory('webgpu')).toBeDefined();
     expect(getSimBackendFactory('webgl2')).toBeDefined();
   });
+
+  it('loads the WebGL1 backend only on demand, so GPU hosts never pull it in', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../src/render/backends.ts', import.meta.url), 'utf8');
+    // a static import would put the CPU sim into every @pylinka/core/pixi bundle
+    expect(src).not.toMatch(/^import[^;]*webgl1/m);
+    expect(src).toContain("import('./webgl1-backend.js')");
+    const { ensureSimBackend } = await import('../src/render/index.js');
+    await ensureSimBackend('webgl1');
+    expect(getSimBackendFactory('webgl1')).toBeDefined();
+  });
+
+  it('keeps a WebGL1 factory the host registered itself', async () => {
+    const own = () => ({}) as unknown as SimBackend;
+    registerSimBackend('webgl1', own);
+    const { ensureSimBackend } = await import('../src/render/index.js');
+    await ensureSimBackend('webgl1');
+    expect(getSimBackendFactory('webgl1')).toBe(own);
+  });
 });

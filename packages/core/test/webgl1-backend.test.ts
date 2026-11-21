@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PylinkaProject, System } from '@pylinka/graph';
 import { KnobStore } from '../src/knobs.js';
 import { getSimBackendFactory, type SimBackend, type SimBackendDeps } from '../src/render/index.js';
-import { registerCompiledBackends } from '../src/render/backends.js';
+import { ensureSimBackend } from '../src/render/backends.js';
 import { CPU_STATE_FLOATS, type CpuSim } from '../src/webgl1/sim.js';
 import { createParticles } from '../src/webgl/index.js';
 
@@ -113,13 +113,14 @@ function system(over: Partial<System> = {}): System {
   };
 }
 
+await ensureSimBackend('webgl1');
+
 function backend(
   over: Partial<SimBackendDeps> & {
     gl?: ReturnType<typeof fakeGl>;
     host?: ReturnType<typeof fakeRenderer>;
   } = {},
 ) {
-  registerCompiledBackends();
   const gl = over.gl ?? fakeGl();
   const host = over.host ?? fakeRenderer();
   const sys = over.system ?? system();

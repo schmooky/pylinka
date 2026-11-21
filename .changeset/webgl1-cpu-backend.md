@@ -11,3 +11,5 @@ The CPU step is a port of the interpreted WebGL2 step: the same node patterns (`
 Caveats are listed in the core README under "WebGL1: downsides and caveats". In short: compiled-only nodes are skipped and `createPylinka` warns about them; the main thread pays for every particle; results match the GPU statistically, not particle for particle; only `f32`/`vec2` knobs reach the CPU simulation; and a context without `ANGLE_instanced_arrays` simulates but draws nothing. Each view under `createPylinka` gets its own seed, so two copies of one effect no longer move in lockstep.
 
 Two fixes in this change also touch the WebGL2 backend under `createPylinka`: both GL backends now re-sync pixi's state caches right after they create their GL objects. Before this, creating an effect mid-session could leave the next pixi draw using stale bindings.
+
+WebGPU and WebGL2 behave as before. Under `@pylinka/core/pixi`, the WebGL1 backend is a lazily loaded chunk, so those apps download about 0.7 KB gzipped more, not the whole CPU backend. `ensureSimBackend(kind)` is exported for hosts that build systems through `getSimBackendFactory` themselves.
