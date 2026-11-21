@@ -24,6 +24,18 @@ describe('resolveBackend — §7.2 (backend follows host)', () => {
     expect(b.kind).toBe('webgl2');
     expect(b.device).toBe(gl);
   });
+  it('selects the CPU backend for a WebGL1 renderer — no transform feedback there', () => {
+    const gl = { fake: 'WebGLRenderingContext' };
+    const renderer = { type: RendererType.WEBGL, gl, context: { webGLVersion: 1 } } as unknown as Renderer;
+    const b = resolveBackend(renderer);
+    expect(b.kind).toBe('webgl1');
+    expect(b.device).toBe(gl);
+  });
+
+  it('keeps WebGL2 when pixi reports version 2', () => {
+    const renderer = { type: RendererType.WEBGL, gl: {}, context: { webGLVersion: 2 } } as unknown as Renderer;
+    expect(resolveBackend(renderer).kind).toBe('webgl2');
+  });
 });
 
 describe('SimBackend registry — GPU seam', () => {
@@ -38,5 +50,24 @@ describe('SimBackend registry — GPU seam', () => {
     registerCompiledBackends();
     expect(getSimBackendFactory('webgpu')).toBeDefined();
     expect(getSimBackendFactory('webgl2')).toBeDefined();
+  });
+
+  it('loads the WebGL1 backend only on demand, so GPU hosts never pull it in', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../src/render/backends.ts', import.meta.url), 'utf8');
+    // a static import would put the CPU sim into every @pylinka/core/pixi bundle
+    expect(src).not.toMatch(/^import[^;]*webgl1/m);
+    expect(src).toContain("import('./webgl1-backend.js')");
+    const { ensureSimBackend } = await import('../src/render/index.js');
+    await ensureSimBackend('webgl1');
+    expect(getSimBackendFactory('webgl1')).toBeDefined();
+  });
+
+  it('keeps a WebGL1 factory the host registered itself', async () => {
+    const own = () => ({}) as unknown as SimBackend;
+    registerSimBackend('webgl1', own);
+    const { ensureSimBackend } = await import('../src/render/index.js');
+    await ensureSimBackend('webgl1');
+    expect(getSimBackendFactory('webgl1')).toBe(own);
   });
 });

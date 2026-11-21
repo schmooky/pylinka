@@ -10,7 +10,7 @@ import type { PylinkaProject, System, SystemBundle } from '@pylinka/graph';
 import { KnobStore, type KnobBus } from '../knobs.js';
 import { clampDt, DEFAULT_MAX_DT, FixedStepDriver } from '../time.js';
 import { resolveBackend } from './backend.js';
-import { registerCompiledBackends } from './backends.js';
+import { ensureSimBackend, registerCompiledBackends } from './backends.js';
 import { ParticleView } from './particle-view.js';
 import { getSimBackendFactory, type SimBackend, type SimStats } from './sim.js';
 import { resolveTexture, type TextureInput } from './texture.js';
@@ -214,7 +214,7 @@ function buildSystem(
   }
   if (resolved.device === undefined || resolved.device === null) {
     throw new Error(
-      `The host renderer exposed no ${resolved.kind === 'webgpu' ? 'GPUDevice' : 'WebGL2 context'} — ` +
+      `The host renderer exposed no ${resolved.kind === 'webgpu' ? 'GPUDevice' : 'WebGL context'} — ` +
         'pass a constructed pixi Renderer (await app.init() first).',
     );
   }
@@ -236,6 +236,13 @@ function buildSystem(
   return new SystemHandle(view, sim, knobs);
 }
 
+/** Load the SimBackend the host renderer needs (the WebGL1 one is a lazy chunk). */
+async function loadBackendFor(opts: CreateOptions): Promise<void> {
+  // no renderer: let buildSystem throw its own, clearer error
+  if (opts.renderer === undefined || opts.renderer === null) return;
+  await ensureSimBackend(resolveBackend(opts.renderer as Parameters<typeof resolveBackend>[0]).kind);
+}
+
 function watchDeviceLost(opts: CreateOptions): void {
   if (opts.onDeviceLost === undefined) return;
   const gpu = (opts.renderer as { gpu?: { device?: { lost?: Promise<unknown> } } }).gpu;
@@ -249,6 +256,7 @@ export async function createParticleSystem(
 ): Promise<ParticleSystemView> {
   const knobs = new KnobStore(bundle.params);
   watchDeviceLost(opts);
+  await loadBackendFor(opts);
   const input = opts.textures?.[bundle.system.name] ?? opts.texture;
   const atlas = input === undefined ? undefined : await resolveTexture(input);
   return buildSystem(bundle.system, { params: bundle.params }, knobs, opts, atlas);
@@ -306,6 +314,7 @@ export async function createPylinka(
 ): Promise<PylinkaRuntime> {
   const knobs = new KnobStore(project.params);
   watchDeviceLost(opts);
+  await loadBackendFor(opts);
   const systems: Record<string, ParticleSystemView> = {};
   const handles: SystemHandle[] = [];
   const links = linksByName(project, opts);

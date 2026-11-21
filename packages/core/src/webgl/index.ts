@@ -25,6 +25,8 @@ import { extractParams, type EngineParams, type KnobValues } from './params.js';
 import { playCode, type AtlasPlay } from '../atlas.js';
 import { pickSystem } from '../system.js';
 import { systemsInBuildOrder } from '../project.js';
+import { WebGL1Engine } from '../webgl1/engine.js';
+import { isWebGL2 } from '../webgl1/renderer.js';
 
 /**
  * Rasterize an emission mask into a point table: one emitter-relative offset
@@ -218,6 +220,14 @@ export interface ParticlesOptions {
    * centred on the emitter and moves with it. Ignored for sub-emitters.
    */
   emissionMask?: EmissionMaskOptions;
+  /**
+   * Where the simulation runs. 'auto' (default): on the GPU through transform
+   * feedback when the context is WebGL2, on the CPU when only WebGL1 is
+   * available. 'cpu' forces the CPU path on any context, which is how to see
+   * what a WebGL1 device will show. The CPU path reads the same node patterns
+   * and draws the same way; its cost is CPU time per particle.
+   */
+  simulation?: 'auto' | 'cpu';
   /** Called when the GL context is lost. Recovery is automatic; this is for UI. */
   onContextLost?: () => void;
   /** Called after the context came back and the effect was rebuilt. */
@@ -271,8 +281,23 @@ export { extractParams, parseColor, type EngineParams, type KnobValues } from '.
 export { WebGL2Engine } from './engine.js';
 export { INTERPRETED_KINDS, isInterpreted, unsupportedNodes } from './support.js';
 
-/** Handle → engine, so a sub-emitter can reach its parent's GPU buffers. */
-const engineOf = new WeakMap<ParticlesHandle, WebGL2Engine>();
+/** Handle → engine, so a sub-emitter can reach its parent's buffers. */
+const engineOf = new WeakMap<ParticlesHandle, WebGL2Engine | WebGL1Engine>();
+
+/**
+ * The context for a target: WebGL2 when the browser has it, else WebGL1. A
+ * context handed in is used as it is.
+ */
+function contextOf(target: HTMLCanvasElement | WebGL2RenderingContext | WebGLRenderingContext): WebGL2RenderingContext | WebGLRenderingContext | null {
+  // `instanceof WebGL2RenderingContext` throws where the global does not exist,
+  // which is exactly the browser this fallback is for
+  if (typeof WebGLRenderingContext !== 'undefined' && target instanceof WebGLRenderingContext) return target;
+  if (typeof WebGL2RenderingContext !== 'undefined' && target instanceof WebGL2RenderingContext) return target;
+  const canvas = target as HTMLCanvasElement;
+  const attrs = { premultipliedAlpha: true, alpha: true };
+  const gl2 = canvas.getContext('webgl2', attrs) as WebGL2RenderingContext | null;
+  return gl2 ?? (canvas.getContext('webgl', attrs) as WebGLRenderingContext | null);
+}
 
 /**
  * Run a project.
@@ -359,7 +384,7 @@ function combine(handles: ParticlesHandle[], children: Set<ParticlesHandle>): Pa
 }
 
 export function createParticles(
-  target: HTMLCanvasElement | WebGL2RenderingContext,
+  target: HTMLCanvasElement | WebGL2RenderingContext | WebGLRenderingContext,
   project: PylinkaProject,
   opts: ParticlesOptions = {},
 ): ParticlesHandle {
@@ -384,11 +409,9 @@ export function createParticles(
       return combine(built, new Set([...links.keys()].map((id) => byId.get(id)!)));
     }
   }
-  const gl =
-    target instanceof WebGL2RenderingContext
-      ? target
-      : target.getContext('webgl2', { premultipliedAlpha: true, alpha: true });
-  if (!gl) throw new Error('WebGL2 is not available on this target.');
+  const gl = contextOf(target);
+  if (!gl) throw new Error('WebGL is not available on this target.');
+  const onCpu = opts.simulation === 'cpu' || !isWebGL2(gl);
 
   const system = pickSystem(project, opts.systemName);
   if (!system) throw new Error('Project has no systems.');
@@ -403,19 +426,32 @@ export function createParticles(
   const params: EngineParams = extractParams(system, project.params, knobValues);
   const parentEngine = opts.subParent ? engineOf.get(opts.subParent) : undefined;
   if (opts.subParent && !parentEngine) throw new Error('subParent handle is not a live pylinka effect.');
-  const engine = new WebGL2Engine(
-    gl, params, opts.sizeScale ?? 1, resolveAtlas(opts.atlas),
-    parentEngine ? { parent: parentEngine } : undefined,
-    buildMaskTable(opts.emissionMask),
-    {
-      ...(opts.onContextLost ? { onContextLost: opts.onContextLost } : {}),
-      onContextRestored: () => {
-        // the pool came back empty, so the spawn schedule restarts with it
-        scheduler = new SpawnScheduler(curSystem.emitter, params.capacity);
-        opts.onContextRestored?.();
-      },
+  // a child shares its parent's state, so both have to live on the same side
+  if (parentEngine && (parentEngine instanceof WebGL1Engine) !== onCpu) {
+    throw new Error('subParent runs on a different simulation backend; pass the same `simulation` to both.');
+  }
+  const hooks = {
+    ...(opts.onContextLost ? { onContextLost: opts.onContextLost } : {}),
+    onContextRestored: () => {
+      // the GPU pool came back empty, so the spawn schedule restarts with it.
+      // The CPU pool survives, and a restart there only drops spawn debt.
+      if (!onCpu) scheduler = new SpawnScheduler(curSystem.emitter, params.capacity);
+      opts.onContextRestored?.();
     },
-  );
+  };
+  const atlas = resolveAtlas(opts.atlas);
+  const mask = buildMaskTable(opts.emissionMask);
+  const engine = onCpu
+    ? new WebGL1Engine(
+        gl, params, opts.sizeScale ?? 1, atlas,
+        parentEngine ? { parent: parentEngine as WebGL1Engine } : undefined,
+        mask, hooks,
+      )
+    : new WebGL2Engine(
+        gl as WebGL2RenderingContext, params, opts.sizeScale ?? 1, atlas,
+        parentEngine ? { parent: parentEngine as WebGL2Engine } : undefined,
+        mask, hooks,
+      );
   let scheduler = new SpawnScheduler(system.emitter, params.capacity);
   // last-applied graph, so setKnob can re-interpret every knob-bound port live
   let curSystem = system;
@@ -491,6 +527,7 @@ export function createParticles(
       }
       const np = extractParams(sys, next.params, knobValues);
       if (np.capacity !== params.capacity) return false; // needs a full re-create
+      if (engine instanceof WebGL1Engine && !engine.sim.fits(np)) return false;
       // adding/removing the first obstacle or collider changes which shader
       // blocks are linked, so the program has to be rebuilt
       const was = featuresOf(params);

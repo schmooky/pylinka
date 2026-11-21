@@ -50,6 +50,51 @@ trajectories.
 The base `@pylinka/core` entry holds the CPU scheduler, the knob bus and the timing helpers that
 every backend shares.
 
+## WebGL1
+
+WebGL1 has no transform feedback, so neither WebGL backend can simulate there. When pixi runs
+WebGL1 (`preferWebGLVersion: 1`, or a device without WebGL2), `createPylinka` uses a third backend
+on its own: the simulation runs on the CPU and the particles are drawn with one instanced WebGL1
+draw in pixi's context, so masks, filters and z-order still work. `createParticles` from
+`@pylinka/core/webgl` falls back the same way, and `simulation: 'cpu'` forces it on any context so
+you can see what a WebGL1 device will show.
+
+The CPU path reads the interpreted node set (`INTERPRETED_KINDS` in `@pylinka/core/webgl`). Nodes
+that only the compiled backends implement do nothing there, and `createPylinka` prints one
+`console.warn` per system that uses them. Its cost is CPU time per particle; it draws only the
+particles that are alive.
+
+### WebGL1: downsides and caveats
+
+- **Fewer nodes.** Compiled-only nodes are skipped (with a warning). Check an effect on WebGL1 with
+  `simulation: 'cpu'` before shipping it to devices that may run it.
+- **CPU cost.** Every particle is stepped in JavaScript on the main thread. As a rough guide, on a
+  desktop CPU 10k particles with no forces step in about 0.15 ms per frame. Turbulence, point
+  fields and colliders raise that to about 2 ms. A low-end phone is several times slower. Keep
+  pools in the low thousands, and treat turbulence as the expensive node.
+- **Not bit-identical to the GPU.** The CPU runs the same formulas in float64, and the GPU runs
+  them in float32. An effect looks the same, but no single particle lands in exactly the same place.
+- **Seeds.** Under `createPylinka`, each view draws its own random particles. Pass `seed` for a
+  repeatable result. Standalone `createParticles` takes no seed and uses the GPU's unseeded hashes,
+  so two effects that start on the same frame match.
+- **Knobs.** Only `f32` and `vec2` knobs reach the CPU simulation. Other knob types print a warning
+  and have no effect.
+- **Stats.** `stats.aliveCount` is exact and free. `overflowCount` is always 0, and `gpuMs` is
+  `null`.
+- **Context loss.** Particle state lives on the CPU, so it survives a lost context, both under pixi
+  and standalone. Only the GL objects are rebuilt.
+- **Bundle size.** Under `@pylinka/core/pixi`, the WebGL1 backend is a separate chunk (about 12 KB
+  gzipped). `createPylinka` loads it only when pixi runs WebGL1, so WebGPU and WebGL2 apps never
+  fetch it. Standalone `@pylinka/core/webgl` has a synchronous `createParticles`, so the CPU path
+  ships inside that entry, which costs about 4.9 KB gzipped more. A custom pipeline that calls
+  `getSimBackendFactory('webgl1')` itself should `await ensureSimBackend('webgl1')` first.
+- **Instancing required.** WebGL1 needs `ANGLE_instanced_arrays`, which every WebGL1 browser in use
+  exposes. Without it, an effect under `createPylinka` warns once and simulates but draws nothing.
+  Standalone `createParticles` throws.
+- **Sub-emitters.** A child fires only on parent steps it has not seen yet. While its parent is
+  hidden, a visible child stops emitting instead of repeating the last event. The GPU backends do
+  not have this guard yet.
+
 ## When the GPU disappears
 
 Phones take the GPU away: background the tab, reset the driver, let another page get greedy. Both
