@@ -11,12 +11,17 @@
  *
  * WebGL2: the TF step + instanced draw run between pixi's own draws;
  * `renderer.resetState()` re-syncs pixi's GL state cache afterwards.
+ *
+ * WebGL1: no transform feedback, so the step runs on the CPU (webgl1/sim.ts)
+ * and only the instanced draw touches GL, with the same re-sync after it. That
+ * backend lives in webgl1-backend.ts and is loaded on demand by
+ * `ensureSimBackend('webgl1')`, so a WebGPU or WebGL2 app never downloads it.
  */
 import type { Renderer, WebGPURenderer } from 'pixi.js';
 import { WebGL2CompiledSim } from '../webgl2/engine.js';
 import { WebGPUSystemSim } from '../webgpu/engine.js';
 import { resolveAnim, resolveSprite } from '../compiled/sprite.js';
-import { registerSimBackend, type Affine, type SimBackend, type SimBackendDeps, type SimStats } from './sim.js';
+import { getSimBackendFactory, registerSimBackend, type Affine, type SimBackend, type SimBackendDeps, type SimBackendKind, type SimStats } from './sim.js';
 
 /** Resolve a system's atlas (if any) to the sim's sprite + anim options. */
 function spriteOpts(deps: SimBackendDeps): { sprite: ReturnType<typeof resolveSprite>; anim: ReturnType<typeof resolveAnim> } | undefined {
@@ -26,7 +31,7 @@ function spriteOpts(deps: SimBackendDeps): { sprite: ReturnType<typeof resolveSp
 /** A sim step requested by prepare() but not yet run. GL/GPU work must happen
  *  ONLY inside execute() (in pixi's pass, wrapped by resetState), so prepare
  *  just queues the step + the emitter position it was requested at. */
-interface QueuedStep {
+export interface QueuedStep {
   dt: number;
   ex: number;
   ey: number;
@@ -34,13 +39,13 @@ interface QueuedStep {
 /** Bound the queue so a view that stops rendering (e.g. `visible = false`) can't
  *  accumulate work and then storm a catch-up when it reappears — it resumes. */
 const MAX_QUEUED_STEPS = 4;
-function queueStep(q: QueuedStep[], dt: number, ex: number, ey: number): void {
+export function queueStep(q: QueuedStep[], dt: number, ex: number, ey: number): void {
   q.push({ dt, ex, ey });
   if (q.length > MAX_QUEUED_STEPS) q.splice(0, q.length - MAX_QUEUED_STEPS);
 }
 
 /** A 2D affine matrix (pixi `Matrix`): x' = a·x + c·y + tx, y' = b·x + d·y + ty. */
-interface Mat2D {
+export interface Mat2D {
   a: number;
   b: number;
   c: number;
@@ -204,6 +209,8 @@ class WebGL2SimBackend implements SimBackend {
       ...spriteOpts(deps),
       ...(deps.mask !== undefined ? { mask: deps.mask } : {}),
     });
+    // building the TF program, buffers and VAOs moved bindings pixi caches
+    resyncPixiGl(this.renderer);
   }
 
   get stats(): SimStats {
@@ -240,24 +247,9 @@ class WebGL2SimBackend implements SimBackend {
   }
 
   draw(worldTransform: Affine): void {
-    // use pixi's CURRENT render-target projection so a filtered / cached
-    // container renders the particles into its off-screen FBO, not the screen.
-    const proj = (this.renderer as unknown as { renderTarget: { projectionMatrix: Mat2D } }).renderTarget.projectionMatrix;
-    const [sx, sy, ox, oy] = projScaleOffset(proj, worldTransform);
+    const [sx, sy, ox, oy] = glScaleOffset(this.renderer, worldTransform);
     this.sim.draw(sx, sy, ox, oy, 1);
-    // invalidate exactly the pixi GL caches the raw draw dirtied (program, VAO,
-    // blend, texture units). renderer.resetState() would also null the CURRENT
-    // RENDER TARGET mid-frame and break pixi's pass teardown.
-    const r = this.renderer as unknown as {
-      shader: { resetState(): void };
-      geometry: { resetState(): void };
-      state: { resetState(): void };
-      texture: { resetState(): void };
-    };
-    r.shader.resetState();
-    r.geometry.resetState();
-    r.state.resetState();
-    r.texture.resetState();
+    resyncPixiGl(this.renderer);
   }
 
   apply(project: Parameters<SimBackend['apply']>[0]): boolean {
@@ -274,8 +266,49 @@ class WebGL2SimBackend implements SimBackend {
   }
 }
 
-/** Register both built-in factories. Runs on import of '@pylinka/core/pixi'. */
+/** Use pixi's CURRENT render-target projection, so a filtered / cached
+ *  container renders the particles into its off-screen FBO, not the screen. */
+export function glScaleOffset(renderer: Renderer, worldTransform: Affine): [number, number, number, number] {
+  const proj = (renderer as unknown as { renderTarget: { projectionMatrix: Mat2D } }).renderTarget.projectionMatrix;
+  return projScaleOffset(proj, worldTransform);
+}
+
+/** Invalidate exactly the pixi GL caches a raw draw dirtied (program, VAO,
+ *  blend, texture units). renderer.resetState() would also null the CURRENT
+ *  RENDER TARGET mid-frame and break pixi's pass teardown. */
+export function resyncPixiGl(renderer: Renderer): void {
+  // optional calls: a construction-time resync can run against a renderer that
+  // is only partly set up (or a test double), and must not throw there
+  const r = renderer as unknown as {
+    shader?: { resetState?(): void };
+    geometry?: { resetState?(): void };
+    state?: { resetState?(): void };
+    texture?: { resetState?(): void };
+  };
+  r.shader?.resetState?.();
+  r.geometry?.resetState?.();
+  r.state?.resetState?.();
+  r.texture?.resetState?.();
+}
+
+/** Register the built-in GPU factories. Runs on import of '@pylinka/core/pixi'. */
 export function registerCompiledBackends(): void {
   registerSimBackend('webgpu', (deps) => new WebGPUSimBackend(deps));
   registerSimBackend('webgl2', (deps) => new WebGL2SimBackend(deps));
+}
+
+/**
+ * Make sure a factory for `kind` is registered. The GPU factories are always
+ * there; the WebGL1 CPU backend is a separate chunk, imported the first time a
+ * WebGL1 host asks for it. A factory registered by the host wins.
+ */
+export async function ensureSimBackend(kind: SimBackendKind): Promise<void> {
+  registerCompiledBackends();
+  if (getSimBackendFactory(kind) !== undefined) return;
+  if (kind === 'webgl1') {
+    const { WebGL1SimBackend } = await import('./webgl1-backend.js');
+    if (getSimBackendFactory('webgl1') === undefined) {
+      registerSimBackend('webgl1', (deps) => new WebGL1SimBackend(deps));
+    }
+  }
 }

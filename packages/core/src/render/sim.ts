@@ -16,6 +16,13 @@ import type { KnobStore } from '../knobs.js';
 import type { CompiledAtlasOptions } from '../compiled/sprite.js';
 import type { MaskTable } from '../compiled/mask.js';
 
+/**
+ * Which simulation runs a system. 'webgpu' and 'webgl2' run the compiled graph
+ * on the GPU. 'webgl1' simulates on the CPU from the interpreted node patterns
+ * (webgl/support.ts lists them) and draws with a WebGL1 program.
+ */
+export type SimBackendKind = 'webgpu' | 'webgl2' | 'webgl1';
+
 /** A 2×3 affine (pixi worldTransform: a, b, c, d, tx, ty). */
 export interface Affine {
   a: number;
@@ -60,8 +67,8 @@ export interface SimBackend {
 
 /** Everything a backend factory needs to build a SimBackend for one system. */
 export interface SimBackendDeps {
-  backend: 'webgpu' | 'webgl2';
-  /** 'webgpu' → GPUDevice; 'webgl2' → WebGL2RenderingContext. Opaque here. */
+  backend: SimBackendKind;
+  /** 'webgpu' → GPUDevice; 'webgl2' → WebGL2RenderingContext; 'webgl1' → WebGLRenderingContext. Opaque here. */
   device: unknown;
   /** The host pixi Renderer — draw() records into its pass / restores state. */
   renderer: unknown;
@@ -87,13 +94,13 @@ export interface SimBackendDeps {
 
 export type SimBackendFactory = (deps: SimBackendDeps) => SimBackend;
 
-const factories = new Map<'webgpu' | 'webgl2', SimBackendFactory>();
+const factories = new Map<SimBackendKind, SimBackendFactory>();
 
 /** Register a GPU backend factory (the built-ins self-register on import). */
-export function registerSimBackend(kind: 'webgpu' | 'webgl2', factory: SimBackendFactory): void {
+export function registerSimBackend(kind: SimBackendKind, factory: SimBackendFactory): void {
   factories.set(kind, factory);
 }
 
-export function getSimBackendFactory(kind: 'webgpu' | 'webgl2'): SimBackendFactory | undefined {
+export function getSimBackendFactory(kind: SimBackendKind): SimBackendFactory | undefined {
   return factories.get(kind);
 }

@@ -52,7 +52,7 @@ Around the engine sits a static site with an `/editor` route (IndexedDB-cached p
 - **No physics solver** (no constraints, no particle-particle collision). Field forces and simple bounds only.
 - **No depth sorting** of particles in v1. Additive/premultiplied blending is the recommended documented path; alpha-blended smoke will exhibit draw-order artifacts (§13.8).
 - **No sub-emitters / death-event chains** in v1. Candidate for M3.
-- **No WebGL1.** The fallback floor is WebGL2.
+- **No GPU simulation on WebGL1.** The GPU fallback floor is WebGL2. A WebGL1 host gets a CPU simulation of the interpreted node set with a WebGL1 instanced draw (`webgl1` SimBackend), so an effect still plays, at CPU cost per particle and without the compiled-only nodes.
 
 ### 1.4 Target platforms & consumers (governs everything)
 
@@ -122,7 +122,7 @@ Typical slot VFX (coin trails, win bursts) needs 2k–20k alive particles; the T
 | **Param / Knob** | A named exposed control (`windPower`) with range + linear/log scale + default. Any value param can be **promoted** to a knob with one click — zero recompile (the uniform slot already exists). |
 | **Field** | An analytic or baked force generator sampled per-particle. A node family. |
 | **IR** | Backend-neutral intermediate representation the codegens consume. |
-| **Backend** | A codegen + execution strategy: `webgpu` (compute) or `webgl2` (transform feedback). |
+| **Backend** | A codegen + execution strategy: `webgpu` (compute) or `webgl2` (transform feedback). A WebGL1 host gets the `webgl1` SimBackend, which compiles nothing: it runs the interpreted node set on the CPU (see §7.2). |
 | **Kernel** | A compiled GPU program pair: **emit** and **update** (compute shaders on WebGPU; TF vertex programs on WebGL2). |
 | **PipelineCache** | Cache of compiled pipelines keyed by (device, backend, graph hash). |
 | **UniformBus** | Runtime channel writing value + knob + system uniforms to the GPU once per frame. |
@@ -258,7 +258,7 @@ Pure function: `compile(bundle, catalog, target): CompiledSystem` (the bundle ca
 ### 7.2 Runtime services
 
 - **`Simulator`** — per-frame order per §13.11. dt policy: host rAF dt **clamped to 50 ms** default (configurable); optional **fixed-step mode** (accumulator) for deterministic capture/replay.
-- **`BackendProvider`** — host pixi WebGPU renderer → shared `renderer.gpu.device`; host pixi WebGL renderer → WebGL2 TF in the **same GL context** (M2); headless/standalone → own device, WebGPU preferred.
+- **`BackendProvider`** — host pixi WebGPU renderer → shared `renderer.gpu.device`; host pixi WebGL2 renderer → WebGL2 TF in the **same GL context** (M2); host pixi WebGL1 renderer (`context.webGLVersion === 1`) → the `webgl1` SimBackend: CPU simulation of the interpreted node set plus one instanced WebGL1 draw, in the same context; headless/standalone → own device, WebGPU preferred.
 - **`TextureResolver`** — ACL for assets: prefer `Assets.cache[pixiAssetKey]` when present, else decode the blob/inline source.
 
 ### 7.3 Coordinate-space contract & moving emitters
@@ -280,7 +280,7 @@ Structural edit → debounce (200 ms) → async `compile` (Web Worker in the edi
 
 ### 7.6 Device loss
 
-WebGPU device loss is routine on mobile. On `device.lost`: BackendProvider re-acquires; pipelines rebuild from retained `CompiledSystem` sources (cheap — no graph recompile); pools reset; `onDeviceRestored` fires so hosts re-trigger ambient effects. PipelineCache entries are device-scoped. WebGL2 handles `webglcontextlost/restored` identically (M2).
+WebGPU device loss is routine on mobile. On `device.lost`: BackendProvider re-acquires; pipelines rebuild from retained `CompiledSystem` sources (cheap — no graph recompile); pools reset; `onDeviceRestored` fires so hosts re-trigger ambient effects. PipelineCache entries are device-scoped. WebGL2 handles `webglcontextlost/restored` identically (M2). The `webgl1` SimBackend keeps its particle state on the CPU, so after a restore it rebuilds only its GL objects and carries on where it was.
 
 ---
 
@@ -319,7 +319,7 @@ Adopts the **pixi-reels MDX/Astro recipe convention verbatim**, plus two enhance
 export type PortType = 'f32' | 'vec2' | 'vec4' | 'color' | 'bool';
 export type EvalTime = 'init' | 'update' | 'both';
 export type Impact = 'low' | 'medium' | 'high';
-export type Backend = 'webgpu' | 'webgl2';
+export type Backend = 'webgpu' | 'webgl2'; // compile targets; the webgl1 SimBackend has none
 
 export type Literal =
   | { t: 'f32';   v: number }

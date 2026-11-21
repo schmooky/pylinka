@@ -19,7 +19,7 @@ export { PylinkaRenderPipe } from './pipe.js';
 export { PylinkaApplicationPlugin } from './plugin.js';
 export { registerPylinka, unregisterPylinka } from './register.js';
 export { resolveBackend, type ResolvedBackend } from './backend.js';
-export { registerCompiledBackends } from './backends.js';
+export { ensureSimBackend, registerCompiledBackends } from './backends.js';
 export {
   createPylinka,
   createParticleSystem,
@@ -44,5 +44,6 @@ export {
   type SimBackend,
   type SimBackendDeps,
   type SimBackendFactory,
+  type SimBackendKind,
   type SimStats,
 } from './sim.js';
