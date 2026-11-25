@@ -59,6 +59,13 @@ export interface CreateOptions {
    * Absent, relative paths resolve against the page, like any `<img src>`.
    */
   assetBase?: string | URL;
+  /**
+   * Read particle counts back from the GPU into `stats` (default true). On
+   * WebGL2 that is a synchronous `getBufferSubData` every 30 frames, which
+   * stalls the GPU pipeline. Pass `false` in production builds that do not
+   * show `stats`: `aliveCount` and `overflowCount` then stay 0 on the GPU backends.
+   */
+  stats?: boolean;
 }
 
 /** Editor-exported project JSON carries per-system textures (not part of the
@@ -231,6 +238,7 @@ function buildSystem(
     ...(atlas !== undefined ? { atlas } : {}),
     ...(mask !== undefined ? { mask } : {}),
     ...(subParent !== undefined ? { subParent } : {}),
+    ...(opts.stats === false ? { stats: false } : {}),
   });
   view.sim = sim;
   return new SystemHandle(view, sim, knobs);

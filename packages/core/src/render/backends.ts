@@ -73,8 +73,11 @@ class WebGPUSimBackend implements SimBackend {
   private readonly device: GPUDevice;
   private readonly renderer: WebGPURenderer;
   private readonly queue: QueuedStep[] = [];
+  /** false: never copy the counters back (CreateOptions.stats) */
+  private readonly readStats: boolean;
 
   constructor(deps: SimBackendDeps) {
+    this.readStats = deps.stats !== false;
     this.device = deps.device as GPUDevice;
     this.renderer = deps.renderer as WebGPURenderer;
     const gpu = (navigator as { gpu?: GPU }).gpu;
@@ -122,7 +125,7 @@ class WebGPUSimBackend implements SimBackend {
       this.sim.prepare(s.dt);
       const enc = this.device.createCommandEncoder();
       this.sim.encodeCompute(enc);
-      const wantStats = this.sim.maybeEncodeStats(enc);
+      const wantStats = this.readStats && this.sim.maybeEncodeStats(enc);
       this.device.queue.submit([enc.finish()]);
       if (wantStats) this.sim.resolveStats();
       this.sim.endFrame(s.dt);
@@ -198,8 +201,11 @@ class WebGL2SimBackend implements SimBackend {
   private readonly renderer: Renderer;
   private readonly queue: QueuedStep[] = [];
   private statClock = 0;
+  /** false: skip the synchronous stats readback (CreateOptions.stats) */
+  private readonly readStats: boolean;
 
   constructor(deps: SimBackendDeps) {
+    this.readStats = deps.stats !== false;
     this.renderer = deps.renderer as Renderer;
     const parent = deps.subParent instanceof WebGL2SimBackend ? deps.subParent.sim : undefined;
     this.sim = new WebGL2CompiledSim(deps.device as WebGL2RenderingContext, deps.system, deps.params, {
@@ -242,6 +248,7 @@ class WebGL2SimBackend implements SimBackend {
     this.queue.length = 0;
     // GL has no cheap async counter readback — refresh the stat on the same
     // 30-frame cadence as the WebGPU backend (debug-tier sync readback)
+    if (!this.readStats) return;
     this.statClock += 1;
     if (this.statClock % 30 === 0) this.sim.aliveCount();
   }

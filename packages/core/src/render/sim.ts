@@ -90,6 +90,14 @@ export interface SimBackendDeps {
    * must be built — and stepped — before its children.
    */
   subParent?: SimBackend;
+  /**
+   * Read `stats.aliveCount` / `overflowCount` back from the GPU (default true).
+   * WebGL2 has no async readback, so this is a synchronous `getBufferSubData`
+   * that stalls the pipeline every 30 frames; WebGPU uses an async map. Set it
+   * false in production: the stats then stay at 0. The WebGL1 CPU backend
+   * counts for free and ignores this.
+   */
+  stats?: boolean;
 }
 
 export type SimBackendFactory = (deps: SimBackendDeps) => SimBackend;

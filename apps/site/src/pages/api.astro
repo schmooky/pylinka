@@ -54,6 +54,7 @@ fx.params.set('windPower', 40);                 // live, zero recompile</code></
       <tr><td><code>maxDt</code></td><td>number</td><td>dt clamp, default 0.05</td></tr>
       <tr><td><code>seed</code></td><td>number</td><td>deterministic base seed (capture mode)</td></tr>
       <tr><td><code>onDeviceLost</code></td><td><code>() =&gt; void</code></td><td>WebGPU device-loss hook</td></tr>
+      <tr><td><code>stats</code></td><td>boolean</td><td>default <code>true</code>. Read particle counts back from the GPU into <code>stats</code>. On WebGL2 this is a synchronous <code>getBufferSubData</code> every 30 frames, which stalls the pipeline. Pass <code>false</code> in production builds that do not show stats</td></tr>
     </tbody>
   </table>
 
@@ -81,8 +82,11 @@ fx.params.set('windPower', 40);                 // live, zero recompile</code></
   destroy(): void;
 &#125;</code></pre>
   <p>
-    The <code>stats</code> fields are plain numbers refreshed every 30 frames. Reading them never
-    triggers a GPU readback, so a debug overlay costs nothing.
+    The <code>stats</code> fields are plain numbers refreshed every 30 frames, so reading them is free.
+    Refreshing them is not free. WebGPU copies the counters back asynchronously, but WebGL2 has no async
+    readback and does a synchronous <code>getBufferSubData</code> that stalls the GPU pipeline. Pass
+    <code>stats: false</code> to <code>createPylinka</code> to turn the refresh off; the counts then stay 0.
+    The WebGL1 CPU backend counts for free either way.
   </p>
 
   <h2>KnobBus</h2>
