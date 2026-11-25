@@ -1,0 +1,206 @@
+---
+// RevoltFX bundles played through Pylinka (@pylinka/revoltfx). Not in the nav
+// yet: a demo of the adapter. ?effect=<name> picks one, ?kind=sequence picks
+// the sequence when a name is both, ?renderer=webgl|webgl1 picks the renderer,
+// ?compare=0 hides the reference: by default the real revolt-fx package plays
+// the same effect on the left half, Pylinka on the right.
+// Assets: the official RevoltFX example bundle (bma73/revolt-fx-examples, MIT).
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>RevoltFX on Pylinka</title>
+    <style>
+      body { margin: 0; background: #0b0b0d; color: #ddd; font: 12px ui-monospace, monospace; overflow: hidden; }
+      #panel { position: fixed; left: 8px; top: 8px; bottom: 8px; width: 320px; z-index: 10; display: flex; flex-direction: column; gap: 6px;
+        background: #000c; padding: 8px; border-radius: 8px; box-sizing: border-box; }
+      #panel select, #panel button { font: inherit; background: #1b1b20; color: #eee; border: 1px solid #333; border-radius: 4px; padding: 4px; }
+      #issues { overflow: auto; flex: 1; margin: 0; padding-left: 16px; }
+      #issues li { margin-bottom: 4px; }
+      .approximate { color: #e8c46a; } .unsupported { color: #ef7d7d; } .warning { color: #8fb3ff; }
+      #hud { color: #9a9; }
+      @media (max-width: 640px) { #panel { width: auto; right: 8px; bottom: auto; max-height: 45vh; } }
+    </style>
+  </head>
+  <body>
+    <div id="panel">
+      <strong>RevoltFX → Pylinka</strong>
+      <select id="effect"></select>
+      <div style="display:flex;gap:6px">
+        <button id="replay">Replay</button>
+        <button id="stop">Stop</button>
+        <label><input id="move" type="checkbox" /> move</label>
+      </div>
+      <div id="hud">booting…</div>
+      <div>Click the canvas to move the effect. Fidelity report:</div>
+      <ul id="issues"></ul>
+      <div style="color:#777">Assets: RevoltFX examples by Bjoern Acker (MIT).</div>
+    </div>
+    <script>
+      import { Application, Assets, Container, Text } from 'pixi.js';
+      import { FX } from 'revolt-fx';
+      import { registerPylinka } from '@pylinka/core/pixi';
+      import { createRevoltFxEffect, type RevoltFxEffect } from '@pylinka/revoltfx/pixi';
+      import type { RfxBundle, SheetData } from '@pylinka/revoltfx';
+
+      type DemoState = { app?: Application; effect?: RevoltFxEffect; renderer?: string; error?: string; triggers: string[]; frames: number };
+      const state: DemoState = { triggers: [], frames: 0 };
+      (window as unknown as { __revoltfx: DemoState }).__revoltfx = state;
+
+      const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+      const hud = $('hud');
+      const select = $<HTMLSelectElement>('effect');
+      const issuesEl = $('issues');
+
+      async function boot() {
+        const params = new URLSearchParams(location.search);
+        const webgl1 = params.get('renderer') === 'webgl1';
+        const preference = params.get('renderer') === 'webgl' || webgl1 ? 'webgl' : 'webgpu';
+        const [bundle, sheet] = await Promise.all([
+          fetch('/revoltfx/default-bundle.json').then((r) => r.json() as Promise<RfxBundle>),
+          fetch('/revoltfx/revoltfx-spritesheet.json').then((r) => r.json() as Promise<SheetData>),
+        ]);
+        const image = new Image();
+        image.src = '/revoltfx/revoltfx-spritesheet.png';
+        await image.decode();
+
+        registerPylinka();
+        const app = new Application();
+        await app.init({ preference, ...(webgl1 ? { preferWebGLVersion: 1 as const } : {}), background: '#0b0b0d', resizeTo: window, antialias: false });
+        document.body.appendChild(app.canvas);
+        state.renderer = app.renderer.name;
+        state.app = app;
+
+        for (const e of bundle.emitters) select.add(new Option(`emitter · ${e.name}`, `emitter:${e.name}`));
+        for (const s of bundle.sequences) select.add(new Option(`sequence · ${s.name}`, `sequence:${s.name}`));
+        const wanted = params.get('effect') ?? 'side-torch';
+        select.value = `${params.get('kind') ?? 'emitter'}:${wanted}`;
+        if (select.selectedIndex < 0) select.selectedIndex = 0;
+
+        const compare = params.get('compare') !== '0';
+        // the reference: revolt-fx itself, fed the same bundle and sheet
+        const rfx = new FX();
+        const rfxLayer = new Container();
+        if (compare) {
+          await Assets.load('/revoltfx/revoltfx-spritesheet.json');
+          rfx.initBundle(structuredClone(bundle));
+          app.stage.addChild(rfxLayer);
+          for (const [label, frac] of [['RevoltFX', 0.25], ['Pylinka', 0.75]] as const) {
+            const txt = new Text({ text: label, style: { fill: 0x777777, fontSize: 14, fontFamily: 'monospace' } });
+            txt.x = app.screen.width * frac + 60;
+            txt.y = 12;
+            app.stage.addChild(txt);
+          }
+        }
+        // the Pylinka copy sits half a screen right of the reference
+        const offset = () => (compare ? app.screen.width * 0.3 : 0);
+        // RevoltFX recycles a finished emitter/sequence into its pool and marks it __recycled
+        type RfxInstance = { x: number; y: number; stop: (wait?: boolean) => void; __recycled?: boolean };
+        let ref: RfxInstance | undefined;
+
+        let pos = { x: app.screen.width * (compare ? 0.42 : 0.6), y: app.screen.height * 0.55 };
+        let t = 0;
+
+        function playReference(kind: string, name: string) {
+          if (!compare) return;
+          if (ref && !ref.__recycled) ref.stop(false);
+          ref = kind === 'sequence'
+            ? (rfx.getEffectSequence(name).init(rfxLayer) as unknown as RfxInstance)
+            : (rfx.getParticleEmitter(name).init(rfxLayer) as unknown as RfxInstance);
+          ref.x = pos.x;
+          ref.y = pos.y;
+        }
+
+        async function load() {
+          state.effect?.destroy();
+          state.effect = undefined;
+          const [kind, ...rest] = select.value.split(':');
+          const name = rest.join(':');
+          try {
+            const fx = await createRevoltFxEffect(bundle, name, {
+              renderer: app.renderer,
+              sheet,
+              image,
+              kind: kind as 'emitter' | 'sequence',
+              onTrigger: (v) => state.triggers.push(v),
+            });
+            fx.x = pos.x + offset();
+            fx.y = pos.y;
+            app.stage.addChild(fx.view);
+            playReference(kind!, name);
+            state.effect = fx;
+            state.error = undefined;
+            issuesEl.replaceChildren(
+              ...(fx.issues.length === 0 ? [Object.assign(document.createElement('li'), { textContent: 'Everything converted exactly.' })] : []),
+              ...fx.issues.map((i) => {
+                const li = document.createElement('li');
+                li.className = i.level;
+                li.textContent = `[${i.level}] ${i.source}: ${i.detail}`;
+                return li;
+              }),
+            );
+          } catch (e) {
+            state.error = String(e);
+            hud.textContent = state.error;
+          }
+        }
+
+        select.addEventListener('change', () => void load());
+        const replay = () => {
+          state.effect?.restart();
+          const [kind, ...rest] = select.value.split(':');
+          playReference(kind!, rest.join(':'));
+        };
+        $('replay').addEventListener('click', replay);
+        $('stop').addEventListener('click', () => {
+          state.effect?.stop();
+          if (ref && !ref.__recycled) ref.stop(true);
+        });
+        app.canvas.addEventListener('pointerdown', (ev) => {
+          // a click on the right half places the Pylinka copy there
+          const x = compare && ev.offsetX > app.screen.width * 0.5 ? ev.offsetX - offset() : ev.offsetX;
+          pos = { x, y: ev.offsetY };
+          if (state.effect?.completed) replay();
+        });
+        await load();
+
+        app.ticker.add((tick) => {
+          const dt = tick.deltaMS / 1000;
+          t += dt;
+          const fx = state.effect;
+          if (!fx) return;
+          let x = pos.x;
+          let y = pos.y;
+          if ($<HTMLInputElement>('move').checked) {
+            x += Math.cos(t * 1.3) * 120;
+            y += Math.sin(t * 2.1) * 60;
+          }
+          fx.x = x + offset();
+          fx.y = y;
+          if (ref?.__recycled) ref = undefined;
+          if (ref) {
+            ref.x = x;
+            ref.y = y;
+          }
+          rfx.update();
+          fx.update(dt);
+          state.frames++;
+          if (state.frames % 15 === 0) {
+            const status = fx.completed ? 'completed' : fx.exhausted ? 'exhausted' : 'playing';
+            hud.textContent = `${state.renderer} · ${fx.converted.project.systems.length} systems · ${status}` +
+              (state.triggers.length ? ` · triggers: ${state.triggers.slice(-3).join(', ')}` : '');
+          }
+        });
+      }
+
+      boot().catch((e) => {
+        state.error = String(e);
+        hud.textContent = state.error;
+      });
+    </script>
+  </body>
+</html>

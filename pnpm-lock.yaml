@@ -72,6 +72,9 @@ importers:
       '@pylinka/graph':
         specifier: workspace:*
         version: link:../../packages/graph
+      '@pylinka/revoltfx':
+        specifier: workspace:*
+        version: link:../../packages/revoltfx
       '@xyflow/react':
         specifier: ^12.3.0
         version: 12.11.2(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -115,6 +118,9 @@ importers:
       playwright:
         specifier: 1.61.1
         version: 1.61.1
+      revolt-fx:
+        specifier: 1.3.6
+        version: 1.3.6(pixi.js@8.19.0)
       tailwindcss:
         specifier: ^4.0.0
         version: 4.3.2
@@ -258,6 +264,25 @@ importers:
         version: link:../graph
 
   packages/graph: {}
+
+  packages/revoltfx:
+    dependencies:
+      '@pylinka/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      '@pylinka/graph':
+        specifier: workspace:*
+        version: link:../graph
+    devDependencies:
+      '@pylinka/core':
+        specifier: workspace:*
+        version: link:../core
+      '@pylinka/format':
+        specifier: workspace:*
+        version: link:../format
+      pixi.js:
+        specifier: ^8
+        version: 8.19.0
 
   tools/atlas-extract:
     dependencies:
@@ -4156,6 +4181,11 @@ packages:
   reusify@1.1.0:
     resolution: {integrity: sha512-g6QUff04oZpHs0eG5p83rFLhHeV00ug/Yf9nZM6fLeUrPguBTkTQOdpAWWspMh55TZfVQDPaN3NQJfbVRAxdIw==}
     engines: {iojs: '>=1.0.0', node: '>=0.10.0'}
+
+  revolt-fx@1.3.6:
+    resolution: {integrity: sha512-z0GK2WJCBO8Uwahqm2bOf9zHzx0P4mWtN5R3zsiRlKxxpew08t4CaHAB8nBUTATbzUiGTmOuQgT3+cp+PvGLGw==}
+    peerDependencies:
+      pixi.js: ^7.4.0 || ^8.0.0
 
   rollup@4.62.2:
     resolution: {integrity: sha512-RFnrW4lhXA3s3eqHDZvN654g8OTjzRfqpIRJYczCGB6HzphckVAi/Qh4tbPUbRuDi7s1Llv8g/NspLkttY3gTA==}
@@ -9285,6 +9315,10 @@ snapshots:
       unified: 11.0.5
 
   reusify@1.1.0: {}
+
+  revolt-fx@1.3.6(pixi.js@8.19.0):
+    dependencies:
+      pixi.js: 8.19.0
 
   rollup@4.62.2:
     dependencies:
