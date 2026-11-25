@@ -8,14 +8,7 @@
   ],
   "commit": false,
   "fixed": [],
-  "linked": [
-    [
-      "@pylinka/graph",
-      "@pylinka/compiler",
-      "@pylinka/format",
-      "@pylinka/core"
-    ]
-  ],
+  "linked": [["@pylinka/graph", "@pylinka/compiler", "@pylinka/format", "@pylinka/core"]],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
@@ -29,5 +22,8 @@
     "@pylinka/example-announcer",
     "@pylinka/example-interaction-lab",
     "@pylinka/example-containers"
-  ]
+  ],
+  "___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH": {
+    "onlyUpdatePeerDependentsWhenOutOfRange": true
+  }
 }
