@@ -1,6 +1,6 @@
 {
   "name": "@pylinka/revoltfx",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Play RevoltFX effect bundles with Pylinka: a converter from RevoltFX emitters and sequences to PylinkaProject, with a fidelity report, plus a pixi.js player.",
   "license": "MIT",
   "repository": {

@@ -1,5 +1,25 @@
 # @pylinka/core
 
+## 2.3.0
+
+### Minor Changes
+
+- [#35](https://github.com/schmooky/pylinka/pull/35) [`6099ca1`](https://github.com/schmooky/pylinka/commit/6099ca1edf2c4f74874e3a24a77fad592b8ee436) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - New graph features, added to play RevoltFX effects faithfully and useful on their own:
+
+  - `math.atan2`, `input.rotation` and `input.dt` nodes. Turn a sprite to its velocity heading, spin from the birth angle, and step a value per frame. `input.time` is now readable at spawn too.
+  - `output.writeScaleXY`: separate width and height scale. Both compiled backends store an aspect per particle.
+  - `multiply` blend mode on every backend.
+  - Emitter timeline: `delay`, `duration`, and `burst.countMax` / `intervalMax` / `immediate` for random burst counts and waits and a first burst at start. Scheduler randomness follows the `seed` option.
+  - Sub-emitter events beyond death and birth on `output.deathBurst`: `age` (the parent reaches `at` seconds), `bounce` (a parent collide output resolved a hit) and `alive` (`rate` times a second while the parent lives, i.e. trails). `input.spawnIndex` is the index within a burst. The `max` cap rises to 128.
+
+- [#34](https://github.com/schmooky/pylinka/pull/34) [`915ba83`](https://github.com/schmooky/pylinka/commit/915ba83729943d7ad3eb191468f238648acb10f7) Thanks [@igaming-bulochka](https://github.com/igaming-bulochka)! - `createPylinka` takes `stats: false` to turn off the GPU particle-count readback behind `stats.aliveCount` / `overflowCount`. On WebGL2 that readback is a synchronous `getBufferSubData` every 30 frames and stalls the GPU pipeline, so production builds that do not show stats should pass `false`. The default stays `true`.
+
+### Patch Changes
+
+- Updated dependencies [[`6099ca1`](https://github.com/schmooky/pylinka/commit/6099ca1edf2c4f74874e3a24a77fad592b8ee436)]:
+  - @pylinka/graph@2.3.0
+  - @pylinka/compiler@2.3.0
+
 ## 2.2.0
 
 ### Minor Changes
