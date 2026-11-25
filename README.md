@@ -28,6 +28,7 @@ version of that loop.
 | [`@pylinka/graph`](./packages/graph) | The shared kernel every other package speaks: graph types, the node catalog, validation, hashing, uniform slot assignment. No dependencies. |
 | [`@pylinka/compiler`](./packages/compiler) | Turns a system into GPU code. WGSL for WebGPU, GLSL ES 3.00 for the WebGL2 transform-feedback path. Both are byte-locked against golden files. |
 | [`@pylinka/format`](./packages/format) | Reads, writes and migrates the `pylinka` project format. |
+| [`@pylinka/revoltfx`](./packages/revoltfx) | Plays RevoltFX effect bundles: converts emitters and sequences to Pylinka projects with a fidelity report, and a pixi player. |
 | [`@pylinka/core`](./packages/core) | The runtime. `/pixi` mounts systems inside a pixi v8 scene, `/gpu` drives a bare canvas on whichever compiled backend is available, `/webgl` is the interpreted engine that carries emission masks, animated atlases and sub-emitters. `pixi.js@^8` is an optional peer. |
 | [`apps/site`](./apps/site) | Docs, the node editor at `/editor`, 69 recorded effects at `/recipes`, and an interaction sandbox at `/interactive`. |
 | [`tools/atlas-extract`](./tools/atlas-extract) · [`tools/gen-previews`](./tools/gen-previews) | Pull sprite sequences out of a Spine atlas · record the gallery previews. |
@@ -52,3 +53,28 @@ pnpm --filter @pylinka/site dev
 ```
 
 Needs Node 22 or newer and pnpm 9 or newer. `REQUIREMENTS.md` §4.4 lists the full toolchain.
+
+## Releasing
+
+Changesets drives releases. Merging the "chore: version packages" PR publishes
+from CI through npm trusted publishing. A package that is not on npm yet cannot
+use trusted publishing, so its first version goes out from your machine:
+
+```bash
+git switch main && git pull
+```
+
+```bash
+pnpm release:local --dry-run
+```
+
+```bash
+NPM_TOKEN=npm_xxx pnpm release:local
+```
+
+The script refuses to run anywhere but a clean, current `main`. It lists the
+versions not yet on npm, runs build, typecheck, lint and tests, then runs
+`changeset publish`. The token stays in the environment. Afterwards, run
+`git push --follow-tags`, and add the new package's Trusted Publisher on
+npmjs.com (repo `schmooky/pylinka`, workflow `release.yml`, environment
+`npm-publish`).

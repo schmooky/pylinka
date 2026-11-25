@@ -31,6 +31,7 @@
     "changeset:status": "changeset status",
     "version-packages": "changeset version && pnpm install --lockfile-only",
     "release": "pnpm build && changeset publish",
+    "release:local": "node scripts/publish-local.mjs",
     "snapshot": "pnpm build && changeset version --snapshot \"${SNAPSHOT_TAG:-snapshot}\" && changeset publish --tag \"${SNAPSHOT_TAG:-snapshot}\" --no-git-tag"
   },
   "devDependencies": {
