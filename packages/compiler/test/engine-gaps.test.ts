@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { V1_CATALOG } from '@pylinka/graph';
-import type { Graph, SystemBundle } from '@pylinka/graph';
+import type { Graph, Node, SystemBundle } from '@pylinka/graph';
 import { compile } from '../src/index.js';
 
 const f = (v: number) => ({ t: 'f32' as const, v });
@@ -17,7 +17,7 @@ function bundle(graph: Graph): SystemBundle {
   };
 }
 
-const base = [
+const base: Node[] = [
   { id: 'n1', kind: 'output.spawnPosition', values: { pos: { t: 'vec2' as const, v: [0, 0] as [number, number] } } },
   { id: 'n2', kind: 'output.initLife', values: { life: f(1) } },
 ];
