@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useEditor } from '../store';
+import { asSubTrigger, useEditor, type SubTrigger } from '../store';
 import type { EmitterPathData } from '../types';
 import { MaskEditor } from './MaskEditor';
 import { useParticleLife, useSetParticleImage, useSystemTexture } from './ParticleThumb';
@@ -35,9 +35,7 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
   const setSubTrigger = useEditor((s) => s.setSubTrigger);
   const trigger = useEditor((s) => {
     const sys = s.project.systems.find((x) => x.id === s.activeSystemId);
-    return sys?.graph.nodes.find((n) => n.kind === 'output.deathBurst')?.structural?.on === 'birth'
-      ? 'birth'
-      : 'death';
+    return asSubTrigger(sys?.graph.nodes.find((n) => n.kind === 'output.deathBurst')?.structural?.on);
   });
   const parentChoices = systems.filter((s) => s.id !== activeId);
 
@@ -70,9 +68,12 @@ export function EmitterPanel({ pathEdit, setPathEdit }: EmitterPanelProps) {
                 className="sel sel-wide"
                 value={trigger}
                 title="Which moment in the parent particle's life spawns one of these"
-                onChange={(e) => setSubTrigger(e.target.value as 'death' | 'birth')}>
+                onChange={(e) => setSubTrigger(e.target.value as SubTrigger)}>
                 <option value="death">on their deaths</option>
                 <option value="birth">on their births</option>
+                <option value="age">at an age (seconds)</option>
+                <option value="bounce">when they bounce</option>
+                <option value="alive">while they live (trail)</option>
               </select>
             )}
           </div>

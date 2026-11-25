@@ -253,7 +253,7 @@ describe('compile — node coverage', () => {
     // spawn: the angle is computed at init and lands in the particle's rot slot
     expect(c.emitSrc).toContain('* 0.017453292519943295');
     expect(c.emitSrc).toContain('let o_initRot: f32 =');
-    expect(c.emitSrc).toContain('ParticleRnd(0xffffffffu, 1.0, o_initRot)');
+    expect(c.emitSrc).toContain('ParticleRnd(0xffffffffu, 1.0, o_initRot, 1.0)');
     // update: spin is an angular velocity, so it must scale with age
     expect(c.updateSrc).toContain('* p.age');
     expect(c.updateSrc).toContain('outRot =');

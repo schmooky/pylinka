@@ -77,11 +77,19 @@ const inputs: NodeSchema[] = [
   schema({ kind: 'input.age', label: 'Age', namespace: 'input', evalTime: 'update', impact: 'low', inputs: [], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'input.ageNormalized', label: 'Age (normalized)', namespace: 'input', evalTime: 'update', impact: 'low', inputs: [], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'input.life', label: 'Life', namespace: 'input', evalTime: 'both', impact: 'low', inputs: [], outputs: [outPort('out', 'f32')] }),
-  schema({ kind: 'input.time', label: 'Time', namespace: 'input', evalTime: 'update', impact: 'low', inputs: [], outputs: [outPort('out', 'f32')] }),
+  // seconds since the system started; readable at spawn too, so a spawn angle
+  // can turn with time (an emitter that rotates as it fires)
+  schema({ kind: 'input.time', label: 'Time', namespace: 'input', evalTime: 'both', impact: 'low', inputs: [], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'input.frame', label: 'Frame', namespace: 'input', evalTime: 'update', impact: 'low', inputs: [], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'input.spawnIndex', label: 'Spawn index', namespace: 'input', evalTime: 'init', impact: 'low', inputs: [], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'input.emitterPosition', label: 'Emitter position', namespace: 'input', evalTime: 'both', impact: 'low', inputs: [], outputs: [outPort('out', 'vec2')] }),
   schema({ kind: 'input.emitterVelocity', label: 'Emitter velocity', namespace: 'input', evalTime: 'both', impact: 'low', inputs: [], outputs: [outPort('out', 'vec2')] }),
+  // The particle's rotation as it stands this frame, in radians: the birth
+  // angle on the first update, then whatever writeRotation last wrote. Adding
+  // to it (rate × dt) spins from wherever the particle started.
+  schema({ kind: 'input.rotation', label: 'Rotation', namespace: 'input', evalTime: 'update', impact: 'low', inputs: [], outputs: [outPort('out', 'f32')] }),
+  // This frame's step in seconds. Incremental writes (pos += …, rot += …) need it.
+  schema({ kind: 'input.dt', label: 'Delta time', namespace: 'input', evalTime: 'both', impact: 'low', inputs: [], outputs: [outPort('out', 'f32')] }),
 ];
 
 // ===========================================================================
@@ -256,6 +264,9 @@ const maths: NodeSchema[] = [
   // Every angle port in the catalog is radians (cos/sin take it straight), but
   // an artist types 45, not 0.785 — so this is the adapter they reach for.
   schema({ kind: 'math.radians', label: 'Degrees to radians', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('degrees', 'f32', f(0))], outputs: [outPort('out', 'f32')] }),
+  // Heading of a vector in radians, atan2(y, x): wire input.velocity's
+  // components in to turn a sprite along its path.
+  schema({ kind: 'math.atan2', label: 'Atan2 (heading)', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('y', 'f32', f(0)), inPort('x', 'f32', f(1))], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'math.abs', label: 'Abs', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('x', 'f32', f(0))], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'math.length', label: 'Length', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('v', 'vec2', v2(0, 0))], outputs: [outPort('out', 'f32')] }),
   schema({ kind: 'math.normalize', label: 'Normalize', namespace: 'math', evalTime: 'inferred', impact: 'low', inputs: [inPort('v', 'vec2', v2(0, 0))], outputs: [outPort('out', 'vec2')] }),
@@ -349,6 +360,9 @@ const outputs: NodeSchema[] = [
   schema({ kind: 'output.writePosition', label: 'Write position', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('pos', 'vec2', v2(0, 0))], outputs: [] }),
   schema({ kind: 'output.writeColor', label: 'Write color', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('color', 'color', col('#ffffffff'))], outputs: [] }),
   schema({ kind: 'output.writeAlpha', label: 'Write alpha', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('alpha', 'f32', f(1))], outputs: [] }),
+  // Separate width and height scale. Overrides output.writeScale when both
+  // are present (it writes after it).
+  schema({ kind: 'output.writeScaleXY', label: 'Write scale XY', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('scale', 'vec2', v2(1, 1))], outputs: [] }),
   schema({ kind: 'output.writeScale', label: 'Write scale', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('scale', 'f32', f(1))], outputs: [] }),
   schema({ kind: 'output.writeRotation', label: 'Write rotation', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('rot', 'f32', f(0))], outputs: [], structural: [{ key: 'unit', options: ANGLE_UNITS, default: 'degrees' }] }),
   schema({ kind: 'output.initTexIndex', label: 'Init texture index', namespace: 'output', evalTime: 'init', impact: 'low', inputs: [inPort('index', 'f32', f(0))], outputs: [] }),
@@ -368,6 +382,10 @@ const outputs: NodeSchema[] = [
       inPort('countMin', 'f32', f(8)),
       inPort('countMax', 'f32', f(8)),
       inPort('inheritVelocity', 'f32', f(0)),
+      // on: 'age' — parent age (seconds) at which the burst fires
+      inPort('at', 'f32', f(0.5)),
+      // on: 'alive' — bursts per second while the parent lives (a trail)
+      inPort('rate', 'f32', f(20)),
     ],
     outputs: [],
     structural: [
@@ -382,10 +400,17 @@ const outputs: NodeSchema[] = [
        */
       {
         key: 'max',
-        options: ['1', '2', '3', '4', '6', '8', '12', '16', '24', '32', '48', '64'],
+        options: ['1', '2', '3', '4', '6', '8', '12', '16', '24', '32', '48', '64', '96', '128'],
         default: '8',
       },
-      { key: 'on', options: ['death', 'birth'], default: 'death' },
+      /*
+       * death / birth: one-frame edges on the parent slot.
+       * age: the frame the parent's age crosses `at` seconds.
+       * bounce: a frame where one of the parent's collide outputs resolved a hit.
+       * alive: `rate` times per second while the parent lives, keyed off its
+       *   own age, so a trail keeps an even spacing whatever the frame rate.
+       */
+      { key: 'on', options: ['death', 'birth', 'age', 'bounce', 'alive'], default: 'death' },
     ],
   }),
   schema({ kind: 'output.killIf', label: 'Kill if', namespace: 'output', evalTime: 'update', impact: 'low', inputs: [inPort('cond', 'bool', boolean(false))], outputs: [] }),

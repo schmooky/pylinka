@@ -123,7 +123,7 @@ export function compile(bundle: SystemBundle, catalog: NodeCatalog, target: Back
       postIntegrate: wgslBodyToGlsl(postIntegrate, ctx.tempTypes),
       setVelocity,
       ...(burst ? { burst } : {}),
-      ...(subOn === 'birth' ? { subOn } : {}),
+      ...(subOn !== 'death' ? { subOn } : {}),
     };
     emitSrc = glslStepShader(glslOpts);
     updateSrc = GLSL_DISCARD_FS;
@@ -326,12 +326,14 @@ class CompileCtx {
     );
     if (node === undefined) return null;
     const raw = Number(node.structural?.max ?? '8');
-    const max = Number.isFinite(raw) ? Math.min(64, Math.max(1, Math.floor(raw))) : 8;
+    const max = Number.isFinite(raw) ? Math.min(128, Math.max(1, Math.floor(raw))) : 8;
     return {
       max,
       countMin: this.burstScalar(node.id, 'countMin', 1),
       countMax: this.burstScalar(node.id, 'countMax', 1),
       inherit: this.burstScalar(node.id, 'inheritVelocity', 0),
+      at: this.burstScalar(node.id, 'at', 0.5),
+      rate: this.burstScalar(node.id, 'rate', 20),
     };
   }
 
@@ -344,7 +346,8 @@ class CompileCtx {
     const node = this.graph.nodes.find(
       (n) => resolveKind(this.catalog, n.kind) === 'output.deathBurst',
     );
-    return node?.structural?.on === 'birth' ? 'birth' : 'death';
+    const on = node?.structural?.on;
+    return on === 'birth' || on === 'age' || on === 'bounce' || on === 'alive' ? on : 'death';
   }
 
   /** f32 value-slot expression for a burst port, or a literal fallback. */
@@ -418,6 +421,14 @@ class CompileCtx {
       case 'output.writeScale':
         out.push(`  outSize = ${inp('scale')};${tag}`);
         break;
+      case 'output.writeScaleXY': {
+        // width in size, height as a ratio of it (aspect), so a plain
+        // writeScale elsewhere keeps whatever aspect the particle has
+        const s = inp('scale');
+        out.push(`  outSize = ${s}.x;${tag}`);
+        out.push(`  outAspect = select(1.0, ${s}.y / ${s}.x, abs(${s}.x) > 1e-6);`);
+        break;
+      }
       case 'output.writeRotation': {
         // the destination owns the angle unit — see output.initRotation below
         const r = this.inputExpr(node.id, 'rot');
@@ -458,6 +469,7 @@ class CompileCtx {
         post.push(`      p.pos = p.pos - ${k}_n * ${k}_sd;`);
         post.push(`      let ${k}_vn: f32 = dot(p.vel, ${k}_n);`);
         post.push(`      if (${k}_vn < 0.0) {`);
+        post.push(`        bounced = true;`);
         post.push(`        let ${k}_vt: vec2f = p.vel - ${k}_n * ${k}_vn;`);
         post.push(
           `        p.vel = ${k}_vt * (1.0 - ${inp('friction')}) - ${k}_n * (${k}_vn * ${inp('restitution')});`,
@@ -483,12 +495,12 @@ class CompileCtx {
           ] as const) {
             post.push(
               `    if (p.pos.${axis} < ${k}_mn.${axis}) { p.pos.${axis} = ${k}_mn.${axis};` +
-                ` if (p.vel.${axis} < 0.0) { p.vel.${axis} = -p.vel.${axis} * ${rest};` +
+                ` if (p.vel.${axis} < 0.0) { bounced = true; p.vel.${axis} = -p.vel.${axis} * ${rest};` +
                 ` p.vel.${other} = p.vel.${other} * (1.0 - ${fric}); } }`,
             );
             post.push(
               `    if (p.pos.${axis} > ${k}_mx.${axis}) { p.pos.${axis} = ${k}_mx.${axis};` +
-                ` if (p.vel.${axis} > 0.0) { p.vel.${axis} = -p.vel.${axis} * ${rest};` +
+                ` if (p.vel.${axis} > 0.0) { bounced = true; p.vel.${axis} = -p.vel.${axis} * ${rest};` +
                 ` p.vel.${other} = p.vel.${other} * (1.0 - ${fric}); } }`,
             );
           }
@@ -497,6 +509,7 @@ class CompileCtx {
           post.push(
             `    if (p.pos.x > ${k}_mn.x && p.pos.x < ${k}_mx.x && p.pos.y > ${k}_mn.y && p.pos.y < ${k}_mx.y) {`,
           );
+          post.push(`      bounced = true;`);
           post.push(`      let ${k}_dl: f32 = p.pos.x - ${k}_mn.x;`);
           post.push(`      let ${k}_dr: f32 = ${k}_mx.x - p.pos.x;`);
           post.push(`      let ${k}_du: f32 = p.pos.y - ${k}_mn.y;`);
@@ -538,6 +551,7 @@ class CompileCtx {
         post.push(`      let ${k}_rel: vec2f = p.vel - ${inp('velocity')};`);
         post.push(`      let ${k}_vn: f32 = dot(${k}_rel, ${k}_n);`);
         post.push(`      if (${k}_vn ${inside ? '>' : '<'} 0.0) {`);
+        post.push(`        bounced = true;`);
         post.push(`        let ${k}_vt: vec2f = ${k}_rel - ${k}_n * ${k}_vn;`);
         post.push(
           `        p.vel = ${inp('velocity')} + ${k}_vt * (1.0 - ${inp('friction')}) - ${k}_n * (${k}_vn * ${inp('restitution')});`,

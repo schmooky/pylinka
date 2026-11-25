@@ -126,9 +126,13 @@ export class GraphBuilder {
     if (s === 0) return [0, 0];
     if (!isRef(v) && typeof s === 'number') return [v[0] * s, v[1] * s];
     if (s === 1) return v;
-    const x = isRef(v) ? this.op('math.component', { v }, { index: 'x' }) : v[0];
-    const y = isRef(v) ? this.op('math.component', { v }, { index: 'y' }) : v[1];
-    return this.vec(this.mul(x, s), this.mul(y, s));
+    return this.vec(this.mul(this.component(v, 'x'), s), this.mul(this.component(v, 'y'), s));
+  }
+
+  /** One component of a vec2. */
+  component(v: V, index: 'x' | 'y'): F {
+    if (!isRef(v)) return index === 'x' ? v[0] : v[1];
+    return this.op('math.component', { v }, { index });
   }
 
   rotate(v: V, angle: F): V {

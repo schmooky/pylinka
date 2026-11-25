@@ -35,12 +35,12 @@ export interface Webgl2Layout {
 }
 
 /**
- * hot (pos/vel/age/life) + meta (seed/flags) + rnd (color/size/rot) fused into
- * one 56-byte record — TF writes one interleaved buffer per system.
+ * hot (pos/vel/age/life) + meta (seed/flags) + rnd (color/size/rot/aspect)
+ * fused into one 60-byte record — TF writes one interleaved buffer per system.
  */
 export const WEBGL2_LAYOUT: Webgl2Layout = {
-  strideBytes: 56,
-  varyings: ['o_pos', 'o_vel', 'o_age', 'o_life', 'o_seed', 'o_flags', 'o_color', 'o_size', 'o_rot'],
+  strideBytes: 60,
+  varyings: ['o_pos', 'o_vel', 'o_age', 'o_life', 'o_seed', 'o_flags', 'o_color', 'o_size', 'o_rot', 'o_aspect'],
   attribs: [
     { name: 'i_pos', size: 2, type: 'float', offsetBytes: 0 },
     { name: 'i_vel', size: 2, type: 'float', offsetBytes: 8 },
@@ -51,6 +51,7 @@ export const WEBGL2_LAYOUT: Webgl2Layout = {
     { name: 'i_color', size: 4, type: 'float', offsetBytes: 32 },
     { name: 'i_size', size: 1, type: 'float', offsetBytes: 48 },
     { name: 'i_rot', size: 1, type: 'float', offsetBytes: 52 },
+    { name: 'i_aspect', size: 1, type: 'float', offsetBytes: 56 },
   ],
   spawnCursorUniform: 'u_spawnCursor',
 };
@@ -73,7 +74,7 @@ export interface GlslStepOptions {
   /** death-burst config (sub-step only) — spawns countMin..countMax per parent
    *  event across `max` k-region passes (uniform u_burstK selects the pass). */
   burst?: SubBurst;
-  /** which parent edge fires the spawn (sub-step only; default 'death'). */
+  /** which parent event fires the spawn (sub-step only; default 'death'). */
   subOn?: SubTrigger;
 }
 
@@ -115,6 +116,7 @@ in uint i_flags;
 in vec4 i_color;
 in float i_size;
 in float i_rot;
+in float i_aspect;
 
 out vec2 o_pos;
 out vec2 o_vel;
@@ -125,6 +127,7 @@ flat out uint o_flags;
 out vec4 o_color;
 out float o_size;
 out float o_rot;
+out float o_aspect;
 
 uint pcg(uint v) {
   uint s = v * 747796405u + 2891336453u;
@@ -192,13 +195,14 @@ ${o.initBody}
     o_color = vec4(1.0);
     o_size = 1.0;
     o_rot = o_initRot;
+    o_aspect = 1.0;
     return;
   }
 
   if (!wasAlive) {
     o_pos = i_pos; o_vel = i_vel; o_age = i_age; o_life = i_life;
     o_seed = i_seed; o_flags = i_flags;
-    o_color = i_color; o_size = i_size; o_rot = i_rot;
+    o_color = i_color; o_size = i_size; o_rot = i_rot; o_aspect = i_aspect;
     return;
   }
 
@@ -212,6 +216,8 @@ ${o.initBody}
   vec4 outColor = i_color;
   float outSize = i_size;
   float outRot = i_rot;
+  float outAspect = i_aspect;
+  bool bounced = false;
 
 ${o.updateBody}
 
@@ -220,8 +226,8 @@ ${post}  p.age += U.dt;
   bool runaway = any(greaterThan(abs(p.pos), vec2(RUNAWAY)));
   if (p.age >= p.life || kill || runaway) {
     o_pos = p.pos; o_vel = p.vel; o_age = p.age; o_life = p.life;
-    o_seed = i_seed; o_flags = i_flags & ~1u;
-    o_color = outColor; o_size = outSize; o_rot = outRot;
+    o_seed = i_seed; o_flags = (i_flags & ~3u) | (bounced ? 2u : 0u);
+    o_color = outColor; o_size = outSize; o_rot = outRot; o_aspect = outAspect;
     return;
   }
   o_pos = p.pos;
@@ -229,10 +235,11 @@ ${post}  p.age += U.dt;
   o_age = p.age;
   o_life = p.life;
   o_seed = i_seed;
-  o_flags = i_flags;
+  o_flags = (i_flags & ~2u) | (bounced ? 2u : 0u); // bit 1: a collide hit this frame
   o_color = clamp(outColor, vec4(0.0), vec4(1.0));
   o_size = outSize;
   o_rot = outRot;
+  o_aspect = outAspect;
 }`);
   return parts.join('\n');
 }
@@ -279,10 +286,12 @@ in uint i_flags;
 in vec4 i_color;
 in float i_size;
 in float i_rot;
+in float i_aspect;
 // parent slot i — current and previous frame (for death detection + position)
 in vec2 i_pPos;
 in uint i_pFlags;
 in uint i_pFlagsPrev;
+in float i_pAge; // parent age now (age/alive events; prev = age − dt)
 ${o.burst ? 'in vec2 i_pVel; // parent death-velocity (for inheritance)' : ''}
 
 out vec2 o_pos;
@@ -294,6 +303,7 @@ flat out uint o_flags;
 out vec4 o_color;
 out float o_size;
 out float o_rot;
+out float o_aspect;
 
 uint pcg(uint v) {
   uint s = v * 747796405u + 2891336453u;
@@ -335,12 +345,8 @@ void main() {
   gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
   uint slot = uint(gl_VertexID);
   bool wasAlive = (i_flags & 1u) != 0u;
-  // one-frame edge on the parent slot: ${o.subOn ?? 'death'}
-  bool parentFired = ${
-    (o.subOn ?? 'death') === 'birth'
-      ? '((i_pFlagsPrev & 1u) == 0u) && ((i_pFlags & 1u) != 0u)'
-      : '((i_pFlagsPrev & 1u) != 0u) && ((i_pFlags & 1u) == 0u)'
-  };
+  // parent event: ${o.subOn ?? 'death'}
+${subEventGlsl(o.subOn ?? 'death', o.burst)}
 ${
   o.burst
     ? `  // burst: this pass writes copy u_burstK; each parent event fires the
@@ -349,11 +355,24 @@ ${
   uint dseed = hash2(U.baseSeed, hash2(slot, U.frame));
   float burstF = mix(${o.burst.countMin}, ${o.burst.countMax}, srand(dseed, 176u));
   uint burstN = min(uint(max(floor(burstF + 0.5), 0.0)), ${o.burst.max}u);
-  bool doSpawn = !wasAlive && parentFired && uint(u_burstK) < burstN;`
+  bool doSpawn = !wasAlive && parentFired && ${
+    o.subOn === 'alive'
+      ? // a trail tick takes the next burstN copies round the ring of max
+        '((uint(u_burstK) + ' + o.burst.max + 'u - (uint(pTick) * burstN) % ' + o.burst.max + 'u) % ' + o.burst.max + 'u) < burstN'
+      : 'uint(u_burstK) < burstN'
+  };`
     : `  bool doSpawn = !wasAlive && parentFired;`
 }
 
   if (doSpawn) {
+    // input.spawnIndex: the index within this parent event's burst
+    uint i = ${
+      o.burst
+        ? o.subOn === 'alive'
+          ? '(uint(u_burstK) + ' + o.burst.max + 'u - (uint(pTick) * burstN) % ' + o.burst.max + 'u) % ' + o.burst.max + 'u'
+          : 'uint(u_burstK)'
+        : '0u'
+    };
     vec2 spawnOrigin = i_pPos;
     uint seed = hash2(U.baseSeed, ${o.burst ? 'hash2(slot, hash2(U.frame, uint(u_burstK) + 1u))' : 'hash2(slot, U.frame)'});
 
@@ -368,13 +387,14 @@ ${o.initBody}
     o_color = vec4(1.0);
     o_size = 1.0;
     o_rot = o_initRot;
+    o_aspect = 1.0;
     return;
   }
 
   if (!wasAlive) {
     o_pos = i_pos; o_vel = i_vel; o_age = i_age; o_life = i_life;
     o_seed = i_seed; o_flags = i_flags;
-    o_color = i_color; o_size = i_size; o_rot = i_rot;
+    o_color = i_color; o_size = i_size; o_rot = i_rot; o_aspect = i_aspect;
     return;
   }
 
@@ -388,6 +408,8 @@ ${o.initBody}
   vec4 outColor = i_color;
   float outSize = i_size;
   float outRot = i_rot;
+  float outAspect = i_aspect;
+  bool bounced = false;
 
 ${o.updateBody}
 
@@ -396,8 +418,8 @@ ${post}  p.age += U.dt;
   bool runaway = any(greaterThan(abs(p.pos), vec2(RUNAWAY)));
   if (p.age >= p.life || kill || runaway) {
     o_pos = p.pos; o_vel = p.vel; o_age = p.age; o_life = p.life;
-    o_seed = i_seed; o_flags = i_flags & ~1u;
-    o_color = outColor; o_size = outSize; o_rot = outRot;
+    o_seed = i_seed; o_flags = (i_flags & ~3u) | (bounced ? 2u : 0u);
+    o_color = outColor; o_size = outSize; o_rot = outRot; o_aspect = outAspect;
     return;
   }
   o_pos = p.pos;
@@ -405,12 +427,42 @@ ${post}  p.age += U.dt;
   o_age = p.age;
   o_life = p.life;
   o_seed = i_seed;
-  o_flags = i_flags;
+  o_flags = (i_flags & ~2u) | (bounced ? 2u : 0u); // bit 1: a collide hit this frame
   o_color = clamp(outColor, vec4(0.0), vec4(1.0));
   o_size = outSize;
   o_rot = outRot;
+  o_aspect = outAspect;
 }`);
   return parts.join('\n');
+}
+
+/**
+ * GLSL for `bool parentFired` (and `pTick` for 'alive'): the parent event, read
+ * from parent slot i's current/previous flags and current age. The previous
+ * age is `age − dt`: the parent stepped exactly once this frame.
+ */
+function subEventGlsl(on: SubTrigger, burst: GlslStepOptions['burst']): string {
+  const was = '((i_pFlagsPrev & 1u) != 0u)';
+  const now = '((i_pFlags & 1u) != 0u)';
+  switch (on) {
+    case 'birth':
+      return `  bool parentFired = !${was} && ${now};`;
+    case 'age': {
+      const at = burst?.at ?? '0.5';
+      return `  float pAgePrev = ${was} ? i_pAge - U.dt : -1.0;
+  bool parentFired = ${now} && i_pAge >= ${at} && pAgePrev < ${at};`;
+    }
+    case 'bounce':
+      return `  bool parentFired = (${now} || ${was}) && ((i_pFlags & 2u) != 0u);`;
+    case 'alive': {
+      const rate = burst?.rate ?? '20.0';
+      return `  float pTick = floor(i_pAge * ${rate});
+  float pTickPrev = ${was} ? floor((i_pAge - U.dt) * ${rate}) : -1.0;
+  bool parentFired = ${now} && pTick != pTickPrev;`;
+    }
+    default:
+      return `  bool parentFired = ${was} && !${now};`;
+  }
 }
 
 /** Fragment stage completing the TF program (rasterizer discard is on). */

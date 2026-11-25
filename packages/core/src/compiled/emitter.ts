@@ -19,7 +19,13 @@ export class SystemClock {
   private scheduler: SpawnScheduler;
 
   constructor(emitter: EmitterSettings, capacity: number, startX: number, startY: number, seed?: number) {
-    this.scheduler = new SpawnScheduler(emitter, capacity);
+    // burst count / interval ranges draw from a stream seeded like the GPU side,
+    // so a fixed `seed` reproduces spawn timing too
+    let s = ((seed ?? Date.now()) ^ 0x9e3779b9) >>> 0;
+    this.scheduler = new SpawnScheduler(emitter, capacity, () => {
+      s = pcg(s);
+      return s / 4294967296;
+    });
     this.ex = startX;
     this.ey = startY;
     this.px = startX;

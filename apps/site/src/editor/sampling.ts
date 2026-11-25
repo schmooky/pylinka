@@ -182,6 +182,13 @@ export class Sampler {
       case 'input.emitterPosition':
       case 'input.emitterVelocity':
         return [0, 0];
+      case 'input.dt':
+        // the preview steps at 60 Hz
+        return 1 / 60;
+      case 'input.rotation':
+        // the preview does not track rotation; it reads as unrotated
+        this.approx.add(node.kind);
+        return 0;
 
       case 'gen.random':
         return this.r(id);
@@ -237,6 +244,8 @@ export class Sampler {
         return (n('degrees') * Math.PI) / 180;
       case 'math.abs':
         return Math.abs(n('x'));
+      case 'math.atan2':
+        return Math.atan2(n('y'), n('x'));
       case 'math.length':
         return len(v('v'));
       case 'math.normalize':

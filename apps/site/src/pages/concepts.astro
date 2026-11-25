@@ -64,9 +64,14 @@ import DocsLayout from '../layouts/DocsLayout.astro';
   <p>Emitters run in one of three modes:</p>
   <ul>
     <li><strong>flow</strong>, a steady <code>rate</code> in particles per second, optionally with <code>rateOverDistance</code>, particles per pixel the emitter travels, for trails without gaps.</li>
-    <li><strong>burst</strong>, a <code>count</code> every <code>interval</code> seconds.</li>
+    <li><strong>burst</strong>, a <code>count</code> every <code>interval</code> seconds. Give it <code>countMax</code> and <code>intervalMax</code> to draw each burst's count and wait from a range, and <code>immediate</code> to fire the first burst at start rather than one interval in.</li>
     <li><strong>once</strong>, a single burst on start.</li>
   </ul>
+  <p>
+    Any mode can wait <code>delay</code> seconds before it starts, and flow or burst can stop after
+    <code>duration</code> seconds. That is enough to lay out a timed sequence &mdash; a flash, then
+    smoke 0.2&nbsp;s later &mdash; as plain systems in one project.
+  </p>
   <p>
     Within a frame, spawns are spread along the emitter's path. Fast trails come out continuous
     instead of arriving in clumps at 60&nbsp;Hz.
@@ -180,10 +185,23 @@ import DocsLayout from '../layouts/DocsLayout.astro';
       <strong>on their births</strong> &mdash; a flash the instant one appears. A bolt of lightning
       and the light it throws are born on the same frame, and this is how you say that.
     </li>
+    <li>
+      <strong>at an age</strong> &mdash; the frame a parent reaches <code>at</code> seconds old: a
+      shell that splits mid-flight.
+    </li>
+    <li>
+      <strong>when they bounce</strong> &mdash; a frame on which one of the parent's collide outputs
+      resolved a hit: a splash where a drop meets the floor.
+    </li>
+    <li>
+      <strong>while they live</strong> &mdash; <code>rate</code> times a second for as long as the
+      parent lives, keyed off its own age so the spacing holds at any frame rate: a trail behind
+      every particle.
+    </li>
   </ul>
   <p>
-    Both are one-frame edges on the same parent slot, read from the same buffers, so a birth costs
-    exactly what a death costs. The setting lives on the child's <code>output.deathBurst</code> node
+    Death and birth are one-frame edges on the same parent slot, read from the same buffers, so a
+    birth costs exactly what a death costs. The setting lives on the child's <code>output.deathBurst</code> node
     (<code>on</code>), which also decides how many children each event spawns and how much of the
     parent's velocity they inherit &mdash; one for a flash, a dozen for an explosion.
   </p>

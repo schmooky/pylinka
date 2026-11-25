@@ -7,10 +7,13 @@ Play [RevoltFX](https://github.com/bma73/revolt-fx) effect bundles with Pylinka.
   timeline (start delays, durations, RevoltFX's spawn clock, triggers) and a
   **fidelity report**: every setting that did not carry over exactly, marked
   `approximate` or `unsupported`, with the measured error where there is one.
+- The project carries RevoltFX's timing itself (delays, durations, random
+  spawn counts and intervals, auto-rotation), so it plays through plain
+  `createPylinka` or in the editor.
 - `createRevoltFxEffect(bundle, name, { renderer, sheet, image })` from
   `@pylinka/revoltfx/pixi` plays it through `createPylinka`. It crops the
-  textures out of the spritesheet, runs the timeline, and calls `onTrigger`
-  for sequence triggers.
+  textures out of the spritesheet, positions and rotates the effect, reports
+  completion, and calls `onTrigger` for sequence triggers.
 
 ```ts
 import { registerPylinka } from '@pylinka/core/pixi';
@@ -31,7 +34,8 @@ console.table(torch.issues);
 ```
 
 [MAPPING.md](./MAPPING.md) maps each RevoltFX setting to Pylinka, says how
-faithful the mapping is, and lists what Pylinka cannot express yet. Converted
+faithful the mapping is, and lists what Pylinka cannot express yet (draw
+order by age, a child reading its parent particle's rotation). Converted
 effects need WebGPU or WebGL2. The WebGL1 CPU backend does not run these graphs.
 
 The test fixtures are the official RevoltFX example bundle and spritesheet

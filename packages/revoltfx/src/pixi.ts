@@ -18,12 +18,13 @@
  * app.ticker.add((t) => torch.update(t.deltaMS / 1000));
  * ```
  *
- * The player converts with `drive: 'runtime'`, so every top-level emitter's
- * spawns come from RevoltFX's own clock (SpawnClockRunner): start delays,
- * durations, random counts and intervals, auto-rotation, child emitters that
- * adopt their parent's rotation, and sequence triggers. Sub-emitters run on the
- * GPU as linked Pylinka systems. One effect object is one playing instance;
- * call `restart()` to play it again.
+ * The converted project carries RevoltFX's timing itself (start delays,
+ * durations, random counts and intervals, auto-rotation), so the player only
+ * adds what a project cannot: sequence triggers, the effect's position and
+ * rotation, and knowing when it is done. With `drive: 'runtime'` it instead
+ * runs RevoltFX's spawn clock on the CPU (SpawnClockRunner) and calls
+ * `spawnBurst`. Sub-emitters run on the GPU as linked Pylinka systems. One
+ * effect object is one playing instance; call `restart()` to play it again.
  */
 import { Container } from 'pixi.js';
 import { createPylinka, loadImage, type CreateOptions, type PylinkaRuntime, type TextureInput } from '@pylinka/core/pixi';
@@ -32,10 +33,11 @@ import { convertEffect, type ConvertOptions, type ConvertedEffect, type SystemTe
 import { sourceSize } from './frames.js';
 import type { FidelityIssue } from './report.js';
 import type { RfxBundle, SheetData } from './types.js';
+import type { PylinkaProject } from '@pylinka/graph';
 
 export interface RevoltFxEffectOptions
   extends Omit<CreateOptions, 'texture' | 'textures' | 'subEmitters'>,
-    Pick<ConvertOptions, 'particleFac' | 'maxDepth' | 'kind'> {
+    Pick<ConvertOptions, 'particleFac' | 'maxDepth' | 'kind' | 'drive'> {
   /** The spritesheet JSON (TexturePacker hash) the bundle's textures live in. */
   sheet: SheetData;
   /** The spritesheet image: a URL or an already-loaded image/canvas/bitmap. */
@@ -81,7 +83,7 @@ export async function createRevoltFxEffect(
 ): Promise<RevoltFxEffect> {
   const converted = convertEffect(bundle, name, {
     sheet: opts.sheet,
-    drive: 'runtime',
+    drive: opts.drive ?? 'project',
     ...(opts.particleFac !== undefined ? { particleFac: opts.particleFac } : {}),
     ...(opts.maxDepth !== undefined ? { maxDepth: opts.maxDepth } : {}),
     ...(opts.kind !== undefined ? { kind: opts.kind } : {}),
@@ -94,7 +96,7 @@ export async function createRevoltFxEffect(
   }
   // everything that is not ours goes to createPylinka
   const create: Record<string, unknown> = { ...opts };
-  for (const k of ['sheet', 'image', 'containers', 'onTrigger', 'autoStart', 'particleFac', 'maxDepth', 'kind']) delete create[k];
+  for (const k of ['sheet', 'image', 'containers', 'onTrigger', 'autoStart', 'particleFac', 'maxDepth', 'kind', 'drive']) delete create[k];
   const runtime = await createPylinka(converted.project, { ...(create as unknown as CreateOptions), textures });
   return new Effect(converted, runtime, opts.containers ?? {}, opts.onTrigger, opts.autoStart !== false);
 }
@@ -179,6 +181,11 @@ class Effect implements RevoltFxEffect {
   private readonly rotations: number[];
   /** knob name per track (undefined: no rotation knob) */
   private readonly knobs: (string | undefined)[];
+  /** true: the CPU clock spawns (drive 'runtime'); false: the project's emitters do */
+  private readonly driven: boolean;
+  /** the project with every emitter silenced, for stop() in project mode */
+  private readonly silenced: PylinkaProject;
+  private stopped = false;
 
   constructor(
     readonly converted: ConvertedEffect,
@@ -189,6 +196,15 @@ class Effect implements RevoltFxEffect {
   ) {
     this.issues = converted.issues;
     const { emits, triggers } = converted.timeline;
+    // a runtime-driven conversion writes rate-0 flow emitters for its tracks
+    this.driven = emits.length > 0 && emits.every((t) => {
+      const sys = converted.project.systems.find((x) => x.name === t.system);
+      return sys !== undefined && sys.emitter.mode === 'flow' && sys.emitter.rate === 0;
+    });
+    this.silenced = {
+      ...converted.project,
+      systems: converted.project.systems.map((x) => ({ ...x, emitter: { mode: 'flow', rate: 0 } })),
+    };
     this.tracks = emits.map((t) => ({ runner: new SpawnClockRunner(t.clock), started: false, spin: 0 }));
     this.fired = triggers.map(() => false);
     this.rotations = emits.map(() => 0);
@@ -205,7 +221,15 @@ class Effect implements RevoltFxEffect {
   }
 
   get exhausted(): boolean {
-    return this.tracks.every((t) => t.started && t.runner.exhausted) && this.fired.every(Boolean);
+    if (!this.fired.every(Boolean)) return false;
+    if (this.stopped) return true;
+    if (this.driven) return this.tracks.every((t) => t.started && t.runner.exhausted);
+    // project mode: each track ends at its start (one-shot) or start + duration
+    return this.converted.timeline.emits.every((t) => {
+      const c = t.clock;
+      if (c.infinite) return false;
+      return this.elapsed >= t.at + (c.duration > 0 ? c.duration : 0) + 1e-6;
+    });
   }
 
   get completed(): boolean {
@@ -235,7 +259,8 @@ class Effect implements RevoltFxEffect {
       }
       // an emitter child stops when the emitter that started it does
       if (track.parent !== undefined && this.tracks[track.parent]!.runner.exhausted) st.runner.stop();
-      if (!st.runner.exhausted) st.spin += track.autoRotation * dt;
+      // project mode turns autoRotation in the graph (input.time); runtime mode turns the knob
+      if (this.driven && !st.runner.exhausted) st.spin += track.autoRotation * dt;
       // ParticleEmitter.rotation: own + (parent's, when adopted) — the effect's own for a root
       const base =
         track.adoptRotationOf !== undefined ? this.rotations[track.adoptRotationOf]! : track.parent === undefined ? this.rotation : 0;
@@ -243,6 +268,7 @@ class Effect implements RevoltFxEffect {
       this.rotations[i] = rot;
       const knob = this.knobs[i];
       if (knob !== undefined) this.runtime.params.set(knob, rot);
+      if (!this.driven) return;
       const n = st.runner.step(dt);
       if (n > 0) this.runtime.systems[track.system]?.spawnBurst(n);
     });
@@ -255,6 +281,11 @@ class Effect implements RevoltFxEffect {
       t.runner.stop();
     }
     this.fired.fill(true);
+    if (!this.driven && !this.stopped) {
+      for (const h of Object.values(this.runtime.systems)) h.apply(this.silenced);
+    }
+    this.stopped = true;
+    this.exhaustedAt ??= this.elapsed;
   }
 
   restart(): void {
@@ -266,6 +297,10 @@ class Effect implements RevoltFxEffect {
       t.spin = 0;
     }
     this.fired.fill(false);
+    if (this.stopped && !this.driven) {
+      for (const h of Object.values(this.runtime.systems)) h.apply(this.converted.project);
+    }
+    this.stopped = false;
     for (const h of Object.values(this.runtime.systems)) h.restart();
     this.playing = true;
   }

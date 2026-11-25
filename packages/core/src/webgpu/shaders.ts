@@ -30,11 +30,14 @@ struct VSOut {
 fn vs(@builtin(vertex_index) vi: u32,
       @location(0) pos: vec2f, @location(1) color: vec4f,
       @location(2) size: f32,  @location(3) rot: f32, @location(4) flags: u32,
-      @location(5) age: f32,   @location(6) life: f32, @location(7) seed: u32) -> VSOut {
+      @location(5) age: f32,   @location(6) life: f32, @location(7) seed: u32,
+      @location(8) aspect: f32) -> VSOut {
   let corner = CORNERS[vi];
   let s = size * f32(flags & 1u) * R.grid.z;
   let c = cos(rot); let sn = sin(rot);
-  let local = vec2f(corner.x * c - corner.y * sn, corner.x * sn + corner.y * c) * s;
+  // scale in the sprite's own axes (height = width × aspect), then rotate
+  let q = vec2f(corner.x, corner.y * aspect);
+  let local = vec2f(q.x * c - q.y * sn, q.x * sn + q.y * c) * s;
   let world = pos + local;
 
   // atlas cell: column advances with life, row is per-particle (or fixed).
@@ -63,7 +66,7 @@ fn fs(in: VSOut) -> @location(0) vec4f {
 `;
 
 /** §13.1 blend states, premultiplied output assumed. */
-export function blendState(mode: 'normal' | 'add' | 'screen'): GPUBlendState {
+export function blendState(mode: 'normal' | 'add' | 'screen' | 'multiply'): GPUBlendState {
   switch (mode) {
     // additive blends alpha too — see webgl/engine.ts render() for why leaving
     // the destination alpha alone makes the compositor discard the pixel
@@ -71,6 +74,12 @@ export function blendState(mode: 'normal' | 'add' | 'screen'): GPUBlendState {
       return {
         color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
         alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+      };
+    // premultiplied multiply: src·dst + dst·(1 − srcα)
+    case 'multiply':
+      return {
+        color: { srcFactor: 'dst', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+        alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
       };
     case 'screen':
       return {
