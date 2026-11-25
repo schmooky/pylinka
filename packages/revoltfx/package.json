@@ -1,0 +1,72 @@
+{
+  "name": "@pylinka/revoltfx",
+  "version": "0.0.0",
+  "description": "Play RevoltFX effect bundles with Pylinka: a converter from RevoltFX emitters and sequences to PylinkaProject, with a fidelity report, plus a pixi.js player.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schmooky/pylinka.git",
+    "directory": "packages/revoltfx"
+  },
+  "homepage": "https://pylinka.schmooky.dev",
+  "bugs": "https://github.com/schmooky/pylinka/issues",
+  "keywords": [
+    "particles",
+    "particle-system",
+    "pixijs",
+    "pixi",
+    "revoltfx",
+    "revolt-fx",
+    "vfx",
+    "converter"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./pixi": {
+      "types": "./dist/pixi.d.ts",
+      "import": "./dist/pixi.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "MAPPING.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pylinka/compiler": "workspace:*",
+    "@pylinka/graph": "workspace:*"
+  },
+  "devDependencies": {
+    "@pylinka/core": "workspace:*",
+    "@pylinka/format": "workspace:*",
+    "pixi.js": "^8"
+  },
+  "peerDependencies": {
+    "@pylinka/core": "workspace:^",
+    "pixi.js": "^8"
+  },
+  "peerDependenciesMeta": {
+    "@pylinka/core": {
+      "optional": true
+    },
+    "pixi.js": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
