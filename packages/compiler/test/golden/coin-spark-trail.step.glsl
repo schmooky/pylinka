@@ -33,6 +33,7 @@ in uint i_flags;
 in vec4 i_color;
 in float i_size;
 in float i_rot;
+in float i_aspect;
 
 out vec2 o_pos;
 out vec2 o_vel;
@@ -43,6 +44,7 @@ flat out uint o_flags;
 out vec4 o_color;
 out float o_size;
 out float o_rot;
+out float o_aspect;
 
 uint pcg(uint v) {
   uint s = v * 747796405u + 2891336453u;
@@ -97,13 +99,14 @@ void main() {
     o_color = vec4(1.0);
     o_size = 1.0;
     o_rot = o_initRot;
+    o_aspect = 1.0;
     return;
   }
 
   if (!wasAlive) {
     o_pos = i_pos; o_vel = i_vel; o_age = i_age; o_life = i_life;
     o_seed = i_seed; o_flags = i_flags;
-    o_color = i_color; o_size = i_size; o_rot = i_rot;
+    o_color = i_color; o_size = i_size; o_rot = i_rot; o_aspect = i_aspect;
     return;
   }
 
@@ -117,6 +120,8 @@ void main() {
   vec4 outColor = i_color;
   float outSize = i_size;
   float outRot = i_rot;
+  float outAspect = i_aspect;
+  bool bounced = false;
 
   // n7 field.gravity
   vec2 t_n7 = V[7].xy;
@@ -139,8 +144,8 @@ void main() {
   bool runaway = any(greaterThan(abs(p.pos), vec2(RUNAWAY)));
   if (p.age >= p.life || kill || runaway) {
     o_pos = p.pos; o_vel = p.vel; o_age = p.age; o_life = p.life;
-    o_seed = i_seed; o_flags = i_flags & ~1u;
-    o_color = outColor; o_size = outSize; o_rot = outRot;
+    o_seed = i_seed; o_flags = (i_flags & ~3u) | (bounced ? 2u : 0u);
+    o_color = outColor; o_size = outSize; o_rot = outRot; o_aspect = outAspect;
     return;
   }
   o_pos = p.pos;
@@ -148,8 +153,9 @@ void main() {
   o_age = p.age;
   o_life = p.life;
   o_seed = i_seed;
-  o_flags = i_flags;
+  o_flags = (i_flags & ~2u) | (bounced ? 2u : 0u); // bit 1: a collide hit this frame
   o_color = clamp(outColor, vec4(0.0), vec4(1.0));
   o_size = outSize;
   o_rot = outRot;
+  o_aspect = outAspect;
 }

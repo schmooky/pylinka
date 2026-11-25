@@ -21,7 +21,7 @@ import {
 export interface EngineParams {
   capacity: number;
   emitter: EmitterSettings;
-  blend: 'normal' | 'add' | 'screen';
+  blend: 'normal' | 'add' | 'screen' | 'multiply';
   gravity: [number, number];
   drag: number;
   windPower: number;

@@ -80,19 +80,21 @@ describe('the official RevoltFX example bundle', () => {
     expect(JSON.stringify(bundle)).toBe(copy);
   });
 
-  it('reports the features Pylinka cannot express, rather than dropping them silently', () => {
+  it('only draw order is left unsupported', () => {
     const features = new Set(every.flatMap((fx) => fx.issues.filter((i) => i.level === 'unsupported').map((i) => i.feature)));
-    // every one of these occurs in the example bundle
-    for (const f of ['particle.align', 'particle.childs', 'particle.nonUniformScale', 'spawn.onHalfway', 'spawn.onBounce', 'particle.blendMode', 'particle.addOnTop']) {
-      expect(features, f).toContain(f);
-    }
+    expect([...features]).toEqual(['particle.addOnTop']);
   });
 
-  it('reports each emitter that uses useChilds', () => {
+  it('every emitter that uses useChilds gets trail children on its particles', () => {
     const withChilds = bundle.emitters.filter((e) => e.particleSettings.useChilds && e.particleSettings.childs.length > 0).map((e) => e.name);
     expect(withChilds.length).toBeGreaterThan(0);
     for (const name of withChilds) {
-      expect(all[name]!.issues.some((i) => i.feature === 'particle.childs'), name).toBe(true);
+      const project = all[name]!.project;
+      const root = project.systems.find((s) => s.name === name)!;
+      const trails = project.systems.filter(
+        (s) => project.subEmitters?.[s.id] === root.id && ['alive', 'birth'].includes(String(only(s, 'output.deathBurst').structural?.on)),
+      );
+      expect(trails.length, name).toBeGreaterThan(0);
     }
   });
 });
@@ -157,21 +159,41 @@ describe('emitters', () => {
     expect(plane.values?.friction?.v).toBeCloseTo(0.1);
   });
 
-  it('turns an eased distance tween into velocity + per-particle drag, and reports it', () => {
+  it('walks an eased distance tween exactly: pos += D·(E(next) − E(now))', () => {
+    const fx = convertEffect(single({ particleSettings: { useMotion: true, distanceMin: 50, distanceMax: 150, distanceEase: 'easeOutCubic' } }), 'probe', { now: NOW, sheet });
+    const s = fx.project.systems[0]!;
+    expect(nodesOf(s, 'output.drag')).toHaveLength(0);
+    expect(input(s, only(s, 'output.writePosition'), 'pos')).toEqual({ from: 'math.makeVec2' });
+    expect(nodesOf(s, 'gen.ease').map((n) => n.structural?.ease)).toEqual(['power2.out', 'power2.out']);
+    expect(nodesOf(s, 'input.dt')).toHaveLength(1);
+    expect(fx.issues.filter((i) => i.level !== 'warning')).toEqual([]);
+  });
+
+  it('a non-preset distance ease is a fitted curve, reported with its error', () => {
     const fx = convertEffect(single({ particleSettings: { useMotion: true, distanceMin: 50, distanceMax: 150, distanceEase: 'easeOutQuint' } }), 'probe', { now: NOW, sheet });
     const s = fx.project.systems[0]!;
-    expect(input(s, only(s, 'output.drag'), 'drag')).toEqual({ from: 'math.div' });
-    const issue = fx.issues.find((i) => i.feature === 'particle.distanceEase')!;
-    expect(issue.level).toBe('approximate');
-    expect(issue.error).toBeLessThan(0.03);
+    expect(nodesOf(s, 'gen.ease').every((n) => n.structural?.ease?.startsWith('curve('))).toBe(true);
+    // a fit within 0.001 is not worth a report; anything worse would be one
+    const issue = fx.issues.find((i) => i.feature === 'ease');
+    expect(issue?.error ?? 0).toBeLessThan(0.005);
   });
 
   it('a spawn clock with a fixed count is exact; random ranges are reported without the player', () => {
     const fixed = convertEffect(single({ spawnCountMin: 3, spawnCountMax: 3, spawnFrequencyMin: 0.2, spawnFrequencyMax: 0.2 }), 'probe', { now: NOW, sheet });
-    expect(fixed.project.systems[0]!.emitter).toEqual({ mode: 'burst', rate: 0, burst: { count: 3, interval: 0.2 } });
-    expect(fixed.issues.some((i) => i.feature === 'emitter.spawnClock')).toBe(false);
-    const random = convertEffect(single({ spawnCountMin: 3, spawnCountMax: 6 }), 'probe', { now: NOW, sheet });
-    expect(random.issues.some((i) => i.feature === 'emitter.spawnClock')).toBe(true);
+    expect(fixed.project.systems[0]!.emitter).toEqual({ mode: 'burst', rate: 0, burst: { count: 3, interval: 0.2, immediate: true } });
+    const random = convertEffect(
+      single({ spawnCountMin: 3, spawnCountMax: 6, spawnFrequencyMin: 0.05, spawnFrequencyMax: 0.12, infinite: false, duration: 2 }),
+      'probe',
+      { now: NOW, sheet },
+    );
+    // Rnd.integer(3, 6) is 3..5; intervals round up to whole 60 fps frames
+    expect(random.project.systems[0]!.emitter).toEqual({
+      mode: 'burst',
+      rate: 0,
+      burst: { count: 3, countMax: 5, interval: 3 / 60, intervalMax: 8 / 60, immediate: true },
+      duration: 2,
+    });
+    expect(random.issues.filter((i) => i.level !== 'warning')).toEqual([]);
     // the player gets the raw clock either way
     expect(random.timeline.emits[0]!.clock).toMatchObject({ countMin: 3, countMax: 6, particleFac: 1 });
   });
@@ -197,10 +219,10 @@ describe('emitters', () => {
     expect(fx.issues.some((i) => i.feature === 'core.ring.uniform')).toBe(false);
   });
 
-  it('multiply blend falls back to normal and is reported', () => {
+  it('multiply blend maps to multiply', () => {
     const fx = convertEffect(single({ particleSettings: { blendMode: 2 } }), 'probe', { now: NOW, sheet });
-    expect(fx.project.systems[0]!.blendMode).toBe('normal');
-    expect(fx.issues.find((i) => i.feature === 'particle.blendMode')?.level).toBe('unsupported');
+    expect(fx.project.systems[0]!.blendMode).toBe('multiply');
+    expect(fx.issues.filter((i) => i.level !== 'warning')).toEqual([]);
   });
 
   it('useBlendModes: false draws everything normal', () => {
@@ -209,14 +231,53 @@ describe('emitters', () => {
     expect(convertEffect(b, 'probe', { now: NOW, sheet }).project.systems[0]!.blendMode).toBe('normal');
   });
 
-  it('spin: rad/frame → rad/s, random direction via sin/|sin|', () => {
-    const fx = convertEffect(single({ particleSettings: { useRotation: true, rotationSpeedMin: 0.1, rotationSpeedMax: 0.1, randomRotationDirection: true, randomStartRotation: true } }), 'probe', { now: NOW, sheet });
+  it('spin: rotation += rad/frame × 60 × dt, from wherever the particle started', () => {
+    const fx = convertEffect(
+      single({ core: { type: 'circle', params: { radius: 10, radial: true, angle: 0, uniform: false, width: 0, height: 0 } }, particleSettings: { useRotation: true, rotationSpeedMin: 0.1, rotationSpeedMax: 0.1, randomRotationDirection: true } }),
+      'probe',
+      { now: NOW, sheet },
+    );
     const s = fx.project.systems[0]!;
-    const spin = only(s, 'gen.spin');
-    expect(spin.structural).toEqual({ unit: 'radians' });
-    expect(input(s, spin, 'rate')).toEqual({ from: 'math.mul' });
-    expect(only(s, 'output.writeRotation').structural).toEqual({ unit: 'radians' });
+    const write = only(s, 'output.writeRotation');
+    expect(write.structural).toEqual({ unit: 'radians' });
+    expect(input(s, write, 'rot')).toEqual({ from: 'math.add' });
+    expect(nodesOf(s, 'input.rotation')).toHaveLength(1);
     expect(nodesOf(s, 'math.abs')).toHaveLength(1);
+    expect(fx.issues.filter((i) => i.level !== 'warning')).toEqual([]);
+  });
+
+  it('align turns each sprite to its velocity heading', () => {
+    const fx = convertEffect(single({ useGravity: true, gravity: 0.3, particleSettings: { useMotion: true, moveSpeedMin: 5, moveSpeedMax: 5, align: true } }), 'probe', { now: NOW, sheet });
+    const s = fx.project.systems[0]!;
+    expect(input(s, only(s, 'output.writeRotation'), 'rot')).toEqual({ from: 'math.atan2' });
+  });
+
+  it('a radial box rotates each sprite to its own heading at birth', () => {
+    const fx = convertEffect(single({ core: { type: 'box', params: { radius: 0, radial: true, angle: 0, uniform: false, width: 100, height: 40 } } }), 'probe', { now: NOW, sheet });
+    const s = fx.project.systems[0]!;
+    expect(input(s, only(s, 'output.initRotation'), 'rot')).toEqual({ from: 'math.atan2' });
+    expect(fx.issues.filter((i) => i.level !== 'warning')).toEqual([]);
+  });
+
+  it('separate X/Y scale tweens become writeScaleXY', () => {
+    const fx = convertEffect(
+      single({ particleSettings: { useScale: true, uniformScale: false, scaleXStartMin: 1, scaleXStartMax: 1, scaleXEndMin: 2, scaleXEndMax: 2, scaleYStartMin: 0.5, scaleYStartMax: 0.5, scaleYEndMin: 0, scaleYEndMax: 0, scaleYEase: 'easeInQuad' } }),
+      'probe',
+      { now: NOW, sheet },
+    );
+    const s = fx.project.systems[0]!;
+    expect(nodesOf(s, 'output.writeScale')).toHaveLength(0);
+    expect(input(s, only(s, 'output.writeScaleXY'), 'scale')).toEqual({ from: 'math.makeVec2' });
+    expect(nodesOf(s, 'gen.numberOverLife').map((n) => n.structural?.ease).sort()).toEqual(['linear', 'power1.in']);
+  });
+
+  it('autoRotation turns the spawn angle with input.time, from the emitter\'s start', () => {
+    const fx = convertEffect(single({ autoRotation: 0.05, core: { type: 'circle', params: { radius: 0, radial: false, angle: 0, uniform: false, width: 0, height: 0 } }, particleSettings: { useMotion: true, distanceMin: 100, distanceMax: 100 } }), 'probe', { now: NOW, sheet });
+    const s = fx.project.systems[0]!;
+    const time = only(s, 'input.time');
+    expect(s.graph.edges.some((e) => e.from.nodeId === time.id)).toBe(true);
+    expect(nodesOf(s, 'math.mul').some((n) => n.values?.b?.v === 0.05 * 60)).toBe(true);
+    expect(fx.issues.filter((i) => i.level !== 'warning')).toEqual([]);
   });
 
   it('warns when no spritesheet data is given', () => {
@@ -291,6 +352,31 @@ describe('sub-emitters', () => {
     expect(fx.project.systems.map((s) => s.name)).toEqual(['parent', 'flash', 'flash#2']);
     const ons = fx.project.systems.slice(1).map((s) => only(s, 'output.deathBurst').structural?.on);
     expect(ons).toEqual(['death', 'birth']);
+  });
+
+  it('onHalfway is an age event at 0.5 s, onBounce a bounce event', () => {
+    const spawn = { type: 0 as const, id: 2, scale: 1, adoptRotation: false, containerId: '' };
+    const b: RfxBundle = sanitizeBundle({
+      emitters: [
+        { id: 1, name: 'parent', useGravity: true, useFloor: true, floorY: 500, gravity: 0.2, particleSettings: { useSpawns: true, spawn: { onComplete: [], onStart: [], onBounce: [spawn], onHalfway: [spawn] } } } as unknown as RfxEmitter,
+        { id: 2, name: 'puff', infinite: false, duration: 0 } as RfxEmitter,
+      ],
+      sequences: [],
+    });
+    const fx = convertEffect(b, 'parent', { now: NOW, sheet });
+    const bursts = fx.project.systems.slice(1).map((s) => only(s, 'output.deathBurst'));
+    expect(bursts.map((n) => n.structural?.on)).toEqual(['age', 'bounce']);
+    expect(bursts[0]!.values?.at?.v).toBe(0.5);
+    expect(fx.issues.filter((i) => i.level === 'unsupported')).toEqual([]);
+  });
+
+  it('a sequence element starts at its delay through emitter.delay', () => {
+    const b = sanitizeBundle({
+      emitters: [{ id: 1, name: 'e', infinite: false, duration: 0 } as RfxEmitter],
+      sequences: [{ id: 1, name: 'seq', effects: [{ componentId: 1, componentType: 2, delay: 0.75 }] } as never],
+    });
+    const fx = convertEffect(b, 'seq', { now: NOW, sheet, kind: 'sequence' });
+    expect(fx.project.systems[0]!.emitter).toMatchObject({ mode: 'once', delay: 0.75 });
   });
 
   it('stops at maxDepth on a self-spawning emitter and reports it', () => {

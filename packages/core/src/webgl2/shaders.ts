@@ -1,6 +1,6 @@
 /**
  * Render program for the compiled WebGL2 backend — the GLSL mirror of the
- * §13.8 WebGPU render pipeline, reading the fused 56-byte interleaved state
+ * §13.8 WebGPU render pipeline, reading the fused 60-byte interleaved state
  * records the compiler's TF step shader writes (WEBGL2_LAYOUT). u_atlas =
  * (cols, rows, sizeScale, unused), matching the WebGPU R.atlas convention.
  */
@@ -18,6 +18,7 @@ layout(location = 5) in uint a_flags;  // instance — state offset 28
 layout(location = 6) in float a_age;   // instance — state offset 16
 layout(location = 7) in float a_life;  // instance — state offset 20
 layout(location = 8) in uint a_seed;   // instance — state offset 24
+layout(location = 9) in float a_aspect; // instance — state offset 56 (height / width)
 
 uniform vec4 u_scaleOffset; // clip = world.xy * xy + zw (§13.8)
 uniform vec4 u_grid;        // cols, rows, sizeScale, pad(px)
@@ -31,7 +32,9 @@ void main() {
   float s = a_size * float(a_flags & 1u) * u_grid.z;
   float c = cos(a_rot);
   float sn = sin(a_rot);
-  vec2 local = vec2(a_corner.x * c - a_corner.y * sn, a_corner.x * sn + a_corner.y * c) * s;
+  // scale in the sprite's own axes (height = width × aspect), then rotate
+  vec2 q = vec2(a_corner.x, a_corner.y * a_aspect);
+  vec2 local = vec2(q.x * c - q.y * sn, q.x * sn + q.y * c) * s;
   vec2 world = a_pos + local;
 
   // atlas cell: column advances with life, row is per-particle (or fixed).

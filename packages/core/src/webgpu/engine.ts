@@ -31,7 +31,7 @@ import { clampDt } from '../time.js';
 import { blendState, RENDER_WGSL } from './shaders.js';
 
 const HOT_STRIDE = 24;
-const RND_STRIDE = 12;
+const RND_STRIDE = 16; // color u32, size, rot, aspect
 const META_STRIDE = 8;
 const COUNTERS_SIZE = 12;
 const STATS_INTERVAL = 30; // frames between counter readbacks (§13.11 step 7)
@@ -340,6 +340,7 @@ export class WebGPUSystemSim {
               { shaderLocation: 1, offset: 0, format: 'unorm8x4' },
               { shaderLocation: 2, offset: 4, format: 'float32' },
               { shaderLocation: 3, offset: 8, format: 'float32' },
+              { shaderLocation: 8, offset: 12, format: 'float32' }, // aspect (height / width)
             ],
           },
           {

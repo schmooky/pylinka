@@ -87,10 +87,10 @@ describe('death-burst codegen', () => {
     expect(gl.subSrc).not.toContain('u_burstK');
   });
 
-  it('clamps max to [1,64] and defaults sensibly', () => {
+  it('clamps max to [1,128] and defaults sensibly', () => {
     const g = burstGraph();
     g.nodes.find((n) => n.id === 'n6')!.structural!.max = '999';
-    expect(compile(bundle(g), V1_CATALOG, 'webgpu').burst).toEqual({ max: 64 });
+    expect(compile(bundle(g), V1_CATALOG, 'webgpu').burst).toEqual({ max: 128 });
   });
 });
 
@@ -119,8 +119,8 @@ describe('sub-emitter trigger — death vs birth', () => {
   it('GLSL: the parent edge flips the same way', () => {
     const death = compile(bundle(graphOn('death')), V1_CATALOG, 'webgl2');
     const birth = compile(bundle(graphOn('birth')), V1_CATALOG, 'webgl2');
-    expect(death.subSrc).toContain('((i_pFlagsPrev & 1u) != 0u) && ((i_pFlags & 1u) == 0u)');
-    expect(birth.subSrc).toContain('((i_pFlagsPrev & 1u) == 0u) && ((i_pFlags & 1u) != 0u)');
+    expect(death.subSrc).toContain('bool parentFired = ((i_pFlagsPrev & 1u) != 0u) && !((i_pFlags & 1u) != 0u);');
+    expect(birth.subSrc).toContain('bool parentFired = !((i_pFlagsPrev & 1u) != 0u) && ((i_pFlags & 1u) != 0u);');
   });
 
   it('a graph with no `on` is byte-identical to one that says death', () => {

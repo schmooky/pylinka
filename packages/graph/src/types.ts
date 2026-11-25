@@ -81,10 +81,20 @@ export interface EmitterSettings {
   rate: number;
   /** particles per px of emitter travel (flow) */
   rateOverDistance?: number;
-  /** burst mode: count every interval seconds */
-  burst?: { count: number; interval: number };
+  /**
+   * burst mode: count every interval seconds. once mode: count, once.
+   * `countMax` / `intervalMax` make each burst draw a random whole count in
+   * [count, countMax] and wait a random time in [interval, intervalMax].
+   * `immediate` fires the first burst when the emitter starts instead of one
+   * interval later.
+   */
+  burst?: { count: number; interval: number; countMax?: number; intervalMax?: number; immediate?: boolean };
   /** clamped to 10s, substepped at 1/30 */
   prewarm?: { seconds: number };
+  /** seconds before the emitter starts (all modes) */
+  delay?: number;
+  /** seconds the emitter runs once started (flow / burst); absent or 0 = forever */
+  duration?: number;
 }
 
 export interface System {
@@ -92,7 +102,8 @@ export interface System {
   name: string;
   /** pool size; draw cost scales with this (§13.8); warn > 262144 */
   capacity: number;
-  blendMode: 'normal' | 'add' | 'screen';
+  /** premultiplied: multiply = src·dst + dst·(1 − srcα), darkening only */
+  blendMode: 'normal' | 'add' | 'screen' | 'multiply';
   enabled: boolean;
   /** 'local' arrives M2; v1 parser rejects other values */
   space: 'world';

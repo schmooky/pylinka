@@ -9,6 +9,12 @@ import { DEFAULT_PREVIEW_BACKGROUND, DEFAULT_REFERENCE } from './types';
 import { generateAnnotations } from './annotate';
 import { copyEmitter, emitterPayload, type ClipboardPayload } from './clipboard';
 
+/** The parent events a sub-emitter can spawn on (output.deathBurst `on`). */
+export type SubTrigger = 'death' | 'birth' | 'age' | 'bounce' | 'alive';
+export function asSubTrigger(on: string | undefined): SubTrigger {
+  return on === 'birth' || on === 'age' || on === 'bounce' || on === 'alive' ? on : 'death';
+}
+
 type NodesPayload = Extract<ClipboardPayload, { kind: 'nodes' }>;
 type EmitterPayload = Extract<ClipboardPayload, { kind: 'emitter' }>;
 
@@ -288,13 +294,13 @@ interface EditorState {
   /** make `childId` spawn on `parentId`'s particle deaths (null = born at cursor) */
   setSubParent(childId: string, parentId: string | null): void;
   /** which parent event the ACTIVE system spawns on ('death' by default) */
-  subTrigger(): 'death' | 'birth';
+  subTrigger(): SubTrigger;
   /**
    * Pick the parent event the ACTIVE system spawns on. The setting lives on an
    * `output.deathBurst` node, so choosing 'birth' on a child that has none adds
    * a minimal one (a single spawn per event) rather than silently doing nothing.
    */
-  setSubTrigger(on: 'death' | 'birth'): void;
+  setSubTrigger(on: SubTrigger): void;
   // knobs (project params)
   /** add a new f32 knob; returns its id */
   addParam(init?: Partial<Pick<ParamDef, 'name' | 'min' | 'max' | 'default' | 'unit' | 'group'>>): string;
@@ -878,7 +884,7 @@ export const useEditor = create<EditorState>((set, get) => {
     subTrigger() {
       const sys = activeSysOf(get().project);
       const node = sys.graph.nodes.find((n) => n.kind === 'output.deathBurst');
-      return node?.structural?.on === 'birth' ? 'birth' : 'death';
+      return asSubTrigger(node?.structural?.on);
     },
 
     setSubTrigger(on) {
@@ -899,11 +905,14 @@ export const useEditor = create<EditorState>((set, get) => {
         sys.graph.nodes.push({
           id,
           kind: 'output.deathBurst',
-          structural: { max: '1', on: 'birth' },
+          // a trail keeps several children alive per parent; the rest want one
+          structural: { max: on === 'alive' ? '32' : '1', on },
           values: {
             countMin: { t: 'f32', v: 1 },
             countMax: { t: 'f32', v: 1 },
             inheritVelocity: { t: 'f32', v: 0 },
+            at: { t: 'f32', v: 0.5 },
+            rate: { t: 'f32', v: 20 },
           },
         });
         placed = id;

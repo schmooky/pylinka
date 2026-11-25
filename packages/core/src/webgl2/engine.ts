@@ -1,7 +1,7 @@
 /**
  * Compiled WebGL2 transform-feedback backend (REQUIREMENTS.md §13.12). Runs the
  * compiler's 'webgl2' output: the fused step vertex shader (emitSrc) with the
- * discard fragment stage (updateSrc), over ping-pong interleaved 56-byte state
+ * discard fragment stage (updateSrc), over ping-pong interleaved 60-byte state
  * buffers (WEBGL2_LAYOUT). Spawning is the cursor-window scheme — the runtime
  * advances `u_spawnCursor` by spawnCount each frame. Rendering mirrors §13.8.
  *
@@ -257,6 +257,7 @@ export class WebGL2CompiledSim {
     bind(pCur, 'i_pVel', 2, 8, false); // parent death-velocity (burst inheritance; absent → skipped)
     bind(pCur, 'i_pFlags', 1, 28, true); // parent flags now (offset 28)
     bind(pPrev, 'i_pFlagsPrev', 1, 28, true); // parent flags prev
+    bind(pCur, 'i_pAge', 1, 16, false); // parent age now (age / alive events)
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindVertexArray(null);
     return vao;
@@ -364,6 +365,7 @@ export class WebGL2CompiledSim {
     inst(6, 1, 16); // a_age
     inst(7, 1, 20); // a_life
     inst(8, 1, 24, true); // a_seed
+    inst(9, 1, 56); // a_aspect
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindVertexArray(null);
     return vao;
@@ -500,6 +502,8 @@ export class WebGL2CompiledSim {
     // the destination alpha alone makes the compositor discard the pixel
     if (mode === 'add') gl.blendFunc(gl.ONE, gl.ONE);
     else if (mode === 'screen') gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_COLOR, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    // premultiplied multiply: src·dst + dst·(1 − srcα)
+    else if (mode === 'multiply') gl.blendFuncSeparate(gl.DST_COLOR, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
     gl.bindVertexArray(this.renderVAOs[this.cur]!);

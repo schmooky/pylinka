@@ -128,11 +128,11 @@ describe('compile — webgl2 target (fused TF step shader, §13.12)', () => {
   });
 
   it('exports the interleaved TF layout the runtime binds', () => {
-    expect(WEBGL2_LAYOUT.strideBytes).toBe(56);
+    expect(WEBGL2_LAYOUT.strideBytes).toBe(60);
     const total = WEBGL2_LAYOUT.attribs.reduce((n, a) => n + a.size * 4, 0);
     expect(total).toBe(WEBGL2_LAYOUT.strideBytes);
     expect(WEBGL2_LAYOUT.varyings).toEqual([
-      'o_pos', 'o_vel', 'o_age', 'o_life', 'o_seed', 'o_flags', 'o_color', 'o_size', 'o_rot',
+      'o_pos', 'o_vel', 'o_age', 'o_life', 'o_seed', 'o_flags', 'o_color', 'o_size', 'o_rot', 'o_aspect',
     ]);
   });
 });

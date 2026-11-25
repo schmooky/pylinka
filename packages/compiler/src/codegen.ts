@@ -213,6 +213,8 @@ export const NODE_CODEGEN: Record<string, NodeCodegen> = {
   'input.time': () => one('U.time'),
   'input.frame': () => one('f32(U.frame)'),
   'input.spawnIndex': () => one('f32(i)'),
+  'input.rotation': () => one('outRot'),
+  'input.dt': () => one('U.dt'),
   'input.emitterPosition': () => one('U.emitterPos'),
   'input.emitterVelocity': () => one('U.emitterVel'),
 
@@ -266,6 +268,7 @@ export const NODE_CODEGEN: Record<string, NodeCodegen> = {
   'math.max': (_c, i) => one(`max(${i.a}, ${i.b})`),
   'math.sin': (_c, i) => one(`sin(${i.x})`),
   'math.cos': (_c, i) => one(`cos(${i.x})`),
+  'math.atan2': (_c, i) => one(`atan2(${i.y}, ${i.x})`),
   'math.radians': (_c, i) => one(`(${i.degrees} * 0.017453292519943295)`),
   'math.abs': (_c, i) => one(`abs(${i.x})`),
   'math.length': (_c, i) => one(`length(${i.v})`),

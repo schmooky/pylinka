@@ -208,6 +208,7 @@ export function ConfigModal() {
                     <option value="normal">normal</option>
                     <option value="add">add</option>
                     <option value="screen">screen</option>
+                    <option value="multiply">multiply</option>
                   </select>
                 </Field>
                 <EmitterPanel pathEdit={pathEdit} setPathEdit={setPathEdit} />

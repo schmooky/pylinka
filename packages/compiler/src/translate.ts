@@ -113,6 +113,7 @@ export function wgslExprToGlsl(src: string): string {
   s = s.replace(/\bf32\(/g, 'float(');
   s = s.replace(/\bu32\(/g, 'uint(');
   s = s.replace(/\bi32\(/g, 'int(');
+  s = s.replace(/\batan2\(/g, 'atan(');
   return s;
 }
 

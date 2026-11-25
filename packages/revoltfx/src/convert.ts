@@ -13,7 +13,7 @@
  */
 import { CATALOG_VERSION } from '@pylinka/graph';
 import type { EmitterSettings, ParamDef, PylinkaProject, System } from '@pylinka/graph';
-import { fadeWindow, fitDrag, heldRamp, mapEase, type FittedEase } from './ease.js';
+import { fadeWindow, heldRamp, mapEase, type FittedEase } from './ease.js';
 import { BASE_PX, FALLBACK_SIZE, componentSize, movieClipFrames, spriteBox, type SpriteBox } from './frames.js';
 import { GraphBuilder, type F, type V } from './graph.js';
 import { Report, type FidelityIssue } from './report.js';
@@ -34,7 +34,8 @@ const TAU = Math.PI * 2;
 const FPS = 60;
 const BLEND = ['normal', 'add', 'multiply', 'screen'] as const;
 /** `output.deathBurst` `max` options. */
-const BURST_MAX_OPTIONS = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
+const BURST_MAX_OPTIONS = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128];
+const BURST_CAP = 128;
 
 export interface ConvertOptions {
   /**
@@ -279,6 +280,8 @@ function topEmitter(
   adoptRotationOf: number | undefined,
   parent: number | undefined,
   depth = 0,
+  /** rotation (rad) and autoRotation (rad/s) this emitter adds to, when it adopts its parent's */
+  inherited: { rotation: number; spin: number } = { rotation: 0, spin: 0 },
 ): void {
   if (depth > 8) {
     ctx.report.add('warning', 'emitter.childs', e.name, 'Emitter children nest more than 8 levels deep; the rest were dropped.');
@@ -291,14 +294,22 @@ function topEmitter(
     name: paramName(ctx, sysName),
     type: 'f32',
     scale: 'linear',
-    default: { t: 'f32', v: e.rotation },
+    default: { t: 'f32', v: e.rotation + inherited.rotation },
     unit: 'rad',
     group: 'rotation',
   });
 
   const clock = spawnClock(ctx, e);
-  const emitter = ctx.opts.drive === 'runtime' ? ({ mode: 'flow', rate: 0 } as const) : projectEmitter(ctx, e, clock);
-  emitterSystem(ctx, e, sysName, { scaleMod, rotation: { param: paramId }, sub: undefined, emitter }, 0);
+  const emitter = ctx.opts.drive === 'runtime' ? ({ mode: 'flow', rate: 0 } as const) : projectEmitter(ctx, e, at);
+  // in the player-driven mode the player turns the knob itself
+  const spin = e.autoRotation * FPS + inherited.spin;
+  emitterSystem(
+    ctx,
+    e,
+    sysName,
+    { scaleMod, rotation: { param: paramId }, sub: undefined, emitter, ...(ctx.opts.drive === 'project' && spin !== 0 ? { spin: { rate: spin, delay: at } } : {}) },
+    0,
+  );
 
   const index = ctx.timeline.emits.length;
   ctx.timeline.emits.push({
@@ -313,15 +324,12 @@ function topEmitter(
     ...(parent !== undefined ? { parent } : {}),
     ...(e.containerId ? { containerId: e.containerId } : {}),
   });
-  if (e.autoRotation !== 0 && ctx.opts.drive === 'project') {
-    ctx.report.add('approximate', 'emitter.autoRotation', e.name, 'autoRotation needs the player; the plain project keeps the start rotation.');
-  }
-
   // MAPPING: emitter `childs` start with this emitter, at its position.
   for (const def of e.childs) {
     const child = refEmitter(ctx, def, e.name, 'emitter.childs');
     if (child === undefined) continue;
-    topEmitter(ctx, child, scaleMod * (def.scale || 1), at, def.adoptRotation ? index : undefined, index, depth + 1);
+    const adopt = def.adoptRotation ? { rotation: e.rotation + inherited.rotation, spin } : { rotation: 0, spin: 0 };
+    topEmitter(ctx, child, scaleMod * (def.scale || 1), at, def.adoptRotation ? index : undefined, index, depth + 1, adopt);
   }
 }
 
@@ -361,6 +369,23 @@ function playSequence(ctx: Ctx, seq: RfxSequence): void {
   }
 }
 
+/** The one-particle graph of a sequence sprite / movie clip. */
+function spriteGraph(seq: RfxSequence, fx: RfxSequenceEffect, tex: SystemTexture, rotation: (g: GraphBuilder) => F, m: number): GraphBuilder {
+  const S = tex.box.side / BASE_PX;
+  const g = new GraphBuilder();
+  // init
+  g.add('output.spawnPosition', { pos: [0, 0] });
+  g.add('output.initLife', { life: Math.max(fx.duration, 1e-3) });
+  g.add('output.initRotation', { rot: g.add2(rotation(g), g.range(fx.rotationMin, fx.rotationMax)) }, { unit: 'radians' });
+  // update: scale = rnd(element) × rnd(sequence) × scaleMod × texture side
+  const scale = g.mul(g.mul(g.range(fx.scaleMin, fx.scaleMax), g.range(seq.scaleMin, seq.scaleMax)), S * m);
+  g.add('output.writeScale', { scale });
+  if (fx.tint !== 0xffffff) g.add('output.writeColor', { color: hexColor(fx.tint) });
+  const alpha = g.range(fx.alphaMin, fx.alphaMax);
+  if (alpha !== 1) g.add('output.writeAlpha', { alpha });
+  return g;
+}
+
 /** A sequence sprite / movie clip: one particle, alive for `duration`. */
 function spriteElement(ctx: Ctx, seq: RfxSequence, fx: RfxSequenceEffect, at: number): void {
   const id = String(fx.componentId ?? '');
@@ -372,19 +397,7 @@ function spriteElement(ctx: Ctx, seq: RfxSequence, fx: RfxSequenceEffect, at: nu
   if (fx.componentType === 1 && cp.loop && cp.animationSpeedMin !== cp.animationSpeedMax) {
     ctx.report.add('approximate', 'movieclip.animationSpeed', seq.name, `Movie clip "${id}" plays at a random speed per play in RevoltFX; the conversion uses the mean.`);
   }
-  const S = tex.box.side / BASE_PX;
-
-  const g = new GraphBuilder();
-  // init
-  g.add('output.spawnPosition', { pos: [0, 0] });
-  g.add('output.initLife', { life: Math.max(fx.duration, 1e-3) });
-  g.add('output.initRotation', { rot: g.add2(g.knob(paramId), g.range(fx.rotationMin, fx.rotationMax)) }, { unit: 'radians' });
-  // update: scale = rnd(element) × rnd(sequence) × texture side
-  const scale = g.mul(g.mul(g.range(fx.scaleMin, fx.scaleMax), g.range(seq.scaleMin, seq.scaleMax)), S);
-  g.add('output.writeScale', { scale });
-  if (fx.tint !== 0xffffff) g.add('output.writeColor', { color: hexColor(fx.tint) });
-  const alpha = g.range(fx.alphaMin, fx.alphaMax);
-  if (alpha !== 1) g.add('output.writeAlpha', { alpha });
+  const g = spriteGraph(seq, fx, tex, (gb) => gb.knob(paramId), 1);
 
   ctx.lifeMax.set(`s${ctx.systems.length + 1}`, Math.max(fx.duration, 1e-3));
   ctx.systems.push({
@@ -394,7 +407,7 @@ function spriteElement(ctx: Ctx, seq: RfxSequence, fx: RfxSequenceEffect, at: nu
     blendMode: blend(ctx, fx.blendMode, seq.name),
     enabled: true,
     space: 'world',
-    emitter: ctx.opts.drive === 'runtime' ? { mode: 'flow', rate: 0 } : { mode: 'once', rate: 0, burst: { count: 1, interval: 1 } },
+    emitter: ctx.opts.drive === 'runtime' ? { mode: 'flow', rate: 0 } : { mode: 'once', rate: 0, burst: { count: 1, interval: 1 }, ...(at > 0 ? { delay: at } : {}) },
     graph: g.graph(),
   });
   ctx.textures[sysName] = tex;
@@ -408,17 +421,20 @@ function spriteElement(ctx: Ctx, seq: RfxSequence, fx: RfxSequenceEffect, at: nu
     autoRotation: 0,
     ...(fx.containerId ? { containerId: fx.containerId } : {}),
   });
-  if (ctx.opts.drive === 'project' && at > 0) {
-    ctx.report.add('approximate', 'sequence.delay', seq.name, `Element "${id}" starts at ${round(at)} s; without the player it starts at once.`);
-  }
 }
+
+type SubEvent = 'death' | 'birth' | 'age' | 'bounce' | 'alive';
 
 interface SubLink {
   parent: string;
-  on: 'death' | 'birth';
+  on: SubEvent;
   /** inclusive integer count range per parent event */
   countMin: number;
   countMax: number;
+  /** on 'age': parent age in seconds */
+  at?: number;
+  /** on 'alive': events per second */
+  rate?: number;
 }
 
 interface EmitterRole {
@@ -428,6 +444,8 @@ interface EmitterRole {
   sub: SubLink | undefined;
   /** the System.emitter to write (sub-emitters never fire on their own) */
   emitter?: EmitterSettings;
+  /** autoRotation, rad/s, accumulated from `delay` seconds on (top level only) */
+  spin?: { rate: number; delay: number };
 }
 
 /**
@@ -477,14 +495,19 @@ function emitterSystem(ctx: Ctx, e: RfxEmitter, sysName: string, role: EmitterRo
       return v as T;
     };
   };
-  const rotOf = lazy<F>(() => ('param' in rotation ? g.knob(rotation.param) : rotation.value));
+  // emitter rotation at spawn: the knob (or a fixed angle), plus autoRotation
+  // accumulated since this emitter started (input.time counts from the system's start)
+  const rotOf = lazy<F>(() => {
+    const base: F = 'param' in rotation ? g.knob(rotation.param) : rotation.value;
+    if (role.spin === undefined || role.spin.rate === 0) return base;
+    const since = role.spin.delay > 0 ? g.add2(g.op('input.time'), -role.spin.delay) : g.op('input.time');
+    return g.add2(base, g.mul(since, role.spin.rate));
+  });
   const emitDir = lazy<V>(() => g.vec(g.cos(rotOf()), g.sin(rotOf())));
   let pos: V = [0, 0];
   let dir: (() => V) = emitDir;
   /** birth sprite rotation (radians) */
   let birthRot: () => F = rotOf;
-  /** true when the birth rotation is per-particle and the update pass cannot rebuild it */
-  let birthRotVaries = false;
 
   switch (e.core.type) {
     case 'box': {
@@ -494,7 +517,8 @@ function emitterSystem(ctx: Ctx, e: RfxEmitter, sysName: string, role: EmitterRo
       if (core.radial) {
         const p = pos;
         dir = lazy(() => g.normalize(p));
-        report.add('approximate', 'core.box.radial', src, 'A radial box core rotates each sprite to its own heading (atan2); Pylinka has no atan2, so sprites keep the emitter rotation.');
+        // BoxEmitterCore: rotation = emitter rotation + atan2(y, x) = heading of the rotated offset
+        birthRot = lazy(() => g.op('math.atan2', { y: g.component(p, 'y'), x: g.component(p, 'x') }));
       }
       break;
     }
@@ -502,7 +526,7 @@ function emitterSystem(ctx: Ctx, e: RfxEmitter, sysName: string, role: EmitterRo
     case 'circle':
     default: {
       const theta = lazy<F>(() => {
-        if (e.core.type === 'ring' && core.uniform) return ringUniformAngle(ctx, g, e, rotOf(), role);
+        if (e.core.type === 'ring' && core.uniform) return ringUniformAngle(ctx, g, e, rotOf());
         if (e.core.type === 'circle' && !core.angle) return g.add2(rotOf(), g.range(0, TAU));
         return g.add2(rotOf(), g.range(-core.angle / 2, core.angle / 2));
       });
@@ -514,7 +538,6 @@ function emitterSystem(ctx: Ctx, e: RfxEmitter, sysName: string, role: EmitterRo
       if (core.radial) {
         dir = u;
         birthRot = theta;
-        birthRotVaries = true;
       }
       if (e.core.type !== 'ring' && e.core.type !== 'circle') {
         report.add('warning', 'core.type', src, `Unknown core type "${String(e.core.type)}"; treated as a circle.`);
@@ -527,30 +550,21 @@ function emitterSystem(ctx: Ctx, e: RfxEmitter, sysName: string, role: EmitterRo
   const randomStart = ps.useRotation && ps.randomStartRotation && !useAlign;
   g.add('output.initRotation', { rot: randomStart ? g.range(0, TAU) : birthRot() }, { unit: 'radians' });
 
-  let dragC = 0;
+  let distanceEase: string | undefined;
   if (ps.useMotion) {
     if (gravityMode) {
       // moveSpeed is px per frame
       const speed = g.range(ps.moveSpeedMin * m * FPS, ps.moveSpeedMax * m * FPS);
       if (speed !== 0) g.add('output.initVelocity', { vel: g.scale(dir(), speed) });
     } else {
-      // Particle.init: Rnd.integer(dMin, dMax) * 0.8 * scaleMod, then * 0.8 again
+      // Particle.init: Rnd.integer(dMin, dMax) * 0.8 * scaleMod, then * 0.8 again.
+      // The velocity slot carries the whole displacement; the update pass
+      // walks the particle along it by the ease's step each frame.
       const distance = g.mul(g.range(ps.distanceMin, ps.distanceMax), 0.64 * m);
-      const fit = fitDrag(ps.distanceEase);
-      dragC = fit.c;
-      if (fit.error > 0.002) {
-        report.add(
-          'approximate',
-          'particle.distanceEase',
-          src,
-          `Distance tween "${ps.distanceEase}" becomes velocity + drag (c = ${round(fit.c)}); the particle still travels the full distance, off the eased path by at most ${pct(fit.error)} of it.`,
-          fit.error,
-        );
+      if (distance !== 0) {
+        g.add('output.initVelocity', { vel: g.scale(dir(), distance) });
+        distanceEase = ps.distanceEase;
       }
-      // v0 = D·c / (life·(1 − e^−c)); c = 0 is the linear D / life
-      const k = dragC === 0 ? 1 : dragC / (1 - Math.exp(-dragC));
-      const speed = g.div(g.mul(distance, k), life);
-      if (speed !== 0) g.add('output.initVelocity', { vel: g.scale(dir(), speed) });
     }
   }
 
@@ -558,52 +572,53 @@ function emitterSystem(ctx: Ctx, e: RfxEmitter, sysName: string, role: EmitterRo
   if (gravityMode) {
     if (e.gravity !== 0) g.add('output.addForce', { force: g.op('field.gravity', { g: [0, e.gravity * FPS * FPS] }, undefined, 'force') });
     if (e.useFloor && e.floorY > 0) {
+      g.add('output.collidePlane', {
+        point: [0, e.floorY],
+        normal: [0, -1],
+        restitution: g.range(ps.bounceFacMin * m, ps.bounceFacMax * m),
+        friction: g.range(ps.frictionMin * m, ps.frictionMax * m),
+      });
       if (ps.stopOnBounce) {
-        g.add('output.killIfOutOfRect', { min: [-1e6, -1e6], max: [1e6, e.floorY] });
-        report.add('approximate', 'particle.stopOnBounce', src, 'stopOnBounce kills particles that cross floorY, one frame later than RevoltFX.');
-      } else {
-        g.add('output.collidePlane', {
-          point: [0, e.floorY],
-          normal: [0, -1],
-          restitution: g.range(ps.bounceFacMin * m, ps.bounceFacMax * m),
-          friction: g.range(ps.frictionMin * m, ps.frictionMax * m),
-        });
-      }
-      if (ps.useSpawns && ps.spawn.onBounce.length > 0) {
-        report.add('unsupported', 'spawn.onBounce', src, 'Spawning on a floor bounce has no Pylinka event; those spawns were dropped.');
+        // the plane parks the particle on floorY; the next frame kills it there
+        g.add('output.killIfOutOfRect', { min: [-1e6, -1e6], max: [1e6, e.floorY - 0.01] });
+        report.add('approximate', 'particle.stopOnBounce', src, 'stopOnBounce: the particle dies on the frame after it hits the floor, one frame later than RevoltFX.');
       }
     }
-  } else if (ps.useMotion && dragC !== 0) {
-    g.add('output.drag', { drag: g.div(dragC, g.op('input.life')) });
+  } else if (distanceEase !== undefined) {
+    // exact eased tween: pos += D·(E((age + dt)/life) − E(age/life))
+    const ease = mapEase(distanceEase);
+    noteEase(ctx, src, 'distanceEase', distanceEase, ease);
+    const age = g.op('input.age');
+    const lifeU = g.op('input.life');
+    const next = g.op('gen.ease', { t: g.div(g.add2(age, g.op('input.dt')), lifeU) }, { ease: ease.key });
+    const now = g.op('gen.ease', { t: g.op('input.ageNormalized') }, { ease: ease.key });
+    const step = g.add2(next, g.mul(now, -1));
+    const p = g.op('input.position');
+    const v = g.op('input.velocity');
+    g.add('output.writePosition', {
+      pos: g.vec(g.op('math.mad', { a: g.component(v, 'x'), b: step, c: g.component(p, 'x') }), g.op('math.mad', { a: g.component(v, 'y'), b: step, c: g.component(p, 'y') })),
+    });
   }
 
-  if (useAlign) {
-    report.add('unsupported', 'particle.align', src, 'align (rotate to the velocity heading) needs atan2; sprites keep their launch rotation.');
-  }
-
+  // rotation: RevoltFX adds rotationSpeed (rad per frame) to whatever the angle is
   const spinning = ps.useRotation && !(ps.rotationSpeedMin === 0 && ps.rotationSpeedMax === 0);
-  if (spinning && !useAlign) {
-    // rotationSpeed is radians per frame
+  let spinStep: F = 0;
+  if (spinning) {
     let rate = g.range(ps.rotationSpeedMin * m * FPS, ps.rotationSpeedMax * m * FPS);
     if (ps.randomRotationDirection) {
       // sign = sin(x) / |sin(x)|, x uniform → ±1 with even odds
-      const s = g.sin(g.range(0, TAU));
-      rate = g.mul(rate, g.div(s, g.abs(s)));
+      const sx = g.sin(g.range(0, TAU));
+      rate = g.mul(rate, g.div(sx, g.abs(sx)));
     }
-    let base: F;
-    if (randomStart) {
-      base = g.range(0, TAU);
-    } else if (birthRotVaries) {
-      base = g.range(0, TAU);
-      report.add('approximate', 'particle.rotation', src, 'Spin starts from each particle\'s spawn direction in RevoltFX; the update pass cannot read that angle, so spin starts from a random one.');
-    } else {
-      base = 'param' in rotation ? g.knob(rotation.param) : rotation.value;
-      if (e.autoRotation !== 0) {
-        report.add('approximate', 'particle.rotation', src, 'Spinning particles follow the live emitter rotation instead of the one they were born with (autoRotation).');
-      }
-    }
-    const spin = g.op('gen.spin', { rate }, { unit: 'radians' });
-    g.add('output.writeRotation', { rot: g.add2(base, spin) }, { unit: 'radians' });
+    spinStep = g.mul(rate, g.op('input.dt'));
+  }
+  if (useAlign) {
+    // Particle.update: rotation = atan2(velocity), then the spin step on top
+    const v = g.op('input.velocity');
+    const heading = g.op('math.atan2', { y: g.component(v, 'y'), x: g.component(v, 'x') });
+    g.add('output.writeRotation', { rot: g.add2(heading, spinStep) }, { unit: 'radians' });
+  } else if (spinning) {
+    g.add('output.writeRotation', { rot: g.add2(g.op('input.rotation'), spinStep) }, { unit: 'radians' });
   }
 
   if (ps.useAlpha) {
@@ -627,48 +642,34 @@ function emitterSystem(ctx: Ctx, e: RfxEmitter, sysName: string, role: EmitterRo
   }
 
   // scale: RevoltFX scale × the texture's square side / BASE_PX
-  let scale: F = 1;
-  if (ps.useScale) {
-    let s0: F;
-    let s1: F;
-    let easeName = ps.scaleEase;
-    if (ps.uniformScale) {
-      s0 = g.range(ps.scaleStartMin * m, ps.scaleStartMax * m);
-      s1 = g.range(ps.scaleEndMin, ps.scaleEndMax);
-    } else {
-      // writeScale is a scalar: use the mean of the X and Y tweens
-      s0 = g.mul(g.add2(g.range(ps.scaleXStartMin * m, ps.scaleXStartMax * m), g.range(ps.scaleYStartMin * m, ps.scaleYStartMax * m)), 0.5);
-      s1 = g.mul(g.add2(g.range(ps.scaleXEndMin, ps.scaleXEndMax), g.range(ps.scaleYEndMin, ps.scaleYEndMax)), 0.5);
-      easeName = ps.scaleXEase;
-      const same =
-        ps.scaleXStartMin === ps.scaleYStartMin &&
-        ps.scaleXStartMax === ps.scaleYStartMax &&
-        ps.scaleXEndMin === ps.scaleYEndMin &&
-        ps.scaleXEndMax === ps.scaleYEndMax &&
-        ps.scaleXEase === ps.scaleYEase;
-      if (!same) {
-        report.add('unsupported', 'particle.nonUniformScale', src, 'Separate X/Y scale needs a vec2 scale output; the conversion scales both axes by the mean of the X and Y tweens.');
-      }
-    }
+  /** one axis' tween (start/end ranges, its ease, scaleIn window) */
+  const tween = (sMin: number, sMax: number, eMin: number, eMax: number, easeName: string, label: string): F => {
+    const s0 = g.range(sMin * m, sMax * m);
+    let s1 = g.range(eMin, eMax);
     // Particle.init: end = start + (end − start) · scaleMod
     if (m !== 1) s1 = g.mix(s0, s1, m);
     if (ps.scaleIn) {
       const ramp = heldRamp(easeName, ps.scaleInDurationFac);
       const win = fadeWindow(ps.scaleInEase, ps.scaleInDurationFac);
-      noteEase(ctx, src, 'scaleEase (with scaleIn)', easeName, ramp);
+      noteEase(ctx, src, `${label} (with scaleIn)`, easeName, ramp);
       noteEase(ctx, src, 'scaleInEase', ps.scaleInEase, win);
       const t = () => g.op('gen.numberOverLife', { from: 0, to: 1 }, { ease: ramp.key });
       const w = g.op('gen.numberOverLife', { from: 0, to: 1 }, { ease: win.key });
-      scale = g.mul(g.mix(s0, s1, t), w);
-    } else if (typeof s0 === 'number' && typeof s1 === 'number' && s0 === s1) {
-      scale = s0;
-    } else {
-      const ease = mapEase(easeName);
-      noteEase(ctx, src, 'scaleEase', easeName, ease);
-      scale = g.op('gen.numberOverLife', { from: s0, to: s1 }, { ease: ease.key });
+      return g.mul(g.mix(s0, s1, t), w);
     }
+    if (typeof s0 === 'number' && typeof s1 === 'number' && s0 === s1) return s0;
+    const ease = mapEase(easeName);
+    noteEase(ctx, src, label, easeName, ease);
+    return g.op('gen.numberOverLife', { from: s0, to: s1 }, { ease: ease.key });
+  };
+  if (ps.useScale && !ps.uniformScale) {
+    const sx = tween(ps.scaleXStartMin, ps.scaleXStartMax, ps.scaleXEndMin, ps.scaleXEndMax, ps.scaleXEase, 'scaleXEase');
+    const sy = tween(ps.scaleYStartMin, ps.scaleYStartMax, ps.scaleYEndMin, ps.scaleYEndMax, ps.scaleYEase, 'scaleYEase');
+    g.add('output.writeScaleXY', { scale: g.vec(g.mul(sx, S), g.mul(sy, S)) });
+  } else {
+    const scale = ps.useScale ? tween(ps.scaleStartMin, ps.scaleStartMax, ps.scaleEndMin, ps.scaleEndMax, ps.scaleEase, 'scaleEase') : 1;
+    g.add('output.writeScale', { scale: g.mul(scale, S) });
   }
-  g.add('output.writeScale', { scale: g.mul(scale, S) });
 
   if (ps.useTint && ps.tintStart !== ps.tintEnd) {
     const ease = mapEase(ps.tintEase);
@@ -681,31 +682,36 @@ function emitterSystem(ctx: Ctx, e: RfxEmitter, sysName: string, role: EmitterRo
   if (!ps.addOnTop) {
     report.add('unsupported', 'particle.addOnTop', src, 'addOnTop: false draws new particles under old ones; Pylinka draws in pool order.');
   }
-  if (ps.useChilds && ps.childs.length > 0) {
-    report.add('unsupported', 'particle.childs', src, `Per-particle child emitters (${ps.childs.length}, e.g. trails) need continuous emission from a live particle; they were dropped.`);
-  }
 
   // ---- sub-emitter link -----------------------------------------------------
+  let burstMax = 1;
   if (role.sub !== undefined) {
-    const max = BURST_MAX_OPTIONS.find((o) => o >= role.sub!.countMax) ?? 64;
-    if (role.sub.countMax > 64) {
-      report.add('approximate', 'spawn.count', src, `Spawns up to ${role.sub.countMax} particles per parent event; Pylinka caps a burst at 64.`);
+    const sub = role.sub;
+    // pool copies per parent: one per particle per event, or, for a trail, the
+    // children alive at once (rate × child life)
+    const need = sub.on === 'alive' ? Math.ceil((sub.rate ?? 1) * Math.max(ps.durationMin, ps.durationMax) * m * sub.countMax) + 1 : sub.countMax;
+    burstMax = BURST_MAX_OPTIONS.find((o) => o >= need) ?? BURST_CAP;
+    if (need > BURST_CAP) {
+      report.add('approximate', 'spawn.count', src, `Needs up to ${need} live particles per parent; Pylinka caps a sub-emitter at ${BURST_CAP}.`);
     }
     // round(mix(a − ½, b + ½, r)) is uniform over the integers a..b
     g.add(
       'output.deathBurst',
-      { countMin: role.sub.countMin - 0.499, countMax: Math.min(role.sub.countMax, 64) + 0.499, inheritVelocity: 0 },
-      { max: String(max), on: role.sub.on },
+      {
+        countMin: sub.countMin - 0.499,
+        countMax: Math.min(sub.countMax, BURST_CAP) + 0.499,
+        inheritVelocity: 0,
+        ...(sub.on === 'age' ? { at: sub.at ?? 0.5 } : {}),
+        ...(sub.on === 'alive' ? { rate: sub.rate ?? 1 } : {}),
+      },
+      { max: String(burstMax), on: sub.on },
     );
   }
 
   let capacity = estimateCapacity(ctx, e, m);
-  const parent = role.sub !== undefined ? ctx.systems.find((s) => s.name === role.sub!.parent) : undefined;
-  if (role.sub !== undefined) {
-    // the engines size a child pool as parent capacity × burst max
-    const max = BURST_MAX_OPTIONS.find((o) => o >= role.sub!.countMax) ?? 64;
-    capacity = Math.max(1, (parent?.capacity ?? 64) * max);
-  }
+  const parent = role.sub !== undefined ? ctx.systems.find((x) => x.name === role.sub!.parent) : undefined;
+  // the engines size a child pool as parent capacity × burst max
+  if (role.sub !== undefined) capacity = Math.max(1, (parent?.capacity ?? 64) * burstMax);
   const system: System = {
     id: `s${ctx.systems.length + 1}`,
     name: sysName,
@@ -720,24 +726,20 @@ function emitterSystem(ctx: Ctx, e: RfxEmitter, sysName: string, role: EmitterRo
   ctx.lifeMax.set(system.id, Math.max(ps.durationMin, ps.durationMax) * m);
   if (parent !== undefined) ctx.subEmitters[system.id] = parent.id;
 
-  // ---- particle spawns → child systems (after this system is placed) ---------
-  if (ps.useSpawns) {
-    queueMicroSpawns(ctx, e, sysName, m, depth);
-  }
+  // ---- particle spawns / trails → child systems (after this system is placed) --
+  if (ps.useSpawns) queueMicroSpawns(ctx, e, sysName, m, depth);
+  if (ps.useChilds && ps.childs.length > 0) queueTrails(ctx, e, sysName, m, depth);
   return system;
 }
 
 /** Ring core with `uniform`: angles stepped by the index inside one spawn. */
-function ringUniformAngle(ctx: Ctx, g: GraphBuilder, e: RfxEmitter, rot: F, role: EmitterRole): F {
+function ringUniformAngle(ctx: Ctx, g: GraphBuilder, e: RfxEmitter, rot: F): F {
   const core = e.core.params;
   const lo = e.spawnCountMin;
   const hi = e.spawnCountMax;
   const fixed = hi - lo <= 1; // Rnd.integer(lo, hi) has an exclusive max
-  const n = role.sub !== undefined ? Math.max(1, Math.ceil(lo * ctx.opts.particleFac)) : Math.max(1, Math.ceil((fixed ? lo : (lo + hi - 1) / 2) * ctx.opts.particleFac));
-  if (role.sub !== undefined) {
-    ctx.report.add('approximate', 'core.ring.uniform', e.name, 'A uniform ring inside a sub-emitter burst gets no per-burst index in Pylinka; angles are random instead.');
-    return g.add2(rot, g.range(-core.angle / 2, core.angle / 2));
-  }
+  // inside a sub-emitter burst input.spawnIndex is the index within that burst
+  const n = Math.max(1, Math.ceil((fixed ? lo : (lo + hi - 1) / 2) * ctx.opts.particleFac));
   if (!fixed) {
     ctx.report.add('approximate', 'core.ring.uniform', e.name, `A uniform ring spaces its spawn count evenly; the count varies (${lo}–${hi - 1}), so angles are spaced for ${n}.`);
   }
@@ -763,12 +765,12 @@ function ringUniformAngle(ctx: Ctx, g: GraphBuilder, e: RfxEmitter, rot: F, role
 function queueMicroSpawns(ctx: Ctx, e: RfxEmitter, parentSys: string, m: number, depth: number): void {
   const ps = e.particleSettings;
   const src = e.name;
-  if (ps.spawn.onHalfway.length > 0) {
-    ctx.report.add('unsupported', 'spawn.onHalfway', src, 'onHalfway spawns (RevoltFX fires them at age ≥ 0.5 s) have no Pylinka event; they were dropped.');
-  }
-  const lists: [RfxSpawnDef[], 'death' | 'birth'][] = [
+  // RevoltFX fires onHalfway at age ≥ 0.5 s (not half the lifetime): an 'age' event at 0.5
+  const lists: [RfxSpawnDef[], SubEvent][] = [
     [ps.spawn.onComplete, 'death'],
     [ps.spawn.onStart, 'birth'],
+    [ps.spawn.onHalfway, 'age'],
+    [e.useGravity && e.useFloor && e.floorY > 0 ? ps.spawn.onBounce : [], 'bounce'],
   ];
   for (const [list, on] of lists) {
     for (const def of list) {
@@ -796,8 +798,62 @@ function queueMicroSpawns(ctx: Ctx, e: RfxEmitter, parentSys: string, m: number,
   }
 }
 
+/**
+ * `particleSettings.childs`: emitters that ride along with each particle (a
+ * trail). RevoltFX starts each one at the particle's birth and moves it with
+ * the particle; Pylinka spawns the child's particles from the live parent,
+ * `rate` times a second (an 'alive' sub-emitter), or once at birth for a
+ * one-shot child.
+ */
+function queueTrails(ctx: Ctx, e: RfxEmitter, parentSys: string, m: number, depth: number, guard = 0): void {
+  for (const def of e.particleSettings.childs) {
+    if (depth + 1 > ctx.opts.maxDepth || guard > 8) {
+      ctx.report.add('unsupported', 'spawn.depth', e.name, `Trail emitters nest deeper than maxDepth (${ctx.opts.maxDepth}); deeper levels were dropped.`);
+      continue;
+    }
+    const child = refEmitter(ctx, def, e.name, 'particle.childs');
+    if (child === undefined) continue;
+    trailEmitter(ctx, child, parentSys, m * (def.scale || 1), depth + 1, def.adoptRotation, e.name, guard);
+  }
+}
+
+function trailEmitter(ctx: Ctx, child: RfxEmitter, parentSys: string, m: number, depth: number, adopt: boolean, src: string, guard: number): void {
+  const fac = ctx.opts.particleFac;
+  const countMin = Math.ceil(child.spawnCountMin * fac);
+  const countMax = Math.ceil((child.spawnCountMax > child.spawnCountMin ? child.spawnCountMax - 1 : child.spawnCountMin) * fac);
+  const oneShot = !child.infinite && child.duration <= 0;
+  // ParticleEmitter.update resets its timer on each spawn: whole frames at 60 fps
+  const interval = Math.max(1, Math.ceil(mean(child.spawnFrequencyMin, child.spawnFrequencyMax) * FPS - 1e-6)) / FPS;
+  if (adopt && directional(child)) {
+    ctx.report.add('approximate', 'trail.adoptRotation', src, `Trail "${child.name}" should turn with its particle; a Pylinka child cannot read the parent's rotation.`);
+  }
+  if (!oneShot && child.spawnFrequencyMin !== child.spawnFrequencyMax) {
+    ctx.report.add('approximate', 'trail.interval', src, `Trail "${child.name}" spawns at a random interval in RevoltFX; the conversion uses the mean (${round(interval, 3)} s).`);
+  }
+  if (!oneShot && !child.infinite) {
+    ctx.report.add('approximate', 'trail.duration', src, `Trail "${child.name}" stops after ${round(child.duration)} s in RevoltFX; here it runs until its particle dies.`);
+  }
+  const sysName = uniqueName(ctx, child.name);
+  emitterSystem(
+    ctx,
+    child,
+    sysName,
+    {
+      scaleMod: m,
+      rotation: { value: child.rotation },
+      sub: oneShot ? { parent: parentSys, on: 'birth', countMin, countMax } : { parent: parentSys, on: 'alive', countMin, countMax, rate: 1 / interval },
+    },
+    depth,
+  );
+  // a child emitter's own childs start with it and follow the same particle
+  for (const def of child.childs) {
+    const grand = refEmitter(ctx, def, child.name, 'emitter.childs');
+    if (grand !== undefined && guard < 8) trailEmitter(ctx, grand, parentSys, m * (def.scale || 1), depth, def.adoptRotation, src, guard + 1);
+  }
+}
+
 /** One spawned emitter (plus the `childs` it starts) as burst children of `parentSys`. */
-function burstEmitter(ctx: Ctx, e: RfxEmitter, parentSys: string, on: 'death' | 'birth', m: number, depth: number, guard = 0): void {
+function burstEmitter(ctx: Ctx, e: RfxEmitter, parentSys: string, on: SubEvent, m: number, depth: number, guard = 0): void {
   const fac = ctx.opts.particleFac;
   const lo = Math.ceil(e.spawnCountMin * fac);
   const hiExclusive = e.spawnCountMax > e.spawnCountMin ? e.spawnCountMax - 1 : e.spawnCountMax;
@@ -819,7 +875,7 @@ function burstEmitter(ctx: Ctx, e: RfxEmitter, parentSys: string, on: 'death' | 
     );
   }
   const sysName = uniqueName(ctx, e.name);
-  emitterSystem(ctx, e, sysName, { scaleMod: m, rotation: { value: e.rotation }, sub: { parent: parentSys, on, countMin, countMax } }, depth);
+  emitterSystem(ctx, e, sysName, { scaleMod: m, rotation: { value: e.rotation }, sub: { parent: parentSys, on, countMin, countMax, ...(on === 'age' ? { at: 0.5 } : {}) } }, depth);
   for (const def of e.childs) {
     if (guard > 8) break;
     const child = refEmitter(ctx, def, e.name, 'emitter.childs');
@@ -827,8 +883,33 @@ function burstEmitter(ctx: Ctx, e: RfxEmitter, parentSys: string, on: 'death' | 
   }
 }
 
+/** A sequence sprite spawned on a particle event: a one-particle child. */
+function spriteBurst(ctx: Ctx, seq: RfxSequence, fx: RfxSequenceEffect, parentSys: string, on: SubEvent, m: number): void {
+  const id = String(fx.componentId ?? '');
+  const cp = fx.componentParams ?? { animationSpeedMin: 1, animationSpeedMax: 1, anchorX: 0.5, anchorY: 0.5, loop: false };
+  const tex = texture(ctx, seq.name, fx.componentType, id, cp.anchorX, cp.anchorY, cp.loop ? mean(cp.animationSpeedMin || 1, cp.animationSpeedMax || 1) : 1, cp.loop);
+  const g = spriteGraph(seq, fx, tex, () => 0, m);
+  g.add('output.deathBurst', { countMin: 0.501, countMax: 1.499, inheritVelocity: 0, ...(on === 'age' ? { at: 0.5 } : {}) }, { max: '1', on });
+  const parent = ctx.systems.find((x) => x.name === parentSys);
+  const sysName = uniqueName(ctx, `${seq.name}.${id || 'sprite'}`);
+  const id2 = `s${ctx.systems.length + 1}`;
+  ctx.systems.push({
+    id: id2,
+    name: sysName,
+    capacity: parent?.capacity ?? 64,
+    blendMode: blend(ctx, fx.blendMode, seq.name),
+    enabled: true,
+    space: 'world',
+    emitter: { mode: 'flow', rate: 0 },
+    graph: g.graph(),
+  });
+  ctx.textures[sysName] = tex;
+  ctx.lifeMax.set(id2, Math.max(fx.duration, 1e-3));
+  if (parent !== undefined) ctx.subEmitters[id2] = parent.id;
+}
+
 /** A sequence spawned on a particle event: its emitters and sprites burst at once. */
-function burstSequence(ctx: Ctx, seq: RfxSequence, parentSys: string, on: 'death' | 'birth', m: number, depth: number, src: string): void {
+function burstSequence(ctx: Ctx, seq: RfxSequence, parentSys: string, on: SubEvent, m: number, depth: number, src: string): void {
   for (const fx of seq.effects) {
     if ((fx.delay || 0) > 0 || (seq.delay || 0) > 0) {
       ctx.report.add('approximate', 'spawn.sequence.delay', src, `Sequence "${seq.name}" spawned on a particle ${on} plays its timed elements at once.`);
@@ -839,7 +920,7 @@ function burstSequence(ctx: Ctx, seq: RfxSequence, parentSys: string, on: 'death
     } else if (fx.componentType === 3) {
       ctx.report.add('unsupported', 'spawn.sequence.trigger', src, `Trigger "${fx.triggerValue}" in sequence "${seq.name}" fires per particle in RevoltFX; the player cannot see GPU particle deaths, so it was dropped.`);
     } else {
-      ctx.report.add('unsupported', 'spawn.sequence.sprite', src, `Sprite "${String(fx.componentId)}" in sequence "${seq.name}" spawned on a particle ${on} was dropped.`);
+      spriteBurst(ctx, seq, fx, parentSys, on, m);
     }
   }
 }
@@ -896,24 +977,32 @@ function spawnClock(ctx: Ctx, e: RfxEmitter): SpawnClock {
   };
 }
 
-/** The plain-project stand-in for the spawn clock (drive: 'project'). */
-function projectEmitter(ctx: Ctx, e: RfxEmitter, clock: SpawnClock): EmitterSettings {
-  const count = Math.max(1, Math.round(meanCount(clock) * clock.particleFac));
-  if (!e.infinite && e.duration <= 0) return { mode: 'once', rate: 0, burst: { count, interval: 1 } };
-  // ParticleEmitter.update spawns at most once per frame
-  const interval = Math.max(mean(clock.frequencyMin, clock.frequencyMax), 1 / FPS);
-  if (clock.countMax - clock.countMin > 1 || clock.frequencyMin !== clock.frequencyMax) {
-    ctx.report.add('approximate', 'emitter.spawnClock', e.name, `Random spawn count/interval becomes ${count} every ${round(interval)} s without the player.`);
-  }
-  if (!e.infinite) {
-    ctx.report.add('approximate', 'emitter.duration', e.name, `Emits for ${round(e.duration)} s in RevoltFX; without the player the project emits forever.`);
-  }
-  return { mode: 'burst', rate: 0, burst: { count, interval } };
-}
-
-function meanCount(c: SpawnClock): number {
+/**
+ * RevoltFX's spawn clock as project emitter settings (drive: 'project').
+ * ParticleEmitter.update fires on its first frame, waits Rnd.float(fMin, fMax),
+ * and resets its timer to 0 when it fires, so at 60 fps an interval is rounded
+ * up to whole frames (and is never shorter than one).
+ */
+function projectEmitter(ctx: Ctx, e: RfxEmitter, at: number): EmitterSettings {
+  const fac = ctx.opts.particleFac;
   // Rnd.integer(min, max): floor(r·(max − min) + min), max exclusive
-  return c.countMax > c.countMin ? (c.countMin + c.countMax - 1) / 2 : c.countMin;
+  const lo = Math.ceil(e.spawnCountMin * fac);
+  const hi = Math.ceil((e.spawnCountMax > e.spawnCountMin ? e.spawnCountMax - 1 : e.spawnCountMin) * fac);
+  if (fac !== 1 && !Number.isInteger(fac)) {
+    ctx.report.add('approximate', 'emitter.particleFac', e.name, `particleFac ${fac} scales the count range ends, not each random draw.`);
+  }
+  const frames = (f: number) => Math.max(1, Math.ceil(f * FPS - 1e-6)) / FPS;
+  const delay = at > 0 ? { delay: at } : {};
+  const burst = { count: lo, ...(hi > lo ? { countMax: hi } : {}), interval: frames(e.spawnFrequencyMin) };
+  if (!e.infinite && e.duration <= 0) return { mode: 'once', rate: 0, burst: { ...burst, interval: 1 }, ...delay };
+  const intervalMax = frames(e.spawnFrequencyMax);
+  return {
+    mode: 'burst',
+    rate: 0,
+    burst: { ...burst, ...(intervalMax > burst.interval ? { intervalMax } : {}), immediate: true },
+    ...delay,
+    ...(!e.infinite && e.duration > 0 ? { duration: e.duration } : {}),
+  };
 }
 
 /** Live particle peak: spawns per second × longest life, capped like RevoltFX's maxParticles. */
@@ -963,12 +1052,8 @@ function texture(
 
 function blend(ctx: Ctx, mode: number, src: string): System['blendMode'] {
   if (!ctx.useBlendModes) return 'normal';
-  const name = BLEND[mode] ?? 'normal';
-  if (name === 'multiply') {
-    ctx.report.add('unsupported', 'particle.blendMode', src, 'Multiply blending is not available; drawn with normal blending.');
-    return 'normal';
-  }
-  return name;
+  void src;
+  return BLEND[mode] ?? 'normal';
 }
 
 function noteEase(ctx: Ctx, src: string, what: string, name: string | undefined, fit: FittedEase): void {
@@ -1009,6 +1094,3 @@ function round(n: number, digits = 2): number {
   return Math.round(n * k) / k;
 }
 
-function pct(n: number): string {
-  return `${Math.round(n * 1000) / 10}%`;
-}

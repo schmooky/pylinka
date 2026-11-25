@@ -273,6 +273,8 @@ export class CpuRenderer {
     if (p.blend === 'add') gl.blendFunc(gl.ONE, gl.ONE);
     else if (p.blend === 'screen')
       gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_COLOR, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    // premultiplied multiply: src·dst + dst·(1 − srcα)
+    else if (p.blend === 'multiply') gl.blendFuncSeparate(gl.DST_COLOR, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
     this.unbindVao();

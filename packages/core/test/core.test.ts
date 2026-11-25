@@ -155,3 +155,45 @@ describe('SpawnScheduler.setEmitter — live-edit retargeting', () => {
     expect(s.tick(1 / 60, 0)).toBe(12);
   });
 });
+
+describe('SpawnScheduler — timeline', () => {
+  const run = (e: EmitterSettings, seconds: number, random?: () => number) => {
+    const s = new SpawnScheduler(e, 10000, random);
+    const out: number[] = [];
+    for (let i = 0; i < Math.round(seconds * 60); i++) out.push(s.tick(1 / 60, 0));
+    return { out, s };
+  };
+
+  it('delay holds every mode back', () => {
+    const { out } = run({ mode: 'once', rate: 5, delay: 0.5 }, 1);
+    expect(out.findIndex((n) => n > 0)).toBe(30);
+    expect(out.reduce((a, b) => a + b, 0)).toBe(5);
+  });
+
+  it('duration stops a flow emitter', () => {
+    const { out, s } = run({ mode: 'flow', rate: 60, duration: 0.5 }, 1);
+    expect(out.reduce((a, b) => a + b, 0)).toBe(30);
+    expect(s.finished).toBe(true);
+  });
+
+  it('immediate fires the first burst at start', () => {
+    const { out } = run({ mode: 'burst', rate: 0, burst: { count: 3, interval: 0.25, immediate: true } }, 0.55);
+    expect(out[0]).toBe(3);
+    expect(out.reduce((a, b) => a + b, 0)).toBe(9);
+  });
+
+  it('countMax / intervalMax draw from their ranges', () => {
+    let i = 0;
+    // each burst draws its count, then the wait before the next one
+    const seq = [0.5, 0, 0.5, 0.999];
+    const { out } = run({ mode: 'burst', rate: 0, burst: { count: 2, countMax: 4, interval: 0.1, intervalMax: 0.3 } }, 2, () => seq[i++ % 4]!);
+    const counts = out.filter((n) => n > 0);
+    expect(new Set(counts)).toEqual(new Set([2, 4]));
+  });
+
+  it('a plain emitter is unchanged', () => {
+    const { out } = run({ mode: 'burst', rate: 0, burst: { count: 10, interval: 0.5 } }, 1.05);
+    expect(out.reduce((a, b) => a + b, 0)).toBe(20);
+    expect(out[0]).toBe(0);
+  });
+});
